@@ -31,7 +31,8 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(cancel.isHittable)
         cancel.tap()
         for _ in 0..<4 { app.swipeDown() }
-        XCTAssertTrue(app.staticTexts["Cancelled"].firstMatch.waitForExistence(timeout: 5))
+        let cancelled = app.descendants(matching: .any).matching(NSPredicate(format: "value == %@ OR label CONTAINS %@", "Cancelled", "Cancelled")).firstMatch
+        XCTAssertTrue(cancelled.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.buttons["Resume folder run"].exists)
     }
 
