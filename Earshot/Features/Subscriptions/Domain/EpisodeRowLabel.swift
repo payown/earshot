@@ -51,21 +51,21 @@ enum EpisodeRowLabel {
     }
 
     /// Naturally spoken download/streaming state for VoiceOver (#513), folded into
-    /// the row label so it never adds a second stop. Four buckets:
+    /// the row label so it never adds a second stop. Five buckets:
     /// - ``DownloadStatus/downloaded`` → `"Downloaded"`
     /// - ``DownloadStatus/downloading`` → `"Downloading"`
     /// - ``DownloadStatus/pending`` → `"Waiting for Wi-Fi"` (parked by the
     ///   Wi-Fi-only gate, not transferring — saying "Downloading" here was a lie
     ///   that hid why nothing was happening, #576)
-    /// - ``DownloadStatus/none``, ``DownloadStatus/failed`` → `"Streams when played"`
-    ///   (a failed download falls back to streaming, so it reads the same as an
-    ///   episode that was never downloaded).
+    /// - ``DownloadStatus/failed`` → `"Download failed. Streams when played"`
+    /// - ``DownloadStatus/none`` → `"Streams when played"`
     static func spokenDownloadState(_ status: DownloadStatus) -> String {
         switch status {
         case .downloaded: return "Downloaded"
         case .downloading: return "Downloading"
         case .pending: return "Waiting for Wi-Fi"
-        case .none, .failed: return "Streams when played"
+        case .none: return "Streams when played"
+        case .failed: return "Download failed. Streams when played"
         }
     }
 
@@ -87,7 +87,9 @@ enum EpisodeRowLabel {
         case .pending:
             // Wi-Fi-gated, not transferring (#576).
             return DownloadBadge(systemImage: "wifi", text: "Waiting for Wi-Fi")
-        case .none, .failed:
+        case .failed:
+            return DownloadBadge(systemImage: "exclamationmark.circle", text: "Download failed")
+        case .none:
             return DownloadBadge(systemImage: "dot.radiowaves.up.forward", text: "Streaming")
         }
     }

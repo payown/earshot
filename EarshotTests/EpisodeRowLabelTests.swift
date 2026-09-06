@@ -168,11 +168,10 @@ final class EpisodeRowLabelTests: XCTestCase {
         XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.pending), "Waiting for Wi-Fi")
     }
 
-    func testSpokenDownloadStateNoneAndFailedBothReadStreams() {
-        // A never-downloaded episode and a failed download both fall back to
-        // streaming, so they must read identically.
+    func testSpokenDownloadStateDistinguishesFailedFromNeverRequested() {
+        // Both can stream, but a failed request must remain discoverable.
         XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.none), "Streams when played")
-        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.failed), "Streams when played")
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.failed), "Download failed. Streams when played")
     }
 
     func testLabelAppendsDownloadStateLast() {
@@ -301,9 +300,10 @@ final class EpisodeRowLabelTests: XCTestCase {
         )
     }
 
-    func testDownloadBadgeNoneAndFailedRenderStreaming() {
+    func testDownloadBadgeDistinguishesFailedFromNeverRequested() {
         let expected = EpisodeRowLabel.DownloadBadge(systemImage: "dot.radiowaves.up.forward", text: "Streaming")
         XCTAssertEqual(EpisodeRowLabel.downloadBadge(.none), expected)
-        XCTAssertEqual(EpisodeRowLabel.downloadBadge(.failed), expected)
+        XCTAssertEqual(EpisodeRowLabel.downloadBadge(.failed),
+                       EpisodeRowLabel.DownloadBadge(systemImage: "exclamationmark.circle", text: "Download failed"))
     }
 }
