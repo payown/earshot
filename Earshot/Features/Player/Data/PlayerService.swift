@@ -94,6 +94,7 @@ final class PlayerService {
     /// ``PlaybackLogic/playbackOrigin(after:current:)`` so stale context cannot
     /// follow an unrelated episode.
     private(set) var playbackOrigin: PlaybackOrigin?
+    let folderRuns = FolderRunController()
 
     /// Identity of the loaded episode, mirrored from ``currentEpisode`` at every
     /// assignment via ``setCurrentEpisode(_:)``. Unlike ``currentEpisode`` (which
@@ -333,6 +334,45 @@ final class PlayerService {
         settings = nil
     }
 
+    func playFolderRunEpisode(_ episode: Episode, origin: PlaybackOrigin?, autoplay: Bool) {
+        clearPreload()
+        if autoplay, nowPlayingEpisodeID == episode.persistentModelID,
+           player.currentItem != nil, player.currentItem?.status != .failed, playbackFailureMessage == nil {
+            playbackOrigin = origin
+            // Resuming the same item retains one-off stop flags and transport
+            // state. A failed item must instead be rebuilt by the retry below.
+            resume(providesStartHaptic: true)
+        } else if autoplay {
+            beginUserMediaAttempt()
+            play(episode, preparedItem: nil, originEvent: .started(origin))
+        } else {
+            load(episode, autoplay: false)
+            playbackOrigin = origin
+        }
+    }
+
+    func finishFolderEpisode(_ episode: Episode) -> Bool {
+        guard let context else { return false }
+        pause(providesPauseHaptic: false, folderRunInternal: true)
+        guard QueueRepository(context: context).markPlayedAndRemove(episode) else { return false }
+        episode.positionSeconds = 0
+        return saveContext()
+    }
+
+    func clearFolderRunPresentation() { clearNowPlayingPresentation() }
+
+    func resumeOrdinaryQueueAfterFolderRun() {
+        guard let context else { return }
+        let queued = QueueRepository(context: context).queue().filter { !$0.isPlayed }
+        guard settings?.bool(SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode) != false,
+              let id = displayedQueuePairs(queued).first?.id,
+              let next = queued.first(where: { $0.persistentModelID == id }) else {
+            clearNowPlayingPresentation()
+            return
+        }
+        play(next, preparedItem: nil, originEvent: .started(nil), automaticallyAdvancing: true)
+    }
+
     /// Pauses when a countdown sleep timer fires, with a short fade so it isn't
     /// an abrupt cut.
     private var automaticPlaybackStoppedByTimer = false
@@ -390,6 +430,7 @@ final class PlayerService {
     /// Notification actions use this path; automatic queue advance uses `play(_:)`
     /// so consecutive playback never waits on the network.
     func playWithHandoff(_ episode: Episode) {
+        folderRuns.playbackWillStart(episode)
         beginUserMediaAttempt()
         playAfterFetchingHandoff(
             episode,
@@ -411,6 +452,7 @@ final class PlayerService {
     /// user-initiated path queues and can present the player — queue auto-advance,
     /// resume, and jump-to-bookmark never do either.
     func playFromEpisodeList(_ episode: Episode, origin: PlaybackOrigin? = nil) {
+        folderRuns.playbackWillStart(episode)
         beginUserMediaAttempt()
         if let context {
             QueueRepository(context: context).add(episode)
@@ -649,6 +691,7 @@ final class PlayerService {
         automaticallyAdvancing: Bool = false
     ) {
         guard !automaticallyAdvancing || !automaticPlaybackStoppedByTimer else { return }
+        folderRuns.playbackWillStart(episode)
         if !automaticallyAdvancing { automaticPlaybackStoppedByTimer = false }
         if resolvedURL == nil {
             beginMediaResolution()
@@ -935,10 +978,12 @@ final class PlayerService {
     }
 
     func resume() {
+        automaticPlaybackStoppedByTimer = false
         resume(providesStartHaptic: true)
     }
 
     private func resume(providesStartHaptic: Bool) {
+        if folderRuns.resumeTransportIfNeeded() { return }
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         guard let episode = currentEpisode else { return }
         if !currentMediaResolutionComplete,
@@ -1022,7 +1067,8 @@ final class PlayerService {
         pause(providesPauseHaptic: true)
     }
 
-    private func pause(providesPauseHaptic: Bool) {
+    private func pause(providesPauseHaptic: Bool, folderRunInternal: Bool = false) {
+        if !folderRunInternal { folderRuns.pauseForTransport() }
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         let wasPlaying = isPlaying
             || intendsToPlay
@@ -1077,6 +1123,7 @@ final class PlayerService {
     /// saved SwiftData deletion can leave `isDeleted == false` on a detached
     /// object even though stored-property access will trap.
     private func unloadWithoutPersisting() {
+        folderRuns.pauseForTransport()
 
         // Supersede any in-flight sleep-timer fade and clear the timer itself:
         // its episode (or the whole library) is going away, and PRD 5.5 clears
@@ -1719,6 +1766,10 @@ final class PlayerService {
     /// No-op when nothing is loaded. Announces the result.
     func markCurrentPlayedAndAdvance(explicitQueueNavigation: Bool = false) {
         guard let finished = currentEpisode, let context, !currentEpisodeIsTransient else { return }
+        if !explicitQueueNavigation, folderRuns.completeCurrent(finished, continuePlayback: true) {
+            Announcer.announce("Marked as played")
+            return
+        }
 
         if explicitQueueNavigation {
             beginUserMediaAttempt()
@@ -2584,8 +2635,17 @@ final class PlayerService {
             forName: AVPlayerItem.didPlayToEndTimeNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.handlePlaybackEnded() }
+        ) { [weak self] notification in
+            let reported = notification.object as? AVPlayerItem
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let expected = self.player.currentItem
+                if let reported, reported !== expected { return }
+                Task { @MainActor [weak self, weak expected] in
+                    guard let self, let expected, expected === self.player.currentItem else { return }
+                    self.handlePlaybackEnded()
+                }
+            }
         }
     }
 
@@ -2600,6 +2660,17 @@ final class PlayerService {
         }
 
         guard !automaticPlaybackStoppedByTimer else { return }
+        let stopsFolderRun = sleepTimer.endOfEpisode || stopAfterCurrentEpisode
+        if folderRuns.completeCurrent(finished, continuePlayback: !stopsFolderRun) {
+            if sleepTimer.endOfEpisode {
+                sleepTimer.episodeEnded()
+                Announcer.announce("Sleep timer ended. Playback stopped.")
+            } else if stopAfterCurrentEpisode {
+                stopAfterCurrentEpisode = false
+                Announcer.announce("Stopped after this episode")
+            }
+            return
+        }
         // Record the just-finished listening before advancing.
         flushListeningSession()
 
@@ -2706,6 +2777,7 @@ final class PlayerService {
     /// Builds (and starts buffering) the next queue item ahead of time, or clears
     /// a stale preload when the up-next episode changed or the queue emptied.
     private func refreshPreload() {
+        if folderRuns.driving { clearPreload(); return }
         guard let context, let current = currentEpisode else {
             clearPreload()
             return
@@ -3116,6 +3188,10 @@ final class PlayerService {
         let episodeID = episode.persistentModelID
         if mediaRecoveryInProgressEpisodeID == episodeID { return }
         guard currentPlaybackURL?.isFileURL == true else {
+            let unavailable = player.currentItem?.errorLog()?.events.contains {
+                $0.errorStatusCode == 404 || $0.errorStatusCode == 410
+            } == true
+            folderRuns.playbackFailed(episode, unavailable: unavailable)
             // A normal remote stream can fail transiently while the player is
             // still resolving or buffering it. Only surface a remote failure
             // when it is the retry from a known-bad downloaded copy.

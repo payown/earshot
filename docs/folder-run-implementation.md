@@ -1,104 +1,93 @@
-# Folder backlog playback: implementation status
+# Folder backlog playback
 
 Tracking: [folder-wide oldest-first playback, #944](https://github.com/payown/earshot/issues/944).
+The tested foundation was merged in #961; the integration adds the working UI,
+catalog preparation, player, recovery, and reset lifecycle.
 
-## Scope of this first slice
+## How to use it
 
-This is a tested foundation, not a user-facing playback feature. Nothing opens
-the new store at launch, changes the normal Queue, fetches feeds, downloads
-episodes, or changes existing VoiceOver controls. Do not close #944 or advertise
-folder backlog playback based on this change.
+1. Open Library, then Folders, and open a folder.
+2. In Folder listening actions, choose Play unheard oldest first. The same
+   action is available on the folder row.
+3. Confirm Check feeds and prepare. Earshot checks each followed show's feed once,
+   including shows in subfolders. You can leave the status screen while it works.
+4. Runs with more than 50 episodes ask you to confirm the actual count before
+   starting. Choose Not now to leave the prepared run ready for later.
+5. Return through Folder run status in Folders to read counts, resume, or cancel.
+   Preparing another folder asks permission to replace an unfinished run.
 
-The offline workflow guide is corrected separately: Clear inbox removes its
-downloaded audio when Delete downloads when done is enabled. Individual Inbox
-dismissal does not. Existing DownloadManager tests cover both Clear inbox settings;
-the bundled-guide test now guards the conditional explanation.
+Eligibility means unplayed and not future-dated, regardless of Inbox dismissal,
+download status, Queue caps, or saved position. Ordering is publication date,
+oldest first, with missing dates last and canonical feed/GUID as deterministic
+tie breakers. Membership and ordering are frozen after preparation; new arrivals
+require preparing a new run. Renaming or deleting the folder does not destroy
+the prepared run. Unfollowed shows and deleted or already-played episodes are
+skipped when their turn arrives.
 
-## Implemented foundation
+Preparation includes stored episodes and older episodes still exposed by RSS.
+It cannot restore a publisher's unavailable archive. Failed or empty feeds and
+fully numbered feeds starting above episode one are flagged as unavailable or
+possibly incomplete; stored episodes from those shows remain eligible. Imported history
+does not arrive in Inbox, send notifications, or trigger automatic downloads.
+Episodes stream unless already downloaded; preparation is not Download all.
 
-- Canonical podcast feed plus episode GUID identity; Inbox visibility, Queue
-  caps, download state, and saved position do not determine eligibility.
-- Unplayed, non-future eligibility; ascending date, missing dates last, then
-  canonical feed and GUID. Each identity occurs once per manifest.
-- A versioned, separate SwiftData manifest store with CloudKit explicitly off.
-  The shipped V12 catalog and local-state schemas are untouched.
-- Actor-owned persistence with value-only inputs/results, at most 100 imported
-  candidates per call, 100 model rows per numbering page, and eight identities
-  per playback window. Publication metadata is frozen after preparation.
-- Explicit replacement identity, stale callback protection, progress validation,
-  cancellation checks, ready/playing/paused/terminal states, and partial-result counts.
-- On reopen, playing becomes paused and incomplete preparation becomes cancelled.
-  The saved cursor and frozen order remain intact. No automatic audio start.
-- Queue precedence policy waits for replenishment while a run is playing rather
-  than falling through to unrelated Queue items when the window is empty.
-- Manifest and replenishment signposts for later device profiling.
-- Bounded pruning of replaced manifests without touching the current run.
+The run is separate from the normal Queue. Unrelated Queue order remains intact;
+completing a queued episode removes that duplicate normally. Completion and
+download cleanup use the existing played-episode policy. Normal Queue playback
+resumes after completion or cancellation of an actively playing run, subject to
+the existing continue-after-episode setting. Cancelling a paused/preparing run
+does not interrupt unrelated audio.
 
-## Integration contracts
+Pause, interruptions, sleep timers, and stop-after-current retain the run.
+Deliberately playing something else pauses it. Relaunch restores active playback
+paused at the saved position, never starts audio automatically, and cancels
+unfinished preparation. A failed stream retains its place and unplayed state:
+Resume retries, while Skip unavailable folder episode explicitly skips it.
+An explicit HTTP 404 or 410 in the player's error log skips automatically;
+ambiguous failures never silently advance or mark an episode played.
 
-Use one FolderRunStore per database URL. Construct it off-main with `open(at:)`.
-No SwiftData model may cross this actor boundary. Folder identity is encoded
-PersistentIdentifier data; folder name is a fallback snapshot, not a replacement
-for resolving the current name after a rename. Ordering version 1 means oldest
-first; any future ordering change requires a new preparation version.
+## Ownership and durability
 
-The catalog coordinator must deduplicate followed podcasts across the entire
-folder subtree, fetch each feed once, and feed bounded candidate batches to the
-manifest. Only call `seal` after all podcast outcomes are known. Cancel the
-preparation task first, then mark the run cancelled: task cancellation interrupts
-numbering between pages; a queued actor call alone cannot interrupt a synchronous
-numbering pass. Interrupted numbering remains unplayable until cancelled/rebuilt.
+- FolderRunController owns only main-actor presentation and the current episode.
+  Tracked operations cancel and drain predecessors before replacement or reset.
+- FolderRunCatalog owns off-main catalog queries/imports with short-lived contexts,
+  canonical subtree deduplication, one RSS fetch per feed, and 100-row batches.
+  GUID pagination uses lexical ordering for both the sort and cursor predicate;
+  natural string ordering would skip numeric GUIDs after the first page.
+- FolderRunStore owns a separate local V1 SwiftData manifest, CloudKit off. It
+  numbers 100 model rows per page and returns at most eight identities per window.
+  No thousands-item Queue or cross-actor SwiftData models are introduced.
+- Publication ordering is frozen. The player re-resolves authoritative played
+  state, availability, and position before each episode. Completion saves played
+  state before advancing the manifest: after a crash between those two stores,
+  recovery skips the played item instead of replaying it.
+- Replaced manifests are pruned in bounded batches. The run directory is excluded
+  from backup. Delete local data cancels/drains the controller before the existing
+  reset transaction removes FolderRuns. Michael explicitly approved this narrow
+  SettingsReset extension on September 5, 2026.
+- Store-open failures are surfaced; no silent deletion or in-memory fallback.
+  Only DEBUG screenshot fixtures and explicit test injection use in-memory runs.
+- The shared V12 schemas, signing, entitlements, and existing playback controls
+  are unchanged. Runs are device-local; they do not sync across devices.
 
-Before playing a window item, re-resolve its authoritative catalog identity,
-played state, availability, and position. Persist a completed episode's played
-state before advancing the manifest cursor. These are separate stores, not an
-atomic cross-store transaction: on a crash between writes, recovery must observe
-the played episode and skip it, rather than replay it. Counters distinguish a
-completion observed by this run from already-played and unavailable skips.
+## Verification and release gate
 
-Do not write a thousands-item normal Queue. Existing Queue membership may refer
-to the same episode, but unrelated Queue order must remain unchanged. Manual
-unrelated playback pauses the run. Sleep timers, interruptions, and
-stop-after-current retain its cursor. The policy tests are not player integration
-tests; these behaviors still need to be wired and verified.
+Automated coverage includes nested/deduplicated membership, a 3,005-episode RSS
+import, all 3,000 manifest entries consumed, deterministic numeric GUID ordering,
+partial-feed failure, cancellation/reset, saved position, relaunch, folder rename
+and deletion, played/unavailable skips, normal Queue preservation, and real local
+audio finishing with stop-after-current followed by resumption. The UI test
+prepares 60 historical episodes, verifies the count confirmation, and cancels.
 
-## Remaining before the feature can ship
+Before release, validate on Michael's phone with VoiceOver:
 
-1. Integrate store lifecycle, recovery, and bounded pruning of obsolete run
-   records. Establish reset/backup handling before production use; SettingsReset
-   cleanup was explicitly approved by Michael on September 5, 2026, limited to
-   cancelling/clearing folder runs without otherwise changing reset behavior.
-   Never silently wipe
-   an unreadable store or fall back to an in-memory run.
-2. Implement off-main catalog preparation, historical import without Inbox
-   arrivals/notifications/automatic downloads, one fetch per followed feed,
-   subtree deduplication, cancellation, and honest unavailable-history reporting.
-3. Integrate bounded replenishment with PlayerService, saved position, played
-   state, Queue duplicates, playback origin, manual unrelated playback, background
-   continuation, and completion returning to the ordinary Queue.
-4. Add the requested start/replace confirmation, dismissible progress/status,
-   resume/cancel actions, and meaningful-boundary announcements. Preserve existing
-   Play all, Add all to queue, row semantics, and configured actions.
-5. Test catalog and player integration, storage-open failures, old/new application
-   store coexistence, cancellation during import/sealing, folder rename/deletion,
-   and continuous audio playback across a large manifest. Run the full non-StoreKit
-   suite and a Release build.
-6. Validate VoiceOver responsiveness and cancellation on Michael's phone, plus
-   background playback, interruptions, relaunch recovery, and return to Queue.
+1. Prepare a large real folder while browsing Library and using the keyboard;
+   check responsiveness, counts, cancellation, and return to status.
+2. Listen across shows while backgrounded, lock/unlock, interrupt with another
+   audio app, and verify pause/resume and saved places after relaunch.
+3. Test sleep timers, stop-after-current, missing audio retry/skip, and completion
+   returning to the original Queue without replaying duplicates.
 
-Keep successive PRs under the repository's 1,500 non-generated-line limit. The
-new store is V1, so there is no older folder-run schema to migrate in this slice;
-disk reopen tests cover persistence. Before any later V1 schema change ships,
-freeze the old model and add a versioned migration and populated-store test.
-
-## Verification on September 5, 2026
-
-- Xcode 26.6, Swift 6.3.3, XcodeGen 2.46.0; Swift 6 complete concurrency.
-- Full EarshotTests run excluding the two documented StoreKit suites: 2,291
-  tests executed, 29 skipped, zero failures. Result bundle:
-  `/tmp/earshot-folder-run-full-tests.xcresult`.
-- Release simulator build passed for arm64 and x86_64. No signing changes.
-- Final focused rerun: all 66 tests passed, including 19 folder-run tests. The
-  strengthened scale test consumed every one of 3,000 entries through completion.
-  Result bundle: `/tmp/earshot-folder-run-final-tests.xcresult`.
-- No device installation, TestFlight upload, release, or playback UI change.
+Simulator tests do not establish on-device VoiceOver latency or long-running
+background reliability. Keep #944 open until that acceptance pass. No App Store
+upload or release is part of this integration.

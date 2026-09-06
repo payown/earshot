@@ -693,6 +693,7 @@ final class AppRuntime {
         launchToAwait?.cancel()
         _ = await launchToAwait?.value
         launchTask = nil
+        await player.folderRuns.release()
         player.releasePersistence()
         quickActions.releasePersistence()
         settings.releasePersistence()

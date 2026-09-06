@@ -256,6 +256,9 @@ final class FolderRunTests: XCTestCase {
         let store = try await FolderRunStore.open()
         let id = try await begin(store)
         let values = [
+            candidate("10", feed: "https://a/feed", date: now),
+            candidate("2", feed: "https://a/feed", date: now),
+            candidate("A", feed: "https://a/feed", date: now),
             candidate("same", feed: "https://b/feed", date: now),
             candidate("z", feed: "https://a/feed"),
             candidate("same", feed: "https://a/feed", date: now),

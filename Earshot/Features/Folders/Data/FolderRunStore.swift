@@ -102,7 +102,7 @@ actor FolderRunStore {
         var offset = 0
         while true {
             try Task.checkCancellation()
-            let count = try numberPage(id: id, offset: offset)
+            let count = try autoreleasepool { try numberPage(id: id, offset: offset) }
             offset += count
             if count < FolderRunPolicy.batchSize { break }
         }
@@ -122,7 +122,7 @@ actor FolderRunStore {
         guard run.checkedPodcasts == run.totalPodcasts else { throw FolderRunError.invalidProgress }
         var descriptor = FetchDescriptor<Item>(predicate: #Predicate { $0.runID == id }, sortBy: [
             SortDescriptor(\.missingDate), SortDescriptor(\.sortDate),
-            SortDescriptor(\.feedURL), SortDescriptor(\.guid),
+            SortDescriptor(\.feedURL, comparator: .lexical), SortDescriptor(\.guid, comparator: .lexical),
         ])
         descriptor.fetchLimit = FolderRunPolicy.batchSize
         descriptor.fetchOffset = offset
