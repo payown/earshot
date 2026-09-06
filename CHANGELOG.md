@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The offline workflow guide now correctly explains that Clear inbox also removes downloaded audio when Delete downloads when done is enabled, unlike dismissing an individual Inbox episode.
 - Download all now reports requests accepted and waiting for Wi-Fi separately from completion. Failed episodes are visibly and audibly identified; download completions no longer queue per-episode VoiceOver announcements. Repeated requests no longer start duplicate active transfers. (#958)
 
 - Discover podcast search no longer becomes unresponsive after directory results

@@ -20,7 +20,7 @@ Recently Expired appears in Downloads for episodes that automatically expired fr
 
 4. Choose whether to keep Auto-download queued episodes on. It defaults to On and requests audio for episodes you add to Queue, including older episodes. This is separate from the new-episode setting. Both settings respect Wi-Fi-only.
 
-5. Choose whether to enable Delete downloads when done. It defaults to Off. When on, Earshot removes completed audio when you finish an episode, mark it played, or deliberately remove it from Queue.
+5. Choose whether to enable Delete downloads when done. It defaults to Off. When on, Earshot removes downloaded audio when you finish an episode, mark it played, deliberately remove it from Queue, or clear it from Inbox using Clear inbox.
 
 ## Download the current Inbox or Queue
 
@@ -50,7 +50,9 @@ Notify when downloads finish, in Settings, Downloads, optionally sends local not
 
 ## Clear Inbox and manage storage
 
-Clear inbox hides the current Inbox episodes without deleting their audio, marking them played, or removing their podcasts. You can still find them in the podcast's episode list. Clearing Inbox does not prevent future episodes from arriving.
+Clear inbox hides the current Inbox episodes without marking them played or removing their podcasts. If Delete downloads when done is on, Clear inbox also removes those episodes' downloaded audio. If that setting is off, their downloaded audio stays on this device. You can still find the episodes in the podcast's episode list. Clearing Inbox does not prevent future episodes from arriving.
+
+Dismissing an individual episode from Inbox is different from Clear inbox: it hides that episode without deleting its downloaded audio or marking it played.
 
 Clear all downloads removes local audio and cancels active or Wi-Fi-waiting requests. It does not dismiss Inbox episodes or remove podcasts. Removing an individual download likewise removes the file rather than the episode. A later manual or automatic request can download an episode again.
 
@@ -62,7 +64,7 @@ For example, 19 Inbox episodes and 9 Downloads means 19 episodes are available t
 
 First, open Download activity. Check for downloading, waiting for Wi-Fi, or failed episodes. Retry failures if appropriate. Check that you completed the Download N episodes confirmation and requested any deferred batches.
 
-Next, check the search, folder, and All or Unheard filter in Downloads. Those controls can hide completed files. Also check Delete downloads when done and whether you previously cleared downloads, marked episodes played, or removed them from Queue.
+Next, check the search, folder, and All or Unheard filter in Downloads. Those controls can hide completed files. Also check Delete downloads when done and whether you previously used Clear inbox, cleared downloads, marked episodes played, or removed them from Queue. With Delete downloads when done on, clearing Inbox can explain why previously downloaded audio is no longer in Downloads.
 
 If requests remain stuck or fail again, use Settings, Help & About, Send Feedback. Include the app version and build, affected podcast and episode names, the states shown in Download activity, roughly when you requested them, whether Wi-Fi-only is on, and whether individual retries work. These details help distinguish a server or connection problem from an app problem.
 
