@@ -2741,6 +2741,53 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
     }
 
+    func testPersonalPodcastNamePersistsAcrossDiskStoreReopen() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let applicationURL = directory.appendingPathComponent("application.store")
+        let localURL = directory.appendingPathComponent("local.store")
+        do {
+            let app = try makeOnDiskApplicationContainer(applicationURL: applicationURL, localURL: localURL)
+            let podcast = Podcast(feedURL: "https://reopen.example/feed", title: "Publisher Audio")
+            app.mainContext.insert(podcast)
+            try app.mainContext.save()
+            try PodcastDisplayNames.shared.save("Personal Show", for: podcast, context: app.mainContext)
+        }
+        let reopened = try makeOnDiskApplicationContainer(applicationURL: applicationURL, localURL: localURL)
+        let podcast = try XCTUnwrap(reopened.mainContext.fetch(FetchDescriptor<Podcast>()).first)
+        PodcastDisplayNames.shared.reload(context: reopened.mainContext)
+        XCTAssertEqual(podcast.displayName, "Personal Show")
+        XCTAssertEqual(podcast.title, "Publisher Audio")
+    }
+
+    func testPersonalPodcastNameAndExplicitRestoreRoundTrip() async throws {
+        let phone = try makeApplicationContainerWithEpisode(position: 120)
+        let episode = try XCTUnwrap(applicationEpisode(in: phone))
+        let podcast = try XCTUnwrap(episode.podcast)
+        let key = SettingsKey.podcastDisplayName(feedURL: podcast.feedURL)
+        try PodcastDisplayNames.shared.save("Personal Show", for: podcast, context: phone.mainContext)
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: phone, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await phoneCoordinator.reconcile()
+        let mac = try makeApplicationContainerWithEpisode(position: 0)
+        let macCoordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: mac, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "mac"
+        )
+        try await macCoordinator.reconcile()
+        XCTAssertEqual(AppSettingsStore(context: mac.mainContext).rawValue(key), "Personal Show")
+        try AppSettingIdentity.setValue("", for: key, in: mac.mainContext)
+        try mac.mainContext.save()
+        try await macCoordinator.publishLocalSettingChange(key: key, now: .distantFuture)
+        try await phoneCoordinator.reconcile()
+        XCTAssertEqual(AppSettingsStore(context: phone.mainContext).rawValue(key), "")
+        XCTAssertEqual(episode.positionSeconds, 120)
+    }
+
     func testNewestMirroredSettingWinsWithoutCopyingLocalSettings() async throws {
         let phone = try makeApplicationContainer()
         let phoneSettings = AppSettingsStore(context: phone.mainContext)

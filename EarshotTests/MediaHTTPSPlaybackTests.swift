@@ -44,6 +44,25 @@ final class MediaHTTPSPlaybackTests: XCTestCase {
         }
     }
 
+    func testExplicitPauseCancelsPendingMediaStart() async throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://feed.example/rss", title: "Show")
+        let episode = makeEpisode(podcast: podcast)
+        context.insert(podcast)
+        context.insert(episode)
+        try context.save()
+        let probe = StubMediaHTTPSProbe(secureURL: URL(string: "https://legacy.example/episode.mp3"))
+        let player = PlayerService(mediaHTTPSProbe: probe)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        player.play(episode)
+        player.pause()
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertNil(player.nowPlayingEpisode)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertNil(player.pendingCleartextPlaybackWarning)
+    }
+
     func testVerifiedHTTPSStartsWithoutWarning() async throws {
         let context = TestStore.freshContext()
         let podcast = Podcast(feedURL: "https://feed.example/rss", title: "Show")

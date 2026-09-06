@@ -294,7 +294,7 @@ struct QueueScreen: View {
             guard !matching.isEmpty else { return nil }
             return QueueGroup(
                 kind: group.kind,
-                title: group.title,
+                title: (group.podcast?.displayName ?? group.title),
                 episodes: matching,
                 podcast: group.podcast
             )
@@ -345,8 +345,8 @@ struct QueueScreen: View {
         let count = group.episodes.count
         let countPhrase = count == 1 ? "1 episode" : "\(count) episodes"
 
-        return Text(group.title)
-            .accessibilityLabel("\(group.title), \(countPhrase)")
+        return Text((group.podcast?.displayName ?? group.title))
+            .accessibilityLabel("\((group.podcast?.displayName ?? group.title)), \(countPhrase)")
             .accessibilityAddTraits(.isHeader)
             .accessibilityFocused($focusedGroup, equals: group.kind)
             // Routed through the shared helper so the rotor announces Play
@@ -367,20 +367,20 @@ struct QueueScreen: View {
                 if let episode = playGroup(group, folderGrouping: folderGrouping) {
                     // playFromEpisodeList so Play Group honors #562 (Item 1).
                     player.playFromEpisodeList(episode, origin: group.playbackOrigin)
-                    Announcer.announce("Playing \(group.title)")
+                    Announcer.announce("Playing \((group.podcast?.displayName ?? group.title))")
                 }
             },
             QuickActionItem(id: "moveGroupUp", label: "Move Group Up", isDestructive: false) {
                 // Announce + refocus only on a real move; an edge no-op
                 // (group already first / last) must stay silent.
                 if moveGroupUp(group, folderGrouping: folderGrouping) {
-                    Announcer.announce("Moved \(group.title) up")
+                    Announcer.announce("Moved \((group.podcast?.displayName ?? group.title)) up")
                     focusedGroup = group.kind
                 }
             },
             QuickActionItem(id: "moveGroupDown", label: "Move Group Down", isDestructive: false) {
                 if moveGroupDown(group, folderGrouping: folderGrouping) {
-                    Announcer.announce("Moved \(group.title) down")
+                    Announcer.announce("Moved \((group.podcast?.displayName ?? group.title)) down")
                     focusedGroup = group.kind
                 }
             },
@@ -717,7 +717,7 @@ private struct QueueRow: View {
                         .foregroundStyle(Color.accentColor)
                         .accessibilityHidden(true)
                 }
-                if let podcast = episode.podcast?.title {
+                if let podcast = episode.podcast?.displayName {
                     Text(podcast)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -792,7 +792,7 @@ private struct QueueRow: View {
     private var accessibilityLabel: String {
         EpisodeRowLabel.label(
             episodeTitle: episode.title,
-            podcastName: episode.podcast?.title,
+            podcastName: episode.podcast?.displayName,
             seasonNumber: settings.showEpisodeNumbers ? episode.seasonNumber : nil,
             episodeNumber: settings.showEpisodeNumbers ? episode.episodeNumber : nil,
             isPlayed: episode.isPlayed,

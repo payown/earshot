@@ -49,7 +49,7 @@ struct EpisodeSelectableRow: View {
         guard !episode.isDeleted else { return "" }
         return EpisodeRowLabel.label(
             episodeTitle: episode.title,
-            podcastName: includesPodcastName ? episode.podcast?.title : nil,
+            podcastName: includesPodcastName ? episode.podcast?.displayName : nil,
             seasonNumber: settings.showEpisodeNumbers ? episode.seasonNumber : nil,
             episodeNumber: settings.showEpisodeNumbers ? episode.episodeNumber : nil,
             isPlayed: episode.isPlayed,

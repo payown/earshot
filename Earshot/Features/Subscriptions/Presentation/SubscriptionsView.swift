@@ -65,7 +65,7 @@ struct SubscriptionsView: View {
     private var sortedPodcasts: [Podcast] {
         switch settings.librarySortOrder {
         case .alphabetical:
-            return podcasts.sorted { LibrarySort.titlesInOrder($0.title, $1.title) }
+            return podcasts.sorted { LibrarySort.titlesInOrder($0.displayName, $1.displayName) }
         case .lastPublished:
             // Sort by the stored `lastSeenPubDate` (maintained on each refresh as
             // the newest episode's pubDate) — NOT by faulting each podcast's
@@ -76,7 +76,7 @@ struct SubscriptionsView: View {
             return podcasts.sorted { lhs, rhs in
                 let lDate = lhs.lastSeenPubDate ?? .distantPast
                 let rDate = rhs.lastSeenPubDate ?? .distantPast
-                if lDate == rDate { return LibrarySort.titlesInOrder(lhs.title, rhs.title) }
+                if lDate == rDate { return LibrarySort.titlesInOrder(lhs.displayName, rhs.displayName) }
                 return lDate > rDate
             }
         }
@@ -265,7 +265,7 @@ struct SubscriptionsView: View {
             }
         }
         .confirmationDialog(
-            "Unfollow \(pendingUnsubscribe?.title ?? "this podcast")?",
+            "Unfollow \(pendingUnsubscribe?.displayName ?? "this podcast")?",
             isPresented: Binding(
                 get: { pendingUnsubscribe != nil },
                 set: { if !$0 { pendingUnsubscribe = nil } }
@@ -276,7 +276,7 @@ struct SubscriptionsView: View {
             Button("Unfollow", role: .destructive) { unsubscribe(podcast) }
             Button("Cancel", role: .cancel) { pendingUnsubscribe = nil }
         } message: { podcast in
-            Text("This removes \(podcast.title) and its episodes. This can't be undone.")
+            Text("This removes \(podcast.displayName) and its episodes. This can't be undone.")
         }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
         .task {
@@ -384,7 +384,7 @@ struct SubscriptionsView: View {
         let actions = rotorActions(for: podcast)
         let presentations = PodcastAction.presentations(actions, for: podcast)
         let descriptionPresentation = PodcastDescriptionPresentation(
-            title: podcast.title,
+            title: podcast.displayName,
             descriptionHTML: podcast.podcastDescription
         )
         let supplementalActions = descriptionPresentation.map { _ in
@@ -466,7 +466,7 @@ struct SubscriptionsView: View {
         return HStack(spacing: Spacing.md) {
             PodcastArtwork(urlString: podcast.artworkURL)
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(podcast.title).font(.headline)
+                Text(podcast.displayName).font(.headline)
                 if let author = podcast.author, !author.isEmpty {
                     Text(author)
                         .font(.subheadline)
@@ -647,7 +647,7 @@ struct SubscriptionsView: View {
     }
 
     private func unsubscribe(_ podcast: Podcast) {
-        let title = podcast.title
+        let title = podcast.displayName
         // Centralized unsubscribe (removeFromAllFolders + delete + save). The repo
         // logs failures; announce only on a successful delete (#499/#500).
         if SubscriptionRepository(context: context).unsubscribe(podcast) {
@@ -665,7 +665,7 @@ struct SubscriptionsView: View {
 
     private func rowLabel(for podcast: Podcast, isReadOnly: Bool) -> String {
         PodcastRowSpeech.label(
-            title: podcast.title,
+            title: podcast.displayName,
             author: podcast.author,
             isReadOnly: isReadOnly
         )

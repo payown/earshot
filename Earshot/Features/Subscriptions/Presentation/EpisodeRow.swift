@@ -160,7 +160,7 @@ struct EpisodeRow: View {
         guard !episode.isDeleted else { return "" }
         return EpisodeRowLabel.label(
             episodeTitle: episode.title,
-            podcastName: includesPodcastName ? episode.podcast?.title : nil,
+            podcastName: includesPodcastName ? episode.podcast?.displayName : nil,
             // Numbering is spoken only when the user has opted in (#452); pass nil
             // when off so `label` omits it entirely.
             seasonNumber: settings.showEpisodeNumbers ? episode.seasonNumber : nil,
@@ -222,7 +222,7 @@ struct EpisodeRowContent: View {
             // Podcast name in mixed-show lists, matching the Queue row's
             // caption treatment (#535). The wrapper's explicit accessibilityLabel
             // already carries it for VoiceOver.
-            if includesPodcastName, let podcast = episode.podcast?.title,
+            if includesPodcastName, let podcast = episode.podcast?.displayName,
                !podcast.isEmpty {
                 Text(podcast)
                     .font(.caption)

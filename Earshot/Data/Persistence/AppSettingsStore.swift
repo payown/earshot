@@ -95,6 +95,7 @@ enum SettingsKey {
     // continueAfterEpisode off → stop at every episode boundary.
     // continueAfterGroupEnds off → stop when the next queue item is a different
     // podcast. Checked tightest-first at the on-complete handler.
+    static let wrapQueue = "wrap_queue"
     static let continueAfterEpisode = "continue_after_episode"
     static let continueAfterGroupEnds = "continue_after_group_ends"
     static let defaultLaunchScreen = "default_launch_screen"
@@ -155,6 +156,12 @@ enum SettingsKey {
     // with `inboxMaxEpisodes = nil` and silently drops the limit (#548).
     // `Podcast.inboxMaxEpisodes` stays the live source of truth for all
     // existing flows; this keyed copy exists only to restore it on re-add.
+    static let podcastDisplayNamePrefix = "podcast_display_name_"
+
+    static func podcastDisplayName(feedURL: String) -> String {
+        podcastDisplayNamePrefix + FeedURLIdentity.canonical(feedURL)
+    }
+
     static let podcastInboxCapPrefix = "podcast_inbox_cap_"
 
     /// The full per-podcast inbox-cap key for a given feed URL (#548).
@@ -250,7 +257,7 @@ enum AppSettingScope {
         SettingsKey.morningLineup,
         SettingsKey.showEpisodeNumbers, SettingsKey.openPlayerOnPlay,
         SettingsKey.dismissPlayerWhenPlaybackEnds,
-        SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds,
+        SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds, SettingsKey.wrapQueue,
         SettingsKey.defaultLaunchScreen, SettingsKey.librarySortOrder,
         SettingsKey.episodeSortOrder, SettingsKey.statsStreaksEnabled,
         SettingsKey.inboxDefaultCount, SettingsKey.themeOverride,
@@ -262,6 +269,7 @@ enum AppSettingScope {
         let canonical = AppSettingIdentity.canonicalKey(key)
         if canonical.hasPrefix(SettingsKey.podcastFilterPrefix)
             || canonical.hasPrefix(SettingsKey.podcastInboxCapPrefix)
+            || canonical.hasPrefix(SettingsKey.podcastDisplayNamePrefix)
             || canonical.hasPrefix(SettingsKey.episodeFilterConfigurationPrefix) {
             return false
         }
@@ -311,6 +319,7 @@ enum SettingsDefault {
     static let dismissPlayerWhenPlaybackEnds = false
     // Auto-advance defaults true: preserves today's unconditional auto-advance
     // until the user opts to stop at a boundary (#446).
+    static let wrapQueue = false
     static let continueAfterEpisode = true
     static let continueAfterGroupEnds = true
     static let onboardingComplete = false

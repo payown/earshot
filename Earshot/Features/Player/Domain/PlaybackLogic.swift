@@ -195,6 +195,21 @@ enum PlaybackLogic {
         return nextIndex < queue.endIndex ? queue[nextIndex] : nil
     }
 
+    /// Explicit navigation never wraps or guesses a position for an unqueued
+    /// episode. The caller supplies the same order displayed in the Queue.
+    static func queueNeighborID<ID: Equatable>(
+        queue: [ID], current: ID?, direction: QueueNavigationDirection
+    ) -> ID? {
+        guard let current, let index = queue.firstIndex(of: current) else { return nil }
+        switch direction {
+        case .previous:
+            return index > queue.startIndex ? queue[queue.index(before: index)] : nil
+        case .next:
+            let next = queue.index(after: index)
+            return next < queue.endIndex ? queue[next] : nil
+        }
+    }
+
     /// The id of the episode to play next after `current` finishes, honoring the
     /// two auto-advance boundary settings (#446). A `nil` result means STOP --
     /// callers clear now-playing / skip preload exactly as they do when the queue
@@ -244,13 +259,15 @@ enum PlaybackLogic {
         after current: ID?,
         currentGroupKey: Key?,
         continueAfterEpisode: Bool,
-        continueAfterGroupEnds: Bool
+        continueAfterGroupEnds: Bool,
+        wrapToRemaining: Bool = false
     ) -> ID? {
         guard continueAfterEpisode else { return nil }
         let next: (id: ID, groupKey: Key)?
         if let current, let idx = queue.firstIndex(where: { $0.id == current }) {
             let nextIndex = queue.index(after: idx)
-            next = nextIndex < queue.endIndex ? queue[nextIndex] : nil
+            next = nextIndex < queue.endIndex ? queue[nextIndex]
+                : (wrapToRemaining ? queue.first(where: { $0.id != current }) : nil)
         } else {
             next = queue.first
         }
@@ -518,4 +535,10 @@ enum PlaybackLogic {
     ) -> Bool {
         playerIsPlaying && intendsToPlay && !currentlyMarkedPlaying
     }
+}
+
+/// Episode navigation is separate from interval skips and chapter navigation.
+enum QueueNavigationDirection {
+    case previous
+    case next
 }

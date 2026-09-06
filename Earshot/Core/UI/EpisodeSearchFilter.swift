@@ -41,6 +41,7 @@ enum EpisodeSearchFilter {
            podcast.localizedStandardContains(trimmed) {
             return true
         }
+        if let name = episode.podcast?.displayName, name.localizedStandardContains(trimmed) { return true }
         if let description = SpokenDescriptionCache.shared.text(
             identity: "episode-search:\(episode.guid)\u{1}\(episode.audioURL)",
             html: episode.episodeDescription,

@@ -58,6 +58,7 @@ enum LocalSearchScanPolicy {
 @ModelActor
 actor LocalPodcastSearchLoader {
     func page(query: String, limit requestedLimit: Int) throws -> LocalSearchPage {
+        let names = try PodcastNamePolicy.snapshot(context: modelContext)
         let limit = LocalSearchScanPolicy.normalizedLimit(requestedLimit)
         var offset = 0
         var inspected = 0
@@ -70,6 +71,7 @@ actor LocalPodcastSearchLoader {
             descriptor.fetchLimit = LocalSearchScanPolicy.storeBatchSize
             descriptor.propertiesToFetch = [
                 \Podcast.title,
+                \Podcast.feedURL,
                 \Podcast.author,
                 \Podcast.podcastDescription,
                 \Podcast.subscriptionStateRaw,
@@ -81,7 +83,7 @@ actor LocalPodcastSearchLoader {
             for podcast in batch {
                 try Task.checkCancellation()
                 if SearchLogic.matches(
-                    "\(podcast.title) \(podcast.author ?? "")",
+                    "\(podcast.title) \(names[FeedURLIdentity.canonical(podcast.feedURL)] ?? "") \(podcast.author ?? "")",
                     query: query
                 ) {
                     matches.append(podcast.persistentModelID)
