@@ -93,6 +93,8 @@ final class FolderRunController {
             let wasDriving = self.driving
             self.driving = false
             self.pendingPlayback = false
+            self.transportPaused = false
+            self.hasPlaybackFailure = false
             if wasDriving { self.player?.pause() }
             self.currentItem = nil
             let feeds = try await catalog.feeds(in: id)

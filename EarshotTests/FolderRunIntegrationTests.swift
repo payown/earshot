@@ -175,6 +175,7 @@ final class FolderRunIntegrationTests: XCTestCase {
         player.resume()
         await run.waitForOperationForTesting()
         XCTAssertEqual(player.nowPlayingEpisode?.guid, "second")
+        player.stopAfterCurrentEpisode = true
         NotificationCenter.default.post(name: AVAudioSession.interruptionNotification,
                                         object: AVAudioSession.sharedInstance(),
                                         userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue])
@@ -188,6 +189,7 @@ final class FolderRunIntegrationTests: XCTestCase {
         for _ in 0..<50 where !run.driving { try await Task.sleep(for: .milliseconds(10)) }
         await run.waitForOperationForTesting()
         XCTAssertTrue(run.driving, "System-authorized resumption must restore folder continuation, not only audio")
+        XCTAssertTrue(player.stopAfterCurrentEpisode, "Interruption recovery must retain the one-off stop flag")
         player.stopAndUnload()
         await run.release()
     }

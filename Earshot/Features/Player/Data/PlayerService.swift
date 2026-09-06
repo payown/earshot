@@ -336,7 +336,13 @@ final class PlayerService {
 
     func playFolderRunEpisode(_ episode: Episode, origin: PlaybackOrigin?, autoplay: Bool) {
         clearPreload()
-        if autoplay {
+        if autoplay, nowPlayingEpisodeID == episode.persistentModelID,
+           player.currentItem != nil, player.currentItem?.status != .failed, playbackFailureMessage == nil {
+            playbackOrigin = origin
+            // Resuming the same item retains one-off stop flags and transport
+            // state. A failed item must instead be rebuilt by the retry below.
+            resume(providesStartHaptic: true)
+        } else if autoplay {
             beginUserMediaAttempt()
             play(episode, preparedItem: nil, originEvent: .started(origin))
         } else {
