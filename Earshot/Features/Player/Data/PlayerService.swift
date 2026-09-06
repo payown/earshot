@@ -29,6 +29,16 @@ extension Notification.Name {
 @MainActor
 @Observable
 final class PlayerService {
+    @ObservationIgnored private var startupRestorationCompleted = false
+
+    /// Startup maintenance may finish after a remote command or manual play.
+    /// Claim restoration once so that late startup cannot pause or resurrect it.
+    func beginStartupRestoration() -> Bool {
+        guard !startupRestorationCompleted else { return false }
+        startupRestorationCompleted = true
+        return currentEpisode == nil
+    }
+
     // MARK: Observed state (drives the UI)
 
     /// Title of the loaded episode, or `nil` when nothing is loaded.
@@ -329,6 +339,7 @@ final class PlayerService {
     /// Drops the old model context after the synchronous reset notification has
     /// unloaded playback and before the store files are moved.
     func releasePersistence() {
+        startupRestorationCompleted = false
         cancelHandoffOperation()
         context = nil
         settings = nil
@@ -725,7 +736,7 @@ final class PlayerService {
             Announcer.announce("Sleep timer cancelled")
         }
 
-        configureSession()
+        guard configureSession() else { return }
 
         // A new episode invalidates the loaded chapter list, the auto-skip loop
         // guard, and any in-progress fast-forward scan. The skipped-chapter map
@@ -989,7 +1000,7 @@ final class PlayerService {
         guard currentEpisode != nil else { return }
         // Resuming during a sleep-timer fade supersedes it (P1-4).
         cancelFadeIfNeeded()
-        configureSession()
+        guard configureSession() else { return }
         applyRate()
         player.play()
         isPlaying = true
@@ -2077,7 +2088,7 @@ final class PlayerService {
 
     // MARK: Private — audio session
 
-    private func configureSession() {
+    private func configureSession() -> Bool {
         recordPlaybackDiagnostic("session.configure.begin")
         do {
             try audioSession.setCategory(
@@ -2086,16 +2097,23 @@ final class PlayerService {
                 // tells iOS to pause Earshot, rather than mix it underneath,
                 // when Siri or another short spoken prompt takes the route.
                 mode: .spokenAudio,
-                options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
+                // Output-only playback already supports AirPlay and A2DP.
+                // HFP is an input option and is invalid for this category.
+                options: []
             )
             try audioSession.activate()
             recordPlaybackDiagnostic("session.activate.succeeded")
-            try audioSession.setPreferredOutputNumberOfChannels(2)
         } catch {
             let failure = error as NSError
             recordPlaybackDiagnostic("session.configure.failed domain=\(failure.domain) code=\(failure.code)")
             AppLog.player.error("Failed to configure audio session: \(error.localizedDescription, privacy: .public)")
+            return false
         }
+        // A route may not support the stereo preference. That does not undo
+        // successful activation or prevent playback on a valid mono route.
+        do { try audioSession.setPreferredOutputNumberOfChannels(2) }
+        catch { recordPlaybackDiagnostic("session.channelPreference.failed") }
+        return true
     }
 
     // MARK: Private — periodic time / persistence
@@ -3499,6 +3517,25 @@ final class PlayerService {
 
     // MARK: Private — remote commands
 
+    enum RemotePlaybackCommand { case play, pause, toggle }
+
+    /// Shared by real command handlers and regression tests. Configuration has
+    /// already supplied the context before handlers are registered. Restore the
+    /// one saved episode synchronously rather than waiting for maintenance.
+    func handleRemotePlaybackCommand(_ command: RemotePlaybackCommand) -> MPRemoteCommandHandlerStatus {
+        recordPlaybackDiagnostic("remote.\(command)")
+        if currentEpisode == nil, command != .pause, let context {
+            PlaybackStartup.restoreLastEpisode(into: self, context: context)
+        }
+        guard currentEpisode != nil else { return .noSuchContent }
+        switch command {
+        case .play: resume()
+        case .pause: pause()
+        case .toggle: togglePlayPause()
+        }
+        return .success
+    }
+
     private func configureRemoteCommands() {
         guard !remoteCommandsConfigured else { return }
         remoteCommandsConfigured = true
@@ -3506,24 +3543,15 @@ final class PlayerService {
 
         center.playCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            self.recordPlaybackDiagnostic("remote.play")
-            guard self.currentEpisode != nil else { return .noSuchContent }
-            self.resume()
-            return .success
+            return self.handleRemotePlaybackCommand(.play)
         }
         center.pauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            self.recordPlaybackDiagnostic("remote.pause")
-            guard self.currentEpisode != nil else { return .noSuchContent }
-            self.pause()
-            return .success
+            return self.handleRemotePlaybackCommand(.pause)
         }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            self.recordPlaybackDiagnostic("remote.toggle")
-            guard self.currentEpisode != nil else { return .noSuchContent }
-            self.togglePlayPause()
-            return .success
+            return self.handleRemotePlaybackCommand(.toggle)
         }
 
         updateRemoteSkipIntervals()

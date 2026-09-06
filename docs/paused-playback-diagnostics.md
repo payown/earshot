@@ -65,3 +65,33 @@ was performed. Wireless cache retrieval succeeded at
 `/tmp/earshot-paused-diagnostics-phone-baseline/events.log`, showing configure
 followed by restored paused playback with metadata and a loaded player item.
 The actual delayed-loss reproduction remains for Michael to perform.
+
+## Captured reproduction and candidate correction
+
+Build 257 log `/tmp/earshot-paused-diagnostics-phone-repro-1/events.log`:
+
+- Session configuration failed with OSStatus -50 before activation succeeded.
+- Pause published rate zero and retained the current item and metadata.
+- A new process session then registered commands while backgrounded. Its
+  `remote.toggle` arrived with no loaded episode; restoration published the
+  paused item about 256 milliseconds later. The handler had already returned
+  no-such-content. The reason the original process ended is not established.
+
+The candidate uses `.playback` / `.spokenAudio` with no explicit category
+options. The installed SDK documents HFP as invalid for output-only categories;
+AirPlay and A2DP are already supported. Activation failures now stop the attempted
+start rather than reporting playing state, while an unsupported stereo preference
+does not prevent playback after successful activation.
+
+Remote play/toggle now synchronously invokes saved-episode restoration when
+nothing is loaded. The context is available before the handlers are registered;
+this avoids waiting for unrelated asynchronous root maintenance. Restoration
+is claimed once per persistence lifecycle, preserving manual playback and
+preventing late maintenance from pausing playback or resurrecting unloaded media.
+Ordinary launch remains paused; pause requests never initiate restoration.
+There are no timers, silent audio, or background lifetime assertions.
+
+The 79 focused tests passed, covering early play and toggle, late restoration,
+pause, missing content, normal paused startup, manual playback preservation,
+activation failure, and existing advanced playback/route changes. Result:
+`/tmp/earshot-paused-fix-tests.xcresult`. Physical confirmation remains required.
