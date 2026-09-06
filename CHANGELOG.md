@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- System playback controls can resume the saved episode when Earshot relaunches in the background after a pause. Corrected audio-session configuration and prevented late startup work from interrupting resumed playback.
+
 ### Added
 
 - Folders can prepare a device-local, oldest-first run of unheard episodes across their followed shows and subfolders, including older history still available through RSS. Runs preserve saved positions and the normal Queue, with progress, resume, cancel, and unavailable-audio recovery. (#944)

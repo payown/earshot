@@ -1,9 +1,128 @@
 import AVFoundation
+import MediaPlayer
 import XCTest
 @testable import Earshot
 
 @MainActor
 final class PlayerAudioSessionTests: XCTestCase {
+    func testRemoteStartRestoresBeforeMaintenanceAndLateStartupDoesNotPauseIt() throws {
+        for command in [PlayerService.RemotePlaybackCommand.play, .toggle] {
+            let container = try ModelContainerFactory.makeInMemory()
+            let context = container.mainContext
+            let audioURL = try makeSilentAudioURL()
+            defer { try? FileManager.default.removeItem(at: audioURL) }
+            let episode = Episode(guid: "cold-start", title: "Saved", audioURL: audioURL.absoluteString)
+            episode.positionSeconds = 8
+            context.insert(episode)
+            try context.save()
+            AppSettingsStore(context: context).setRawValue("cold-start", for: SettingsKey.lastPlayingEpisodeID)
+            let player = PlayerService(audioSession: MockPlayerAudioSession())
+            player.configure(context: context)
+
+            XCTAssertNil(player.nowPlayingEpisodeID)
+            XCTAssertEqual(player.handleRemotePlaybackCommand(command), .success)
+            XCTAssertEqual(player.nowPlayingEpisodeID, episode.persistentModelID)
+            XCTAssertTrue(player.isPlaying)
+            XCTAssertEqual(player.currentPositionSeconds, 8)
+            PlaybackStartup.restoreLastEpisode(into: player, context: context)
+            XCTAssertTrue(player.isPlaying, "Late startup must not reload paused")
+            XCTAssertEqual(player.handleRemotePlaybackCommand(.pause), .success)
+            XCTAssertFalse(player.isPlaying)
+            PlaybackStartup.restoreLastEpisode(into: player, context: context)
+            XCTAssertFalse(player.isPlaying)
+            player.stopAndUnload()
+            XCTAssertEqual(player.handleRemotePlaybackCommand(.play), .noSuchContent)
+        }
+    }
+
+    func testRemoteStartWithoutSavedEpisodeDoesNotClaimSuccess() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let player = PlayerService(audioSession: MockPlayerAudioSession())
+        player.configure(context: container.mainContext)
+        XCTAssertEqual(player.handleRemotePlaybackCommand(.play), .noSuchContent)
+        XCTAssertEqual(player.handleRemotePlaybackCommand(.toggle), .noSuchContent)
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    func testOrdinaryStartupRemainsPausedAndPreservesManualPlayback() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        let episode = Episode(guid: "saved", title: "Saved", audioURL: audioURL.absoluteString)
+        context.insert(episode)
+        try context.save()
+        AppSettingsStore(context: context).setRawValue("saved", for: SettingsKey.lastPlayingEpisodeID)
+        let player = PlayerService(audioSession: MockPlayerAudioSession())
+        player.configure(context: context)
+        XCTAssertEqual(player.handleRemotePlaybackCommand(.pause), .noSuchContent)
+        PlaybackStartup.restoreLastEpisode(into: player, context: context)
+        XCTAssertEqual(player.nowPlayingEpisodeID, episode.persistentModelID)
+        XCTAssertFalse(player.isPlaying)
+        player.stopAndUnload()
+
+        let manual = PlayerService(audioSession: MockPlayerAudioSession())
+        manual.configure(context: context)
+        manual.playPreview(guid: "manual", title: "Manual", audioURL: audioURL.absoluteString, showTitle: "Show")
+        PlaybackStartup.restoreLastEpisode(into: manual, context: context)
+        XCTAssertEqual(manual.currentTitle, "Manual")
+        XCTAssertTrue(manual.isPlaying)
+        manual.stopAndUnload()
+    }
+
+    func testActivationFailureDoesNotPretendToResume() throws {
+        let session = MockPlayerAudioSession()
+        let player = PlayerService(audioSession: session)
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        player.playPreview(guid: "test", title: "Test", audioURL: audioURL.absoluteString, showTitle: "Show")
+        player.pause()
+        session.activationFails = true
+        player.resume()
+        XCTAssertFalse(player.isPlaying)
+        player.stopAndUnload()
+    }
+
+    func testExplicitPauseAndBackgroundPreserveNowPlayingWithoutReactivation() throws {
+        let session = MockPlayerAudioSession()
+        let player = PlayerService(audioSession: session)
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        player.playPreview(guid: "paused", title: "Paused episode", audioURL: audioURL.absoluteString, showTitle: "Show")
+        player.pause()
+        player.persistForBackground()
+
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(player.currentTitle, "Paused episode")
+        XCTAssertEqual(session.activationCount, 1)
+        let info = MPNowPlayingInfoCenter.default().nowPlayingInfo
+        XCTAssertEqual(info?[MPMediaItemPropertyTitle] as? String, "Paused episode")
+        XCTAssertEqual((info?[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue, 0)
+        player.stopAndUnload()
+    }
+
+    func testInterruptionDoesNotResumeExplicitlyPausedEpisode() async throws {
+        let session = MockPlayerAudioSession()
+        let player = PlayerService(audioSession: session)
+        let container = try ModelContainerFactory.makeInMemory()
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        player.configure(context: container.mainContext)
+        player.playPreview(guid: "paused", title: "Paused episode", audioURL: audioURL.absoluteString, showTitle: "Show")
+        player.pause()
+        NotificationCenter.default.post(name: AVAudioSession.interruptionNotification, object: session.notificationObject, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+            AVAudioSessionInterruptionReasonKey: AVAudioSession.InterruptionReason.default.rawValue,
+        ])
+        try await Task.sleep(for: .milliseconds(50))
+        postInterruption(.ended, options: .shouldResume, session: session)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(session.activationCount, 1)
+        XCTAssertNotNil(MPNowPlayingInfoCenter.default().nowPlayingInfo)
+        player.stopAndUnload()
+    }
+
     func testPlaybackStartConfiguresAndActivatesProductionRoutingOptions() {
         let session = MockPlayerAudioSession()
         let player = PlayerService(audioSession: session)
@@ -19,7 +138,7 @@ final class PlayerAudioSessionTests: XCTestCase {
         XCTAssertEqual(session.mode, .spokenAudio)
         XCTAssertEqual(
             session.options,
-            [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
+            []
         )
         XCTAssertEqual(session.activationCount, 1)
         XCTAssertEqual(session.preferredChannelCounts, [2])
@@ -46,7 +165,7 @@ final class PlayerAudioSessionTests: XCTestCase {
         XCTAssertEqual(session.mode, .spokenAudio)
         XCTAssertEqual(
             session.options,
-            [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
+            []
         )
         XCTAssertEqual(session.activationCount, 1)
         XCTAssertEqual(session.preferredChannelCounts, [2])
@@ -195,6 +314,7 @@ final class PlayerAudioSessionTests: XCTestCase {
 
 @MainActor
 private final class MockPlayerAudioSession: PlayerAudioSession {
+    var activationFails = false
     let notificationObject: AnyObject = NSObject()
     private(set) var category: AVAudioSession.Category?
     private(set) var mode: AVAudioSession.Mode?
@@ -213,6 +333,7 @@ private final class MockPlayerAudioSession: PlayerAudioSession {
     }
 
     func activate() throws {
+        if activationFails { throw NSError(domain: NSOSStatusErrorDomain, code: -50) }
         activationCount += 1
     }
 

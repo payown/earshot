@@ -13,6 +13,7 @@ enum PlaybackStartup {
     /// across podcasts); values written by earlier builds are bare guids and
     /// still resolve by guid alone.
     static func restoreLastEpisode(into player: PlayerService, context: ModelContext) {
+        guard player.beginStartupRestoration() else { return }
         let settings = AppSettingsStore(context: context)
         guard let stored = settings.rawValue(SettingsKey.lastPlayingEpisodeID), !stored.isEmpty else {
             return

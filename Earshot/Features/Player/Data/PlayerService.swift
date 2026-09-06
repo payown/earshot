@@ -29,6 +29,16 @@ extension Notification.Name {
 @MainActor
 @Observable
 final class PlayerService {
+    @ObservationIgnored private var startupRestorationCompleted = false
+
+    /// Startup maintenance may finish after a remote command or manual play.
+    /// Claim restoration once so that late startup cannot pause or resurrect it.
+    func beginStartupRestoration() -> Bool {
+        guard !startupRestorationCompleted else { return false }
+        startupRestorationCompleted = true
+        return currentEpisode == nil
+    }
+
     // MARK: Observed state (drives the UI)
 
     /// Title of the loaded episode, or `nil` when nothing is loaded.
@@ -313,6 +323,7 @@ final class PlayerService {
     /// Wires the service to a persistence context. Call once at app startup with
     /// the shared container's `mainContext`. Must not be called from a view body.
     func configure(context: ModelContext) {
+        recordPlaybackDiagnostic("configure")
         self.context = context
         self.settings = AppSettingsStore(context: context)
         configureRemoteCommands()
@@ -329,6 +340,7 @@ final class PlayerService {
     /// Drops the old model context after the synchronous reset notification has
     /// unloaded playback and before the store files are moved.
     func releasePersistence() {
+        startupRestorationCompleted = false
         cancelHandoffOperation()
         context = nil
         settings = nil
@@ -475,6 +487,12 @@ final class PlayerService {
     /// The currently loaded episode, if any. Exposed read-only for features that
     /// act on the current item — e.g. bookmarking the current position.
     var nowPlayingEpisode: Episode? { currentEpisode }
+
+    /// Recovery must respect requested playback while AVPlayer buffers or a
+    /// cross-device position lookup is still finishing, not just audible state.
+    var hasActivePlaybackRequest: Bool {
+        isPlaying || intendsToPlay || playbackHandoffTask != nil
+    }
 
     /// Internal verification surface for the transport selected after #709's
     /// HTTPS probe. The URL is never persisted or included in diagnostics.
@@ -767,7 +785,7 @@ final class PlayerService {
             Announcer.announce("Sleep timer cancelled")
         }
 
-        configureSession()
+        guard configureSession() else { return }
 
         // A new episode invalidates the loaded chapter list, the auto-skip loop
         // guard, and any in-progress fast-forward scan. The skipped-chapter map
@@ -1029,10 +1047,11 @@ final class PlayerService {
     }
 
     private func resumeImmediately(providesStartHaptic: Bool) {
+        recordPlaybackDiagnostic("resume.begin")
         guard currentEpisode != nil else { return }
         // Resuming during a sleep-timer fade supersedes it (P1-4).
         cancelFadeIfNeeded()
-        configureSession()
+        guard configureSession() else { return }
         applyRate()
         player.play()
         isPlaying = true
@@ -1068,6 +1087,7 @@ final class PlayerService {
     }
 
     private func pause(providesPauseHaptic: Bool, folderRunInternal: Bool = false) {
+        recordPlaybackDiagnostic("pause.begin")
         if !folderRunInternal { folderRuns.pauseForTransport() }
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         let wasPlaying = isPlaying
@@ -1123,6 +1143,7 @@ final class PlayerService {
     /// saved SwiftData deletion can leave `isDeleted == false` on a detached
     /// object even though stored-property access will trap.
     private func unloadWithoutPersisting() {
+        recordPlaybackDiagnostic("unload")
         folderRuns.pauseForTransport()
 
         // Supersede any in-flight sleep-timer fade and clear the timer itself:
@@ -2124,7 +2145,8 @@ final class PlayerService {
 
     // MARK: Private — audio session
 
-    private func configureSession() {
+    private func configureSession() -> Bool {
+        recordPlaybackDiagnostic("session.configure.begin")
         do {
             try audioSession.setCategory(
                 .playback,
@@ -2132,13 +2154,23 @@ final class PlayerService {
                 // tells iOS to pause Earshot, rather than mix it underneath,
                 // when Siri or another short spoken prompt takes the route.
                 mode: .spokenAudio,
-                options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
+                // Output-only playback already supports AirPlay and A2DP.
+                // HFP is an input option and is invalid for this category.
+                options: []
             )
             try audioSession.activate()
-            try audioSession.setPreferredOutputNumberOfChannels(2)
+            recordPlaybackDiagnostic("session.activate.succeeded")
         } catch {
+            let failure = error as NSError
+            recordPlaybackDiagnostic("session.configure.failed domain=\(failure.domain) code=\(failure.code)")
             AppLog.player.error("Failed to configure audio session: \(error.localizedDescription, privacy: .public)")
+            return false
         }
+        // A route may not support the stereo preference. That does not undo
+        // successful activation or prevent playback on a valid mono route.
+        do { try audioSession.setPreferredOutputNumberOfChannels(2) }
+        catch { recordPlaybackDiagnostic("session.channelPreference.failed") }
+        return true
     }
 
     // MARK: Private — periodic time / persistence
@@ -2275,6 +2307,7 @@ final class PlayerService {
     /// (#736). Saving here is off the visible view hot path, so the resulting
     /// `@Query` invalidation costs nothing the user can feel.
     func persistForBackground() {
+        recordPlaybackDiagnostic("background")
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         persistCurrentPosition()
         publishCurrentPlaybackHandoff()
@@ -2904,7 +2937,11 @@ final class PlayerService {
         ) { [weak self] note in
             let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
             let optionsValue = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
-            Task { @MainActor in self?.handleInterruption(typeValue: typeValue, optionsValue: optionsValue) }
+            let reason = note.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt
+            Task { @MainActor in
+                self?.recordPlaybackDiagnostic("interruption type=\(String(describing: typeValue)) options=\(String(describing: optionsValue)) reason=\(String(describing: reason))")
+                self?.handleInterruption(typeValue: typeValue, optionsValue: optionsValue)
+            }
         }
         routeChangeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
@@ -3103,6 +3140,7 @@ final class PlayerService {
     }
 
     private func handleRouteChange(reasonValue: UInt?) {
+        recordPlaybackDiagnostic("route.change reason=\(String(describing: reasonValue))")
         guard let reasonValue,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
         // Headphones / Bluetooth unplugged: pause FIRST so audio doesn't blast
@@ -3418,6 +3456,7 @@ final class PlayerService {
 
     /// Clears the Now Playing center and the local mirror together.
     private func clearNowPlayingInfo() {
+        recordPlaybackDiagnostic("nowPlaying.clear")
         cachedNowPlayingInfo = [:]
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
@@ -3444,6 +3483,7 @@ final class PlayerService {
         writeNowPlayingInfo(info)
 
         // This is a discontinuity write (play / pause / seek / resume): the elapsed
+        recordPlaybackDiagnostic("nowPlaying.publish")
         // time and rate are now exact, so re-anchor the per-tick throttle (#412) and
         // let the next tick re-sync `nowPlayingElapsedSyncInterval` seconds later.
         lastNowPlayingSyncSecond = nil
@@ -3559,6 +3599,25 @@ final class PlayerService {
 
     // MARK: Private — remote commands
 
+    enum RemotePlaybackCommand { case play, pause, toggle }
+
+    /// Shared by real command handlers and regression tests. Configuration has
+    /// already supplied the context before handlers are registered. Restore the
+    /// one saved episode synchronously rather than waiting for maintenance.
+    func handleRemotePlaybackCommand(_ command: RemotePlaybackCommand) -> MPRemoteCommandHandlerStatus {
+        recordPlaybackDiagnostic("remote.\(command)")
+        if currentEpisode == nil, command != .pause, let context {
+            PlaybackStartup.restoreLastEpisode(into: self, context: context)
+        }
+        guard currentEpisode != nil else { return .noSuchContent }
+        switch command {
+        case .play: resume()
+        case .pause: pause()
+        case .toggle: togglePlayPause()
+        }
+        return .success
+    }
+
     private func configureRemoteCommands() {
         guard !remoteCommandsConfigured else { return }
         remoteCommandsConfigured = true
@@ -3566,21 +3625,15 @@ final class PlayerService {
 
         center.playCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            guard self.currentEpisode != nil else { return .noSuchContent }
-            self.resume()
-            return .success
+            return self.handleRemotePlaybackCommand(.play)
         }
         center.pauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            guard self.currentEpisode != nil else { return .noSuchContent }
-            self.pause()
-            return .success
+            return self.handleRemotePlaybackCommand(.pause)
         }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            guard self.currentEpisode != nil else { return .noSuchContent }
-            self.togglePlayPause()
-            return .success
+            return self.handleRemotePlaybackCommand(.toggle)
         }
 
         updateRemoteSkipIntervals()
@@ -3631,7 +3684,59 @@ final class PlayerService {
         center.skipForwardCommand.preferredIntervals = [NSNumber(value: skipForwardSeconds)]
         center.skipBackwardCommand.preferredIntervals = [NSNumber(value: skipBackSeconds)]
     }
+
+    /// Diagnostic-only scalar snapshot. The local metadata dictionary is NOT
+    /// evidence that iOS still selects Earshot as its global Now Playing app.
+    /// No titles, episode IDs, URLs, audio, or other apps' content are recorded.
+    private func recordPlaybackDiagnostic(_ event: String) {
+#if EARSHOT_PLAYBACK_DIAGNOSTICS
+        let session = AVAudioSession.sharedInstance()
+        let info = MPNowPlayingInfoCenter.default().nowPlayingInfo
+        let routes = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        let line = "\(event) app=\(UIApplication.shared.applicationState.rawValue) episode=\(currentEpisode != nil) item=\(player.currentItem != nil) playing=\(isPlaying) intent=\(intendsToPlay) transport=\(player.timeControlStatus.rawValue) rate=\(player.rate) metadata=\(info != nil) metadataRate=\(String(describing: info?[MPNowPlayingInfoPropertyPlaybackRate])) otherAudio=\(session.isOtherAudioPlaying) route=\(routes)"
+        PausedPlaybackDiagnosticLog.record(line)
+#endif
+    }
 }
+
+#if EARSHOT_PLAYBACK_DIAGNOSTICS
+/// Compiled only into the explicitly requested local diagnostic build.
+/// All filesystem operations run on this one serial queue, preserving enqueue
+/// order without mutable state crossing isolation boundaries. No timers,
+/// background assertions, audio activation, or debugger are used.
+enum PausedPlaybackDiagnosticLog {
+    private static let queue = DispatchQueue(label: "media.payown.earshot.playback-diagnostics", qos: .utility)
+    private static let sessionID = UUID().uuidString
+
+    static func record(_ event: String) {
+        let timestamp = Date().timeIntervalSince1970
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let line = "\(timestamp) uptime=\(uptime) session=\(sessionID) \(event)\n"
+        queue.async {
+            do {
+                let manager = FileManager.default
+                let directory = try manager.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                    .appendingPathComponent("PlaybackDiagnostics", isDirectory: true)
+                try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+                let file = directory.appendingPathComponent("events.log")
+                let previous = directory.appendingPathComponent("previous.log")
+                let size = (try? manager.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
+                if size >= 262_144 {
+                    if manager.fileExists(atPath: previous.path) { try manager.removeItem(at: previous) }
+                    try manager.moveItem(at: file, to: previous)
+                }
+                if !manager.fileExists(atPath: file.path) { manager.createFile(atPath: file.path, contents: nil) }
+                let handle = try FileHandle(forWritingTo: file)
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data(line.utf8))
+            } catch {
+                AppLog.player.error("Playback diagnostic write failed")
+            }
+        }
+    }
+}
+#endif
 
 #if DEBUG
 extension PlayerService {
