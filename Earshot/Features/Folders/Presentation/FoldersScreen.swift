@@ -14,6 +14,7 @@ struct FoldersScreen: View {
     @State private var showingCreate = false
     @State private var newName = ""
     @State private var pendingDelete: PodcastFolder?
+    @State private var runFolder: PodcastFolder?
     @State private var expandedFolderIDs = Set<PersistentIdentifier>()
     @AccessibilityFocusState private var focusedFolderID: PersistentIdentifier?
     @AccessibilityFocusState private var focusEmptyState: Bool
@@ -53,7 +54,11 @@ struct FoldersScreen: View {
             }
         }
         .navigationTitle("Folders")
+        .navigationDestination(item: $runFolder) { FolderRunScreen(folder: $0) }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink("Folder run status") { FolderRunScreen() }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 EditButton()
             }
@@ -215,6 +220,9 @@ struct FoldersScreen: View {
                 }
             }
         actions += deleteAction(for: folder)
+        actions.append(QuickActionItem(id: "playUnheardOldestFirst", label: "Play unheard oldest first", isDestructive: false) {
+            runFolder = folder
+        })
         return actions
     }
 

@@ -122,7 +122,7 @@ actor FolderRunStore {
         guard run.checkedPodcasts == run.totalPodcasts else { throw FolderRunError.invalidProgress }
         var descriptor = FetchDescriptor<Item>(predicate: #Predicate { $0.runID == id }, sortBy: [
             SortDescriptor(\.missingDate), SortDescriptor(\.sortDate),
-            SortDescriptor(\.feedURL), SortDescriptor(\.guid),
+            SortDescriptor(\.feedURL, comparator: .lexical), SortDescriptor(\.guid, comparator: .lexical),
         ])
         descriptor.fetchLimit = FolderRunPolicy.batchSize
         descriptor.fetchOffset = offset
