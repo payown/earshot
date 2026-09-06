@@ -152,7 +152,7 @@ struct FeedRefreshSettingsView: View {
             Button("Unfollow", role: .destructive) { unfollow(podcast) }
             Button("Cancel", role: .cancel) { pendingUnfollow = nil }
         } message: { podcast in
-            Text("This removes \(podcast.title) and its episodes. This can't be undone.")
+            Text("This removes \(podcast.displayName) and its episodes. This can't be undone.")
         }
         .sheet(item: $sharingPodcast) { podcast in
             ShareSheet(items: shareItems(for: podcast))
@@ -181,14 +181,14 @@ struct FeedRefreshSettingsView: View {
             let performAction = { (action: PodcastAction) in perform(action, for: podcast) }
             NavigationLink(value: podcast) {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text(failure.podcastTitle)
+                    Text(podcast.displayName)
                         .font(.headline)
                     Text(failure.reason)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(failure.podcastTitle). Refresh failed. \(failure.reason)")
+                .accessibilityLabel("\(podcast.displayName). Refresh failed. \(failure.reason)")
                 .podcastActionsRotor(presentations, perform: performAction)
             }
             .podcastActionsContextMenu(presentations, perform: performAction)
@@ -232,7 +232,7 @@ struct FeedRefreshSettingsView: View {
     }
 
     private func unfollow(_ podcast: Podcast) {
-        let title = podcast.title
+        let title = podcast.displayName
         let feedURL = podcast.feedURL
         guard SubscriptionRepository(context: context).unsubscribe(podcast) else { return }
         failedPodcasts.removeValue(forKey: FeedURLIdentity.canonical(feedURL))

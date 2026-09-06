@@ -6,6 +6,31 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testPodcastNameEditorSavesAndRestoresPublisherName() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+        let settings = app.buttons["Podcast settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        let rename = app.buttons["Rename podcast"].firstMatch
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        let originalName = rename.value as? String
+        rename.tap()
+        let field = app.textFields["Podcast name"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        let existing = field.value as? String ?? ""
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count) + "Personal Podcast")
+        app.buttons["Save"].firstMatch.tap()
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        XCTAssertEqual(rename.value as? String, "Personal Podcast")
+        rename.tap()
+        app.buttons["Restore original name"].firstMatch.tap()
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        XCTAssertEqual(rename.value as? String, originalName)
+    }
+
     func testSeededLibraryLaunchAndTabNavigationSmoke() {
         let app = XCUIApplication()
         app.launchArguments = [

@@ -180,10 +180,10 @@ struct SearchView<HeaderContent: View>: View {
                 Section(header: Text("Podcasts").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedPodcasts) { podcast in
                         NavigationLink(value: podcast) {
-                            Text(podcast.title)
+                            Text(podcast.displayName)
                         }
                         .accessibilityLabel(PodcastRowSpeech.label(
-                            title: podcast.title,
+                            title: podcast.displayName,
                             author: podcast.author,
                             isReadOnly: false
                         ))
@@ -282,7 +282,7 @@ struct SearchView<HeaderContent: View>: View {
 
     private func fullDescriptionActions(for podcast: Podcast) -> [QuickActionItem] {
         guard let presentation = PodcastDescriptionPresentation(
-            title: podcast.title,
+            title: podcast.displayName,
             descriptionHTML: podcast.podcastDescription
         ) else {
             return []

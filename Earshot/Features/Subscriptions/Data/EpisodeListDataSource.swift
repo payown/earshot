@@ -22,7 +22,7 @@ final class EpisodeListDataSource {
 
     private let context: ModelContext
     private let podcastID: PersistentIdentifier
-    private let podcastTitle: String
+    var podcastTitle: String
 
     init(context: ModelContext, podcastID: PersistentIdentifier, podcastTitle: String) {
         self.context = context
