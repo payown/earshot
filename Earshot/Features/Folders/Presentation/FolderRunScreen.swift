@@ -6,7 +6,8 @@ import SwiftData
 struct FolderRunScreen: View {
     @Environment(PlayerService.self) private var player
     @Environment(\.modelContext) private var context
-    var folder: PodcastFolder? = nil
+    @Query private var folders: [PodcastFolder]
+    private let folderID: PersistentIdentifier?
     @State private var confirmStart = false
     @State private var confirmPlayback = false
     @State private var replacementID: UUID?
@@ -14,6 +15,10 @@ struct FolderRunScreen: View {
     @State private var requestedPreparation = false
     @AccessibilityFocusState private var focusedHeading: Bool
 
+    init(folder: PodcastFolder? = nil) { folderID = folder?.persistentModelID }
+
+    // Resolve from live rows, never dereference a retained model after deletion.
+    private var folder: PodcastFolder? { folders.first { $0.persistentModelID == folderID } }
     private var run: FolderRunController { player.folderRuns }
     private var targetName: String { folder?.isDeleted == false ? folder?.name ?? "Folder" : "Folder" }
 
