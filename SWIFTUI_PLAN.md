@@ -34,6 +34,51 @@ run. Required next gate: Xcode tests, physical-device VoiceOver, then a
 pre-merge test build. Do not merge or close issues until Michael verifies.
 No signing, schema, purchase, reset, or release-number changes in this batch.
 
+## September 5, 2026: Mac compilation of player hints (#948)
+
+Xcode 26.6 / Swift 6.3.3 simulator Debug build succeeded. Required
+Earshot accessibility source gate passed: existing labels, actions, and
+Play/Pause semantics remain intact. Native integrated tests and physical
+VoiceOver verification with hints on/off remain pending. No release or merge.
+
+## September 5, 2026: player action discovery (#948)
+
+Michael authorized work on post-1.2.1 feedback. Added concise discovery hints
+on Skip back, Skip forward, and artwork; all existing labels/actions and
+Play/Pause behavior remain intact. Play/Pause has no hidden action to explain.
+Hints are guidance only; actions still work when VoiceOver hints are disabled.
+Coordinate with #949 navigation additions; avoid duplicating system-provided
+"Actions available" wording. Source-reviewed only: this workspace has no
+Xcode/Swift or iPhone. Run native tests and verify hints on/off and action order
+on device before merging. No issue closure or distribution performed here.
+
+## September 5, 2026: personal podcast display names (#947)
+
+Implemented on codex/947-podcast-names. Podcast Settings opens a draft name
+editor with Save, Cancel, and Restore original name. Blank names are rejected;
+save failures keep the editor open. Publisher title remains refresh-owned and
+unchanged. Followed-podcast presentation uses an observed in-memory name map,
+loaded only at settings initialization/import or explicit rename, so row reads
+never fetch settings or episodes. Library sorts by effective name; local and
+podcast-detail searches accept both personal and publisher names. Player and
+Queue group speech use effective names. Directory/catalog-only titles stay
+publisher-owned. Shared files/text (OPML, audio/transcript exports, CSV, and
+Listening Places labels) retain publisher names for portability.
+
+Persistence decision: canonical-feed-keyed AppSetting, mirrored through the
+existing private CloudSettingProjection contract, no new schema/entity/field.
+Normal newest-modified contribution wins; ties use existing source-device ID
+then value ordering. Restore writes an explicit empty value, not row deletion,
+so stale contributions cannot revive an older override. Followed-feed scoping
+applies to publication, activation, and imports. No new CloudKit schema rollout.
+
+Initial native gates passed 61 tests (one pre-existing intentional search
+capability skip), including schema drift, editor logic, and search. Source
+accessibility review found and fixed podcast-detail search invalidation and
+refresh-failure row names. Added disk-reopen, two-device projection/restore,
+local-name search, 10k-episode cached lookup, and editor UI coverage; final
+rerun/integrated tests pending. Physical VoiceOver and TestFlight remain
+pending. No main merge, issue closure, purchase/reset/signing or #944 changes.
 
 > **2026-07-30 — restructure.** SwiftUI is now the primary codebase and the app
 > lives at the **repo root** (it was under `EarshotSwift/` while this plan was

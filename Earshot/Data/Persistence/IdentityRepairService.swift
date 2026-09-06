@@ -197,6 +197,7 @@ enum AppSettingIdentity {
         for prefix in [
             SettingsKey.podcastFilterPrefix,
             SettingsKey.podcastInboxCapPrefix,
+            SettingsKey.podcastDisplayNamePrefix,
             SettingsKey.episodeFilterConfigurationPrefix,
         ]
         where rawKey.hasPrefix(prefix) {
