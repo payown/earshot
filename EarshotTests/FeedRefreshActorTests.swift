@@ -22,6 +22,74 @@ private final class SaveFailureProbe {
 /// `ModelContext`.
 @MainActor
 final class FeedRefreshActorTests: XCTestCase {
+    func testRealRefreshEnforcesInboxCountAcrossPagesWithoutDeletingDownloads() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = ModelContext(container)
+        let now = Date.now
+        let url = "https://example.com/hourly"
+        let podcast = Podcast(feedURL: url, title: "Hourly", lastSeenPubDate: now.addingTimeInterval(-60))
+        podcast.inboxMaxEpisodes = 1
+        podcast.inboxAgeLimitHours = nil
+        context.insert(podcast)
+        for index in 0..<205 {
+            let episode = Episode(guid: "hour-\(index)", title: "Hour", audioURL: "https://example.com/\(index).mp3",
+                                  pubDate: now.addingTimeInterval(-Double(206 - index) * 3_600))
+            episode.podcast = podcast
+            context.insert(episode)
+            context.insert(LocalEpisodeState(podcastFeedURL: url, episodeGUID: episode.guid,
+                                             downloadStatus: .downloaded, downloadPath: "retained-\(index).mp3"))
+        }
+        try context.save()
+        let feed = FakeFeed(ParsedFeed(title: "Hourly", episodes: [
+            ParsedEpisode(guid: "latest", title: "Latest", audioURL: "https://example.com/latest.mp3",
+                          description: nil, pubDate: now.addingTimeInterval(-30), durationSeconds: nil)
+        ]))
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: url, feed: feed, autoQueueEnabled: false)
+        let rows = try ModelContext(container).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(rows.count, 206)
+        XCTAssertEqual(rows.filter { !$0.inboxDismissed }.map(\.guid), ["latest"])
+        let downloads = try ModelContext(container).fetch(FetchDescriptor<LocalEpisodeState>())
+        XCTAssertEqual(downloads.filter { $0.downloadPath != nil }.count, 205)
+        XCTAssertTrue(rows.allSatisfy { !$0.isPlayed })
+        XCTAssertEqual(outcome?.inboxDismissedEpisodeIDs.count, 205)
+        XCTAssertEqual(outcome?.added, 1)
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<QueueItem>()), 0)
+    }
+
+    func testUnchangedRefreshAppliesCountAndAgeButRespectsUnlimitedAndExcludedShows() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = ModelContext(container)
+        let now = Date.now
+        for name in ["count", "age", "unlimited", "excluded"] {
+            let podcast = Podcast(feedURL: "https://example.com/\(name)", title: name, lastSeenPubDate: now)
+            podcast.inboxMaxEpisodes = (name == "count" || name == "excluded") ? 1 : nil
+            podcast.inboxAgeLimitHours = name == "age" ? 24 : nil
+            podcast.inboxExcluded = name == "excluded"
+            context.insert(podcast)
+            for index in 0..<6 {
+                let episode = Episode(guid: "\(name)-\(index)", title: name, audioURL: "https://example.com/audio.mp3",
+                                      pubDate: now.addingTimeInterval(-Double(48 + index) * 3_600))
+                episode.podcast = podcast
+                if name == "age", index == 0 { episode.positionSeconds = 30 }
+                context.insert(episode)
+            }
+        }
+        try context.save()
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: NotModifiedFeed(validators: FeedHTTPValidators(etag: nil, lastModified: nil, representationURL: nil)),
+            autoQueueEnabled: false, isCancelled: { false }, onProgress: { _, _ in })
+        XCTAssertEqual(report.failed, 0)
+        XCTAssertEqual(report.results.count, 4)
+        XCTAssertTrue(report.results.allSatisfy(\.wasNotModified))
+        let rows = try ModelContext(container).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(rows.filter { $0.guid.hasPrefix("count-") && !$0.inboxDismissed }.count, 1)
+        XCTAssertEqual(rows.filter { $0.guid.hasPrefix("age-") && !$0.inboxDismissed }.map(\.guid), ["age-0"])
+        XCTAssertEqual(rows.filter { $0.guid.hasPrefix("unlimited-") && !$0.inboxDismissed }.count, 6)
+        XCTAssertEqual(rows.filter { $0.guid.hasPrefix("excluded-") && !$0.inboxDismissed }.count, 6)
+        XCTAssertEqual(report.results.reduce(0) { $0 + $1.outcome.inboxDismissedEpisodeIDs.count }, 10)
+    }
+
 
     func testSwiftDataContextStateAfterRealSaveDisabledFailure() throws {
         let schema = Schema([SaveFailureProbe.self])

@@ -106,6 +106,7 @@ struct RefreshOutcome: Sendable {
     var newestNewEpisodeGUID: String?
     var newEpisodeIDs: [PersistentIdentifier] = []
     var inboxReentryEpisodeIDs: [PersistentIdentifier] = []
+    var inboxDismissedEpisodeIDs: [PersistentIdentifier] = []
     var filteredCount = 0
     var rejectedAllNewCandidates = false
     var keptOverflowCount = 0
@@ -535,7 +536,7 @@ extension SubscriptionRepository {
         mergeBackgroundWrites(
             affectedPodcastIDs: reconcileEpisodeModels ? [podcast.persistentModelID] : []
         )
-        publishInboxReentries(outcome.inboxReentryEpisodeIDs)
+        publishInboxReentries(outcome.inboxReentryEpisodeIDs + outcome.inboxDismissedEpisodeIDs)
         // Refresh-time auto-queue mutates the queue on the background actor, so
         // QueueRepository never gets a chance to publish its normal change
         // notification. Notify after the durable save and main-context merge so
@@ -637,6 +638,7 @@ extension SubscriptionRepository {
                         $0.outcome.added > 0 || $0.outcome.filteredCount > 0
                             || $0.outcome.metadataUpdatedCount > 0
                             || !$0.outcome.inboxReentryEpisodeIDs.isEmpty
+                            || !$0.outcome.inboxDismissedEpisodeIDs.isEmpty
                     }
                     .compactMap {
                         self.podcast(forFeedURL: $0.feedURL)?.persistentModelID
@@ -650,7 +652,7 @@ extension SubscriptionRepository {
                     self.mergeBackgroundWrites(affectedPodcastIDs: affectedIDs)
                 }
                 self.publishInboxReentries(
-                    checkpoint.flatMap { $0.outcome.inboxReentryEpisodeIDs }
+                    checkpoint.flatMap { $0.outcome.inboxReentryEpisodeIDs + $0.outcome.inboxDismissedEpisodeIDs }
                 )
                 let newEpisodeIDGroups = checkpoint
                     .map { $0.outcome.newEpisodeIDs }
@@ -969,9 +971,9 @@ extension SubscriptionRepository {
         return (try? context.fetch(descriptor))?.first
     }
 
-    /// A republished episode deliberately re-enters Inbox. Project that false
-    /// dismissal with a fresh clock so it wins over an older explicit removal
-    /// on another device; ordinary new/backlog rows never enter this path.
+    /// Publish durable Inbox membership changes from refresh: republished
+    /// entries and dismissals caused by the user's count/age policy. Ordinary
+    /// new/backlog rows never enter this path.
     private func publishInboxReentries(_ episodeIDs: [PersistentIdentifier]) {
         let episodes = episodeIDs.compactMap(episode(forPersistentID:))
         guard !episodes.isEmpty else { return }
@@ -979,6 +981,7 @@ extension SubscriptionRepository {
             episodes,
             inboxDismissedChangedExplicitly: true
         )
+        NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
     }
 
     /// Current podcast count for the free-tier cap check (#635). Unlike the
