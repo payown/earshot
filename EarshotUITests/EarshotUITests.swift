@@ -210,12 +210,24 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(mark.isHittable)
         XCTAssertEqual(app.buttons.matching(identifier: "Mark as played").count, 1)
         let bookmarks = app.buttons["Bookmarks"].firstMatch
-        // A partially visible List row can report hittable while its center
-        // is clipped below the pinned Done area. Bring the whole row into view.
-        for _ in 0..<6 where !bookmarks.isHittable || bookmarks.frame.maxY > app.buttons["Done"].frame.minY {
-            app.swipeUp()
+        // Hittable can also include a row clipped UNDER the navigation bar.
+        // Large flicks can overshoot Bookmarks, placing its tap center in the
+        // header. Use short, directed drags to reveal the entire target.
+        let optionsList = app.collectionViews.firstMatch
+        let navigationBar = app.navigationBars["More options"]
+        for _ in 0..<12 {
+            let top = navigationBar.frame.maxY + 4
+            let bottom = app.buttons["Done"].frame.minY - 4
+            if bookmarks.isHittable && bookmarks.frame.minY >= top && bookmarks.frame.maxY <= bottom { break }
+            let direction = bookmarks.exists && bookmarks.frame.minY < top ? 0.25 : -0.25
+            optionsList.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.1,
+                       thenDragTo: optionsList.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5 + direction)),
+                       withVelocity: .slow, thenHoldForDuration: 0.2)
         }
         XCTAssertTrue(bookmarks.isHittable)
+        XCTAssertGreaterThanOrEqual(bookmarks.frame.minY, navigationBar.frame.maxY)
+        XCTAssertLessThanOrEqual(bookmarks.frame.maxY, app.buttons["Done"].frame.minY)
         bookmarks.tap()
         XCTAssertTrue(app.navigationBars["Bookmarks"].waitForExistence(timeout: 5), app.debugDescription)
     }
