@@ -6,6 +6,31 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testPodcastNameEditorSavesAndRestoresPublisherName() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+        let settings = app.buttons["Podcast settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        let rename = app.buttons["Rename podcast"].firstMatch
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        let originalName = rename.value as? String
+        rename.tap()
+        let field = app.textFields["Podcast name"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        let existing = field.value as? String ?? ""
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count) + "Personal Podcast")
+        app.buttons["Save"].firstMatch.tap()
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        XCTAssertEqual(rename.value as? String, "Personal Podcast")
+        rename.tap()
+        app.buttons["Restore original name"].firstMatch.tap()
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        XCTAssertEqual(rename.value as? String, originalName)
+    }
+
     func testSeededLibraryLaunchAndTabNavigationSmoke() {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -82,4 +107,21 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Drama"].firstMatch.exists)
         XCTAssertTrue(app.buttons["Science Fiction"].firstMatch.exists)
     }
+    func testPlayerQueueActionsRemainAvailableInVisibleMenu() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        app.launch()
+        let actions = app.buttons["Episode actions"].firstMatch
+        XCTAssertTrue(actions.waitForExistence(timeout: 10))
+        let skipBack = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Skip back")).firstMatch
+        let skipForward = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Skip forward")).firstMatch
+        XCTAssertTrue(skipBack.exists)
+        XCTAssertTrue(skipForward.exists)
+        actions.tap()
+        XCTAssertTrue(app.buttons["Previous in Queue"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Next in Queue"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["Mark as played and next in Queue"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["Mark as played"].firstMatch.exists)
+    }
+
 }

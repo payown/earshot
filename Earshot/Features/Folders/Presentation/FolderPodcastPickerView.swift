@@ -44,7 +44,7 @@ struct FolderPodcastPickerView: View {
         } label: {
             HStack(spacing: Spacing.md) {
                 PodcastArtwork(urlString: podcast.artworkURL)
-                Text(podcast.title)
+                Text(podcast.displayName)
                     .font(.headline)
                     .foregroundStyle(.primary)
                 Spacer(minLength: Spacing.sm)
@@ -57,7 +57,7 @@ struct FolderPodcastPickerView: View {
         // row is activated, so membership state is never silent. `.isSelected`
         // reflects current state for the rotor. The visual checkmark stays as a
         // second, non-color signal.
-        .accessibilityLabel(podcast.title)
+        .accessibilityLabel(podcast.displayName)
         .accessibilityHint(isIn ? "Removes from folder" : "Adds to folder")
         .accessibilityAddTraits(isIn ? [.isToggle, .isSelected] : [.isToggle])
     }

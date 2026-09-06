@@ -411,7 +411,7 @@ struct InboxScreen: View {
             Button("Unfollow", role: .destructive) { unfollow(podcast) }
             Button("Cancel", role: .cancel) { pendingUnfollow = nil }
         } message: { podcast in
-            Text("This removes \(podcast.title) and its episodes from your library. This can't be undone.")
+            Text("This removes \(podcast.displayName) and its episodes from your library. This can't be undone.")
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
@@ -687,7 +687,7 @@ struct InboxScreen: View {
     /// inbox automatically; if that empties the inbox the focused row is gone, so
     /// move VoiceOver focus to the empty state (mirrors `clearInbox`).
     private func unfollow(_ podcast: Podcast) {
-        let title = podcast.title
+        let title = podcast.displayName
         let removed = SubscriptionRepository(context: context).unsubscribe(podcast)
         pendingUnfollow = nil
         guard removed else { return }

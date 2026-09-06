@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import Observation
 
 /// A subscribed podcast feed. Mirrors the Flutter drift `podcasts` table.
 @Model
@@ -111,5 +112,86 @@ final class Podcast {
         self.episodes = []
         self.listeningSessions = []
         self.folderMemberships = []
+    }
+}
+
+// Personal names are existing mirrored AppSetting values, never feed metadata.
+// Empty string is an explicit restore, so a stale device cannot revive a name
+// merely because the local preference row was deleted.
+enum PodcastNamePolicy {
+    static func normalized(_ value: String?) -> String? {
+        guard let name = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return nil }
+        return name
+    }
+
+    static func snapshot(context: ModelContext) throws -> [String: String] {
+        let prefix = SettingsKey.podcastDisplayNamePrefix
+        let rows = try context.fetch(FetchDescriptor<AppSetting>(
+            predicate: #Predicate { $0.key.starts(with: prefix) }
+        ))
+        var names: [String: String] = [:]
+        var seen: Set<String> = []
+        for row in rows.sorted(by: { String(describing: $0.persistentModelID) < String(describing: $1.persistentModelID) }) {
+            let feed = FeedURLIdentity.canonical(String(row.key.dropFirst(prefix.count)))
+            guard seen.insert(feed).inserted else { continue }
+            names[feed] = normalized(row.value)
+        }
+        return names
+    }
+}
+
+@MainActor
+@Observable
+final class PodcastDisplayNames {
+    static let shared = PodcastDisplayNames()
+    private(set) var names: [String: String] = [:]
+
+    func reload(context: ModelContext) {
+        do {
+            let loaded = try PodcastNamePolicy.snapshot(context: context)
+            if names != loaded { names = loaded }
+        } catch {
+            AppLog.data.error("Could not load custom podcast names: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func save(_ name: String?, for podcast: Podcast, context: ModelContext) throws {
+        let key = SettingsKey.podcastDisplayName(feedURL: podcast.feedURL)
+        let value: String
+        if let name {
+            guard let normalized = PodcastNamePolicy.normalized(name) else { throw NameError.empty }
+            value = normalized
+        } else {
+            value = ""
+        }
+        do {
+            try AppSettingIdentity.setValue(value, for: key, in: context)
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        reload(context: context)
+        NotificationCenter.default.post(name: .earshotMirroredSettingDidChange, object: key)
+        NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
+        NotificationCenter.default.post(name: .earshotPodcastNamesDidChange, object: nil)
+    }
+
+    enum NameError: LocalizedError {
+        case empty
+        var errorDescription: String? { "Enter a podcast name." }
+    }
+}
+
+extension Notification.Name {
+    static let earshotPodcastNamesDidChange = Notification.Name("earshotPodcastNamesDidChange")
+}
+
+extension Podcast {
+    /// Constant-time presentation lookup, with no database work in row bodies.
+    @MainActor var displayName: String {
+        guard isFollowed else { return title }
+        return PodcastDisplayNames.shared.names[FeedURLIdentity.canonical(feedURL)] ?? title
     }
 }

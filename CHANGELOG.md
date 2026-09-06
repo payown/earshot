@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Optional Queue wrapping continues from the first remaining unplayed episode after the last finishes. Off by default; stop preferences and sleep timers still apply. (#950)
+- Player actions now offer Previous in Queue, Next in Queue, and Mark as played and next in Queue. Previous/Next preserve skipped episodes and their saved places. (#949)
+- Followed podcasts can have personal display names, with an option to restore the publisher name. Names survive refresh, sync through private iCloud, and work in Library sorting and local search. (#947)
 
 - Add Podcast now includes expandable Apple Podcasts categories and subcategories. Category results use the same podcast details and Follow or Unfollow actions as search results.
 - Podcast descriptions in search and category results now follow the Podcast list details preference under Accessibility, including Off, Brief, and Full modes.
@@ -20,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Silence trimming now compacts silent passages during playback, with a global setting and per-podcast override. Saved episode positions remain in the original media timeline. (#570)
 
 ### Changed
+
+- Player Skip back, Skip forward, and episode artwork now explain where to find their additional VoiceOver actions. (#948)
 
 - Add Podcast places search directly below its heading before the RSS-feed option. VoiceOver announces the result count once instead of repeating a position on every podcast, and expandable categories no longer carry a redundant heading trait.
 - Removed the Voice Enhance setting because it selected a spoken-audio session mode and mono output but did not perform speech-enhancement processing. Playback continues to use stereo output and the stable time-stretch algorithm.

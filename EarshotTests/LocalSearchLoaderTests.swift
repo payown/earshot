@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class LocalSearchLoaderTests: XCTestCase {
+    func testCustomAndPublisherNamesBothFindFollowedPodcast() async throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://names.example/feed", title: "Publisher Audio")
+        context.insert(podcast)
+        try context.save()
+        try PodcastDisplayNames.shared.save("Personal Podcast", for: podcast, context: context)
+        let loader = LocalPodcastSearchLoader(modelContainer: context.container)
+        let custom = try await loader.page(query: "Personal", limit: 100)
+        let publisher = try await loader.page(query: "Publisher", limit: 100)
+        XCTAssertEqual(custom.ids, [podcast.persistentModelID])
+        XCTAssertEqual(publisher.ids, [podcast.persistentModelID])
+    }
+
     func testAddPodcastPlanAndLoaderSetNeverCreateEpisodeOrBookmarkLoaders() {
         let plan = LocalSearchLoaderPlan(scope: .addPodcast)
         XCTAssertTrue(plan.loadsPodcasts)
