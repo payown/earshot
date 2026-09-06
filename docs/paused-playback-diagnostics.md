@@ -57,3 +57,11 @@ Reading the simulator cache confirmed timestamped diagnostic events are actually
 written. The reserved CI simulator was not used. A compile-time mistake in the
 first new test was corrected to assert the public presentation state; deprecated
 interruption constants were removed before this final run.
+
+Signed Release build and strict signature verification passed. Direct Wi-Fi
+installation and normal launch succeeded on September 6, 2026; installed app
+query confirmed 1.2.2 (257). No uninstall, reset, upload, or debugger attachment
+was performed. Wireless cache retrieval succeeded at
+`/tmp/earshot-paused-diagnostics-phone-baseline/events.log`, showing configure
+followed by restored paused playback with metadata and a loaded player item.
+The actual delayed-loss reproduction remains for Michael to perform.
