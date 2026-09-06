@@ -2,23 +2,179 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
-## September 5, 2026: optional Queue wrapping (#950)
+## September 5, 2026: feedback batch complete, approved and unreleased
 
-Implemented on codex/950-queue-wrap. Default-off Wrap Queue to remaining
-episodes uses the displayed grouped order, then excludes completed items.
-Only natural completion and preload use wrapping; explicit Previous/Next and
-mark-and-next remain nonwrapping. Continue-after-episode and group stops,
-Stop after this episode, and sleep timers take precedence. Countdown timers
-survive automatic advancement; expiration invalidates pending media resolution
-and cannot be cancelled by an automatic start. Manual-start timer policy stays
-unchanged. This is normal Queue policy only; #944 folder runs remain deferred.
+Michael approved the final middle-position Player layout and the complete
+#947–#951 feedback batch after testing local 1.2.2 (255) on his iPhone. He
+explicitly authorized merging the five PRs and closing resolved issues after
+remaining gates pass. Earlier pending-device statements below are historical
+and superseded by this approval.
 
-The preference uses the existing mirrored scalar-setting contract. No schema,
-signing, reset, purchase, or folder-run changes. Source accessibility gate
-passed after correcting order-before-filtering and timer-expiry races. Native
-focused tests: 172 passed on Xcode 26.6 / iOS 26.5 before final additional
-unusable-target/completion-save guards; rerun and integrated suite pending.
-Device VoiceOver and integrated pre-merge TestFlight remain pending. No merge.
+- #947 / #952: personal podcast display names, refresh preservation and restore.
+- #948 / #953: concise Player VoiceOver discovery hints.
+- #949 / #954: explicit Previous/Next Queue actions preserving skipped episodes.
+- #950 / #955: default-off wrapping with completed-item and sleep-timer guards.
+- #951 / #956: navigation cleanup and the approved middle-position Player.
+
+Required accessibility source reviews passed for all five PRs; conflict
+resolution reviews preserved the combined hints, Queue actions, wrapping and
+timer behavior. Native integration validation passed 2,265 tests with 29
+intentional skips, followed by 183 focused playback/Queue/timer tests and
+standard/largest-text layout and interaction checks on SE and Pro Max. Full
+GitHub CI is required on each updated PR before merge. Merge order is #952,
+#953, #954, #955, then #956. Final app source is compared with approved
+integration 8b7759d / installed app code 69bf17f to preserve device-tested code.
+
+All batch implementation and device verification work is complete. Changes
+remain under Unreleased in CHANGELOG.md. Version/build remains 1.2.2 (255);
+no TestFlight upload, App Store submission, tag or release publication.
+Distribution requires separate authorization. Kashe Chapter 82 remains staged
+and unshipped, with no distribution build assigned; canonical shipped chapters
+are unchanged. Folder-wide oldest-first playback #944 remains deferred.
+
+## September 5, 2026: middle Player placement trial (#951)
+
+Michael requested a focused comfort trial near the vertical middle. The simplest
+layout shares remaining height between two flexible ScrollViews around the
+unchanged playback area. Artwork/title scroll above; errors, chapters, speed,
+timer and transcript scroll below. This reuses lower space for content instead
+of adding a blank spacer. No device coordinate, content-based position, overlay,
+or accessibility sort priority is used. Playback position remains above transport,
+with native AirPlay and always-present Show notes side by side underneath.
+Targets, actions, header, options and focus restoration are unchanged. At
+accessibility text sizes below an 800pt available-height budget, one combined
+scroll region above stable playback preserves usable content space. The fallback
+depends on viewport/text settings, not device identity or episode content.
+
+Required earshot-accessibility source gate PASS. Initial native/UI run passed:
+183 playback/Queue/sleep-timer tests; five SE UI flows and three Pro Max flows.
+Both normal/AX5 geometry checks preserved positions through long titles, missing
+artwork, late chapters, errors, folder context, timer and notes-availability
+changes. Final adaptive-layout checks passed on SE and Pro Max at standard/AX5 text,
+including title and lower-detail reachability. An added title test initially
+flicked past the heading on SE AX5; short directed drags corrected the test
+and confirmed reachability. This test failure did not prove a product defect.
+The compact AX fallback provides a single usable scrolling region.
+
+Measured Play/Pause center, in screen points: Pro Max standard text 806 -> 520
+(286pt higher, on a 956pt screen); AX5 about 731.83 -> 544.5. SE standard text
+551 -> 376.5; AX5 retains the previous lower placement through the fallback.
+Signed Release 1.2.2 (255), app code 69bf17f, passed signature verification
+and was installed/launched over Wi-Fi; running process verified. Physical
+comfort at Michael’s actual text setting is not inferred from simulator measurements. This remains a trial,
+awaiting his iPhone VoiceOver verification; no merge/closure/TestFlight/release.
+
+## September 5, 2026: bottom Player row (#951)
+
+Michael requested a focused comfort adjustment: playback position remains above
+transport, with native audio destination and Show notes side by side underneath.
+Moved the existing controls out of the scrolling content. Show notes retains
+its label and footprint when unavailable, using native disabled semantics and
+an explanatory hint. The row wraps its text at larger sizes without changing
+layout based on episode content. Existing header, options, artwork/actions,
+slider interaction and focus restoration are preserved. iPhone remains portrait
+only; the short-height horizontal slider/transport variant was removed to keep
+the explicitly requested order.
+
+Required earshot-accessibility source gate PASS. SE measured normal-text frames:
+slider y443 h56; Play/Pause y511 h80; skips y519 h64; bottom row y603 h56.
+SE AX5: slider y363 h56; Play/Pause y431 h90.5; skips y440.5 h72;
+Show notes y533.5 h125.5, native AirPlay y568.5 h56. The text-driven row height
+is stable when notes disappear. Both initial SE stability/slider tests passed
+with long titles, late chapters, missing artwork, folder context, errors, timers
+and notes becoming unavailable. Final stability and scroll-access reruns passed
+on SE and Pro Max at standard/AX5 text. The added scroll test initially selected
+the mini-player's hidden Extend button; scoping to the full Player resolved it.
+Current checks total eight UI flows across the two devices, plus 168 playback/
+Queue tests and 15 sleep-timer tests, all passing. Show notes activation and the
+native AirPlay button's bounds/hit-test availability passed. The simulator did
+not expose the system audio-destination sheet; destination selection and physical
+VoiceOver accuracy/focus/comfort remain device checks.
+
+Pro Max normal: slider y698 h56; Play/Pause y766 h80 (center 806); bottom row
+y858 h56, leaving 42pt below the controls. AX5: Play/Pause y687 h89.67;
+notes y788.67 h125.33; AirPlay y823.33 h56. Frames are in screen points.
+Signed Release 1.2.2 (255), app code 6817eea, was installed and launched over Wi-Fi;
+the running process was verified. No merge, issue closure, release or TestFlight.
+
+## September 5, 2026: anchored Player refinement (#951)
+
+Michael explicitly requested stable physical transport positions. Implemented in
+feedback-integration, to be carried into the existing #951 branch/PR #956.
+Header (Close, Now Playing, More options), scrolling episode content, and bottom
+playback dock are layout siblings. The dock reserves space instead of covering
+content; optional chapters, timers, folder context and errors remain in the
+scroll region. Artwork stays visible at 140pt with its existing VoiceOver stop
+and custom actions. Transport targets remain 64/80/64pt. The 56pt slider region
+uses a full-height native UIControl with native slider rendering and the existing
+spoken adjustable representation. Actual coordinate taps exposed UISlider's
+narrow gesture region, so a wrapper frame alone was rejected. Elapsed time still
+previews the drag destination; seeking persists once at release.
+
+Removed the delayed initial title-focus request; system opening focus can no
+longer be overridden after interaction starts. Existing sheet-return focus is
+preserved. No accessibility sort priority disguises the visual order. iPhone
+orientation remains portrait as configured; short-height layouts adapt the dock
+horizontally without changing the orientation policy.
+
+Required earshot-accessibility source gate PASS after restoring draft-time
+preview, forwarding disabled state, and checking complete adaptive clocks.
+SE standard/AX5 native coordinate edge-tap and dynamic-content stability tests
+passed; the final Pro Max iOS 27 standard/AX5 checks also passed, including
+artwork reachability, full scroll-content access and header bounds. Full native
+unit suite: 2,265 tests, 29 skipped, zero failures (StoreKit suites excluded).
+Signed Release 1.2.2 (255), code revision 97bef25, installed and launched over
+the paired Wi-Fi connection on Michael’s iPhone; running process verified.
+Final SE UI run: all seven flows passed (standard/AX5 stability and slider
+edge taps, standard/AX5 options/Bookmarks, names, Queue actions, Clear Queue
+cancellation). Physical iPhone VoiceOver focus and explore-by-touch accuracy
+remain Michael’s acceptance checks. No main merge, issue closure, TestFlight upload or release.
+
+## September 5, 2026: iPhone feedback follow-up (#951)
+
+Michael verified names, Queue navigation/wrapping and timers, Library/Settings,
+Clear Queue cancellation, and improved hints. He requests one More options
+entry and more accurate/larger Player touch targets before merge. Consolidated
+episode commands and playback settings in a native List sheet, removed the
+duplicate chapter entry, and retained direct chapter/transport and rotor access.
+Play/Pause now has an 80pt label target, skips 64pt, and secondary buttons at
+least 44pt. Native testing exposed a 36pt toolbar accessibility frame, so Close
+and More options now use a reserved header inset and Done a reserved bottom
+inset. Chapter access remains direct before the first chapter; options-origin
+Bookmarks/share dismissal explicitly returns focus to More options.
+Required accessibility source gate passed. Selected playback/speed tests: 90
+passed; sleep-timer logic/controller: 15 passed. Five existing integrated UI
+flows passed. Small-screen SE geometry, near-edge More options activation and
+Bookmarks presentation passed at standard and AX5 text. Pro final rerun also passed at both sizes.
+The UI harness was corrected to identify full-player rather than mini-player
+controls, and to fully scroll lazy/partly clipped rows into view before tapping.
+Final signed Release 1.2.2 (255) refinement installed over Wi-Fi on September 5.
+No TestFlight upload, issue closure, release or main merge; await Michael’s
+verification of the new menus and touch areas.
+
+## September 5, 2026: delivery changed to direct iPhone installation
+
+Michael requested Wi-Fi installation on his iPhone before TestFlight. No
+TestFlight upload has occurred or is authorized for this step. Keep the build
+number at 255; version 1.2.2 identifies the integration. Use a signed Release
+build and devicectl over the paired local-network connection. Final Release
+build and signature checks passed; 1.2.2 (255) was installed and launched on
+Michael’s iPhone over Wi-Fi on September 5. The proposed
+Chapter 82 remains a draft outside the canonical story until distribution.
+The full simulator native suite passed 2,264 tests, with 29 skips and zero
+failures. Final playback/media follow-up passed 73 tests; the final name identity
+assertion also passed. Four of five selected UI flows passed initially; the
+Queue-clear flow exposed an unreachable Cancel in confirmationDialog. Replaced
+it with a native alert and reran that flow successfully. The required source
+accessibility gate passed again for the final alert. Physical VoiceOver is
+still pending. No main merge,
+issue closure, or release before Michael verifies on his iPhone.
+
+Draft PRs assigned to payown: #952 (names), #953 (hints), #954 (Queue
+navigation), #955 (wrapping), and #956 (navigation cleanup). Each targets main;
+none is merged. The integrated device checklist is in
+`docs/feedback-device-test-2026-09-05.md`.
+
 ## September 5, 2026: Mac validation of Queue navigation (#949)
 
 Xcode 26.6 / Swift 6.3.3: 163 PlaybackLogicTests and AdvancedPlaybackTests
@@ -50,7 +206,6 @@ workspace. Xcode and Swift are unavailable, so added XCTest coverage has not
 run. Required next gate: Xcode tests, physical-device VoiceOver, then a
 pre-merge test build. Do not merge or close issues until Michael verifies.
 No signing, schema, purchase, reset, or release-number changes in this batch.
-
 ## September 5, 2026: Mac compilation of player hints (#948)
 
 Xcode 26.6 / Swift 6.3.3 simulator Debug build succeeded. Required
@@ -68,7 +223,23 @@ Coordinate with #949 navigation additions; avoid duplicating system-provided
 "Actions available" wording. Source-reviewed only: this workspace has no
 Xcode/Swift or iPhone. Run native tests and verify hints on/off and action order
 on device before merging. No issue closure or distribution performed here.
+## September 5, 2026: optional Queue wrapping (#950)
 
+Implemented on codex/950-queue-wrap. Default-off Wrap Queue to remaining
+episodes uses the displayed grouped order, then excludes completed items.
+Only natural completion and preload use wrapping; explicit Previous/Next and
+mark-and-next remain nonwrapping. Continue-after-episode and group stops,
+Stop after this episode, and sleep timers take precedence. Countdown timers
+survive automatic advancement; expiration invalidates pending media resolution
+and cannot be cancelled by an automatic start. Manual-start timer policy stays
+unchanged. This is normal Queue policy only; #944 folder runs remain deferred.
+
+The preference uses the existing mirrored scalar-setting contract. No schema,
+signing, reset, purchase, or folder-run changes. Source accessibility gate
+passed after correcting order-before-filtering and timer-expiry races. Native
+focused tests: 172 passed on Xcode 26.6 / iOS 26.5 before final additional
+unusable-target/completion-save guards; rerun and integrated suite pending.
+Device VoiceOver and integrated pre-merge TestFlight remain pending. No merge.
 ## September 5, 2026: personal podcast display names (#947)
 
 Implemented on codex/947-podcast-names. Podcast Settings opens a draft name
@@ -96,6 +267,26 @@ refresh-failure row names. Added disk-reopen, two-device projection/restore,
 local-name search, 10k-episode cached lookup, and editor UI coverage; final
 rerun/integrated tests pending. Physical VoiceOver and TestFlight remain
 pending. No main merge, issue closure, purchase/reset/signing or #944 changes.
+## September 5, 2026: navigation cleanup (#951)
+
+Implemented on codex/951-navigation-cleanup. Library toolbar goes from six
+controls to five: Search, Folders, Refresh, Library options, Discover. Sort and
+Select move under Library options; current sort is still spoken and Done stays
+direct while selecting. Frequent refresh and existing per-row rotor actions
+remain direct. Queue options has Organization, Downloads, Saved lineup, and
+separate Clear queue groups. Clearing requires confirmation for the entire
+Queue, explains download retention, and announces success only after saving;
+focus returns to the Queue heading. Player options now consistently names its
+opener and sheet and hints at sleep timer, volume boost, and chapters.
+Settings destinations are grouped into Listening, Personalization, Library and
+sync, and Help and privacy. Purchase UI is unchanged.
+
+Task audit: Inbox and podcast details retain their current search, filters,
+row actions, and settings entry points; no extra hierarchy was added there.
+Source accessibility review passed. Simulator build-for-testing succeeded;
+Queue-clear UI regression and full integrated tests pending. Physical checks:
+Explore by Touch, swipe order, menu dismissal focus, largest Dynamic Type,
+and hints enabled/disabled. No merge, issue closure, or release.
 
 > **2026-07-30 — restructure.** SwiftUI is now the primary codebase and the app
 > lives at the **repo root** (it was under `EarshotSwift/` while this plan was

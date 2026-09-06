@@ -40,14 +40,7 @@ struct SettingsScreen: View {
                 }
             }
 
-            Section {
-                NavigationLink {
-                    AccessibilitySettingsView()
-                } label: {
-                    Label("Accessibility", systemImage: "accessibility")
-                }
-                .accessibilityHint("Choose what VoiceOver speaks in episode and podcast lists")
-
+            Section("Listening") {
                 NavigationLink {
                     PlaybackSettingsView()
                 } label: {
@@ -70,6 +63,21 @@ struct SettingsScreen: View {
                 .accessibilityHint("Wi-Fi restriction and auto-download")
 
                 NavigationLink {
+                    HistorySettingsView()
+                } label: {
+                    Label("History & Stats", systemImage: "clock")
+                }
+                .accessibilityHint("Listening stats and how long history is kept")
+            }
+            Section("Personalization") {
+                NavigationLink {
+                    AccessibilitySettingsView()
+                } label: {
+                    Label("Accessibility", systemImage: "accessibility")
+                }
+                .accessibilityHint("Choose what VoiceOver speaks in episode and podcast lists")
+
+                NavigationLink {
                     AppearanceSettingsView()
                 } label: {
                     Label("Appearance", systemImage: "paintpalette")
@@ -82,14 +90,8 @@ struct SettingsScreen: View {
                     Label("Quick Actions", systemImage: "bolt")
                 }
                 .accessibilityHint("Choose and reorder the episode and queue actions")
-
-                NavigationLink {
-                    HistorySettingsView()
-                } label: {
-                    Label("History & Stats", systemImage: "clock")
-                }
-                .accessibilityHint("Listening stats and how long history is kept")
-
+            }
+            Section("Library and sync") {
                 NavigationLink {
                     CloudSyncSettingsView()
                 } label: {
@@ -112,18 +114,19 @@ struct SettingsScreen: View {
                 .accessibilityHint("Share listening positions through a folder you already sync")
 
                 NavigationLink {
-                    PrivacySettingsView()
-                } label: {
-                    Label("Privacy", systemImage: "hand.raised")
-                }
-                .accessibilityHint("What Earshot collects, and policy links")
-
-                NavigationLink {
                     DataSettingsView()
                 } label: {
                     Label("Data", systemImage: "externaldrive")
                 }
                 .accessibilityHint("Podcast import and export, transcript export format, clear this device, or delete the synced library everywhere")
+            }
+            Section("Help and privacy") {
+                NavigationLink {
+                    PrivacySettingsView()
+                } label: {
+                    Label("Privacy", systemImage: "hand.raised")
+                }
+                .accessibilityHint("What Earshot collects, and policy links")
 
                 NavigationLink {
                     HelpSettingsView()

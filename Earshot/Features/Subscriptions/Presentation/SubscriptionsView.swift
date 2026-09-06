@@ -205,37 +205,26 @@ struct SubscriptionsView: View {
             }
             if !podcasts.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("Sort library", selection: Binding(
-                            get: { settings.librarySortOrder },
-                            set: { settings.librarySortOrder = $0 }
-                        )) {
-                            ForEach(LibrarySortOrder.allCases) { order in
-                                Text(order.title).tag(order)
-                            }
-                        }
-                    } label: {
-                        Label("Sort library", systemImage: "arrow.up.arrow.down")
-                    }
-                    // Speak the active order on the menu button itself so VoiceOver
-                    // users know the current sort without opening the menu.
-                    .accessibilityValue(settings.librarySortOrder.title)
-                }
-            }
-            // Enter/leave multi-select (#757). "Select" is the entry point (a
-            // real Button, so it's reachable by VoiceOver swipe and rotor); while
-            // selecting it becomes "Done", which exits and announces the change.
-            if !podcasts.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
                     if selection.isSelecting {
                         Button("Done") { exitSelection(announce: true) }
                             .accessibilityHint("Leaves selection mode")
                     } else {
-                        Button {
-                            enterSelection()
+                        Menu {
+                            Picker("Sort library", selection: Binding(
+                                get: { settings.librarySortOrder },
+                                set: { settings.librarySortOrder = $0 }
+                            )) {
+                                ForEach(LibrarySortOrder.allCases) { order in
+                                    Text(order.title).tag(order)
+                                }
+                            }
+                            Button { enterSelection() } label: {
+                                Label("Select podcasts", systemImage: "checkmark.circle")
+                            }
                         } label: {
-                            Label("Select podcasts", systemImage: "checkmark.circle")
+                            Label("Library options", systemImage: "ellipsis.circle")
                         }
+                        .accessibilityValue(settings.librarySortOrder.title)
                     }
                 }
             }

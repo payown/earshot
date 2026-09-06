@@ -45,14 +45,16 @@ struct NowPlayingScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(SettingsStore.self) private var settings
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.playbackFolderNavigation) private var openPlaybackFolder
-    // Drives the artwork's smaller footprint at accessibility Dynamic Type
-    // sizes so the transport and scrubber stay above the fold (#579).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.playbackFolderNavigation) private var openPlaybackFolder
     @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
     private var folders: [PodcastFolder]
 
+    @State private var scrubPreview: Double?
     @State private var showingControls = false
+    @State private var pendingOptionAction: (() -> Void)?
+    @State private var restoresOptionsFocus = false
+    @AccessibilityFocusState private var moreOptionsFocused: Bool
     @State private var showingNotes = false
     // The transcript reader sheet (#451), shown only when the current episode's
     // feed advertised a transcript URL.
@@ -69,10 +71,6 @@ struct NowPlayingScreen: View {
     @State private var exportURL: ExportFile?
     @State private var isExporting = false
 
-    // On present, VoiceOver should land on the episode title (a heading), not the
-    // Close button or the decorative artwork. We request focus after a short
-    // settle so the sheet transition doesn't drop the request mid-animation.
-    @AccessibilityFocusState private var titleFocused: Bool
     @AccessibilityFocusState private var speedBadgeFocused: Bool
 
     /// Latches the speed a VoiceOver flick just set, so the badge's spoken value
@@ -85,57 +83,52 @@ struct NowPlayingScreen: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: Spacing.xl) {
-                    artworkBlock
-                        .padding(.top, Spacing.lg)
-
-                    titleBlock
-                    if let failure = player.playbackFailureMessage {
-                        Label(failure, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.secondary)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(failure)
+            GeometryReader { geometry in
+                // Two readable regions plus enlarged header/controls need this
+                // height budget at accessibility text sizes. This breakpoint
+                // depends only on available space and text size, never an episode.
+                let separateDetails = !dynamicTypeSize.isAccessibilitySize || geometry.size.height >= 800
+                VStack(spacing: 0) {
+                    playerHeader
+                    ScrollView {
+                        VStack(spacing: Spacing.xl) {
+                            artworkBlock
+                                .padding(.top, Spacing.lg)
+                            titleBlock
+                            if !separateDetails { playerDetails }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Spacing.lg)
+                        .padding(.bottom, Spacing.xl)
                     }
-                    chapterRow
-                    ScrubberView(player: player)
-                    transportRow
-                    speedRow
-                    sleepTimerRow
-                    airPlayRow
-
-                    if hasShowNotes {
-                        showNotesButton
+                    .frame(maxHeight: .infinity)
+                    .accessibilityIdentifier("player.episodeContent")
+                    playbackDock
+                    if separateDetails {
+                        ScrollView {
+                            VStack(spacing: Spacing.xl) {
+                                playerDetails
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, Spacing.lg)
+                            .padding(.vertical, Spacing.lg)
+                        }
+                        .frame(maxHeight: .infinity)
+                        .accessibilityIdentifier("player.details")
                     }
-
-                    if hasTranscript {
-                        transcriptButton
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, Spacing.lg)
-                .padding(.bottom, Spacing.xl)
-            }
-            .navigationTitle("Now Playing")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }
-                        .accessibilityLabel("Close player")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingControls = true
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                    }
-                    .accessibilityLabel("Player controls, sleep timer and chapters")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    episodeActionsMenu
                 }
             }
-            .sheet(isPresented: $showingControls) { PlayerControlsSheet() }
+            .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showingControls, onDismiss: {
+                let action = pendingOptionAction
+                pendingOptionAction = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    if let action { action() }
+                    else { moreOptionsFocused = true }
+                }
+            }) {
+                PlayerControlsSheet { episodeOptions }
+            }
             .sheet(isPresented: $showingSpeedPicker, onDismiss: {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     speedBadgeFocused = true
@@ -151,10 +144,10 @@ struct NowPlayingScreen: View {
             .sheet(isPresented: $showingTranscript) {
                 TranscriptView(episode: player.nowPlayingEpisode)
             }
-            .sheet(item: $exportURL) { file in
+            .sheet(item: $exportURL, onDismiss: restoreOptionsFocus) { file in
                 ShareSheet(items: [file.url])
             }
-            .sheet(isPresented: $showingBookmarks) {
+            .sheet(isPresented: $showingBookmarks, onDismiss: restoreOptionsFocus) {
                 if let episode = player.nowPlayingEpisode {
                     BookmarksListView(episode: episode)
                 }
@@ -163,12 +156,6 @@ struct NowPlayingScreen: View {
                 ChapterListView()
             }
         }
-        .task {
-            // Let the present transition settle before requesting VoiceOver focus;
-            // a request mid-animation is dropped.
-            try? await Task.sleep(for: .milliseconds(500))
-            titleFocused = true
-        }
         // Deleting the loaded episode clears the player's observed identity
         // before SwiftData performs the cascade. Close this modal at that same
         // boundary instead of leaving a stale, empty Now Playing destination on
@@ -176,6 +163,99 @@ struct NowPlayingScreen: View {
         .onChange(of: player.nowPlayingEpisodeID) { _, episodeID in
             if episodeID == nil { dismiss() }
         }
+    }
+
+    // When space permits, two equally flexible scroll regions share the space
+    // around playback. Episode content cannot change its position. Visual and semantic
+    // order match without an overlay or sort priority. System initial
+    // focus is left alone: no delayed request can steal focus after a first touch.
+    private var playerHeader: some View {
+        HStack(spacing: Spacing.sm) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Close player")
+            Spacer(minLength: 0)
+            Text("Now Playing")
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            Button { showingControls = true } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("More options")
+            .accessibilityHint("Episode actions and playback settings")
+            .accessibilityFocused($moreOptionsFocused)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, Spacing.lg)
+        .background(.regularMaterial)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var playerDetails: some View {
+        VStack(spacing: Spacing.xl) {
+            if let failure = player.playbackFailureMessage {
+                Label(failure, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(failure)
+            }
+            chapterRow
+            speedRow
+            sleepTimerRow
+            if hasTranscript { transcriptButton }
+        }
+    }
+
+    private var playbackDock: some View {
+        VStack(spacing: Spacing.xs) {
+            // Clocks can grow upward without moving the slider or transport.
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    playbackElapsed
+                    Spacer()
+                    playbackDuration
+                }
+                VStack(spacing: 0) {
+                    playbackElapsed
+                    playbackDuration
+                }
+            }
+            .font(.footnote)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true) // The slider speaks both complete times.
+            ScrubberView(player: player, preview: $scrubPreview)
+            transportRow
+            HStack(spacing: Spacing.lg) {
+                RoutePickerView()
+                    .frame(width: 64, height: 56)
+                    .frame(maxWidth: .infinity)
+                showNotesButton
+                    .frame(maxWidth: .infinity)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.bottom, Spacing.sm)
+        .background(.regularMaterial)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var playbackElapsed: some View {
+        Text(BookmarkLogic.clock(Int(scrubPreview ?? player.currentPositionSeconds)))
+            .fixedSize()
+    }
+    private var playbackDuration: some View {
+        Text(player.hasKnownDuration ? BookmarkLogic.clock(Int(player.durationSeconds)) : "--:--")
+            .fixedSize()
     }
 
     // MARK: Artwork (with hold-to-fast-forward, #373)
@@ -189,12 +269,9 @@ struct NowPlayingScreen: View {
     /// available too.
     @ViewBuilder
     private var artworkBlock: some View {
-        // At accessibility Dynamic Type sizes the surrounding text rows grow
-        // several fold, and the full 280pt square pushes the transport and
-        // scrubber below the fold on smaller devices (#579). Shrink only the
-        // visual: the label, rotor actions, and the press-and-hold scan pad
-        // behave identically at both sizes.
-        let side: CGFloat = dynamicTypeSize.isAccessibilitySize ? 140 : 280
+        // Compact visible artwork retains its accessibility stop and actions.
+        // The transport occupies a separate, reserved region below this scroll view.
+        let side: CGFloat = 140
         let base = PodcastArtwork(urlString: artworkURLString, size: side, cornerRadius: 16)
             // A zero-distance long press fires `pressing:` on touch-down and again
             // on release, giving us begin/end without a separate drag gesture.
@@ -302,7 +379,6 @@ struct NowPlayingScreen: View {
                 // player lands on — no extra stop (#513). Falls back to the plain
                 // title when nothing is loaded.
                 .accessibilityLabel(titleAccessibilityLabel)
-                .accessibilityFocused($titleFocused)
             if let artist = player.currentArtist {
                 Text(artist)
                     .font(.subheadline)
@@ -390,7 +466,8 @@ struct NowPlayingScreen: View {
     /// collapsed into one element so each button keeps its own action.
     @ViewBuilder
     private var chapterRow: some View {
-        if let title = player.currentChapterTitle {
+        if player.chapterCount > 0 {
+            let title = player.currentChapterTitle ?? "Chapters"
             HStack(spacing: Spacing.md) {
                 if showChapterNavButtons {
                     transportButton(
@@ -458,11 +535,12 @@ struct NowPlayingScreen: View {
     // MARK: Transport
 
     private var transportRow: some View {
-        HStack(spacing: Spacing.xl) {
+        HStack(spacing: Spacing.md) {
             transportButton(
                 systemImage: "gobackward",
                 label: "Skip back \(secondsPhrase(player.skipBackSeconds))",
                 font: .title,
+                target: 64,
                 action: player.skipBack
             )
             // Pair "Previous chapter" with Skip back as a VoiceOver custom action
@@ -485,15 +563,19 @@ struct NowPlayingScreen: View {
                 Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.system(.largeTitle, design: .default))
                     .imageScale(.large)
+                    .frame(minWidth: 80, minHeight: 80)
+                    .contentShape(Rectangle())
                     .accessibilityHidden(true)
             }
-            .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+            .buttonStyle(.plain)
             .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+            .accessibilityIdentifier("player.playPause")
 
             transportButton(
                 systemImage: "goforward",
                 label: "Skip forward \(secondsPhrase(player.skipForwardSeconds))",
                 font: .title,
+                target: 64,
                 action: player.skipForward
             )
             // Pair "Next chapter" with Skip forward as a VoiceOver custom action
@@ -517,16 +599,19 @@ struct NowPlayingScreen: View {
         systemImage: String,
         label: String,
         font: Font,
+        target: CGFloat = 44,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(font)
-                .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+                .frame(minWidth: target, minHeight: target)
                 .contentShape(Rectangle())
                 .accessibilityHidden(true)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityIdentifier("player.\(systemImage)")
     }
 
     // MARK: Speed control row
@@ -548,6 +633,8 @@ struct NowPlayingScreen: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.xs)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .background(.thinMaterial, in: Capsule())
             }
             // Replace the button's accessibility node with a PURE adjustable
@@ -648,7 +735,19 @@ struct NowPlayingScreen: View {
     private var sleepTimerRow: some View {
         let timer = player.sleepTimer
         if timer.isActive {
-            HStack(spacing: Spacing.md) {
+            ViewThatFits(in: .horizontal) {
+                sleepTimerContents(horizontal: true)
+                sleepTimerContents(horizontal: false)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Spacing.xs)
+        }
+    }
+
+    private func sleepTimerContents(horizontal: Bool) -> some View {
+        let timer = player.sleepTimer
+        let layout = horizontal ? AnyLayout(HStackLayout(spacing: Spacing.md)) : AnyLayout(VStackLayout(spacing: Spacing.md))
+        return layout {
                 Image(systemName: "moon.zzz.fill")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
@@ -662,7 +761,7 @@ struct NowPlayingScreen: View {
                         ? "End of episode"
                         : SleepTimerLogic.spokenRemaining(timer.remainingSeconds))
 
-                Spacer()
+                if horizontal { Spacer() }
 
                 if !timer.endOfEpisode {
                     Button {
@@ -673,13 +772,12 @@ struct NowPlayingScreen: View {
                             .font(.subheadline.weight(.medium))
                             .padding(.horizontal, Spacing.md)
                             .padding(.vertical, Spacing.xs)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                             .background(.thinMaterial, in: Capsule())
                     }
                     .accessibilityLabel("Extend sleep timer by 5 minutes")
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.xs)
         }
     }
 
@@ -692,50 +790,27 @@ struct NowPlayingScreen: View {
         return ""
     }
 
-    // MARK: AirPlay route picker
-
-    /// A centered AirPlay route picker. Tapping presents the system output-device
-    /// sheet (AirPlay, Bluetooth, etc.). The accessible label and hint are set on
-    /// the underlying `AVRoutePickerView` inside `RoutePickerView`.
-    private var airPlayRow: some View {
-        HStack {
-            Spacer()
-            RoutePickerView()
-                .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
-            Spacer()
-        }
-    }
-
     // MARK: Show notes
 
     private var showNotesButton: some View {
         Button {
             showingNotes = true
         } label: {
-            HStack {
-                Text("Show notes")
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-            // Guarantee a 44pt-plus tap target at default Dynamic Type; the
-            // vertical padding alone leaves the row short of the minimum.
-            // Mirrors the Transcript row below (#579).
-            .frame(minHeight: Spacing.minTouchTarget)
-            .contentShape(Rectangle())
+            Text("Show notes")
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.vertical, Spacing.sm)
-        .accessibilityHint("Opens the episode show notes")
+        .disabled(!hasShowNotes)
+        .accessibilityHint(hasShowNotes ? "Opens the episode show notes" : "This episode has no show notes")
     }
 
     // MARK: Transcript (#451)
 
-    /// Opens the transcript reader. Mirrors the Show notes row exactly (same
-    /// layout, chevron, and 44pt-plus row height) so the two entry points read as a
-    /// pair. Shown only when the current episode advertised a transcript URL, so it
+    /// Opens the transcript reader from the scrolling details. Shown only when
+    /// the current episode advertised a transcript URL, so it
     /// never offers a dead action.
     private var transcriptButton: some View {
         Button {
@@ -759,20 +834,13 @@ struct NowPlayingScreen: View {
         .accessibilityHint("Opens the episode transcript")
     }
 
-    // MARK: Episode actions menu (#371)
+    // MARK: Unified options
 
-    /// The toolbar overflow menu surfacing the three episode actions as a visible
-    /// control alongside the VoiceOver rotor actions on the artwork. Each
-    /// destructive-feeling action carries a leading icon so its nature isn't
-    /// signalled by position alone. "Stop after this episode" shows a checkmark
-    /// while active.
-    private var episodeActionsMenu: some View {
-        Menu {
-            Section("Queue navigation") {
-                Button("Previous in Queue", action: player.previousInQueue)
-                Button("Next in Queue", action: player.nextInQueue)
-                Button("Mark as played and next in Queue", action: player.markCurrentPlayedAndNextInQueue)
-            }
+    @ViewBuilder
+    private var episodeOptions: some View {
+        Button("Previous in Queue", action: player.previousInQueue)
+        Button("Next in Queue", action: player.nextInQueue)
+        Button("Mark as played and next in Queue", action: player.markCurrentPlayedAndNextInQueue)
             Button {
                 player.markCurrentPlayedAndAdvance()
             } label: {
@@ -780,23 +848,14 @@ struct NowPlayingScreen: View {
             }
 
             Button {
-                startExport()
+                closeOptionsThen { startExport() }
             } label: {
                 Label(exportActionLabel, systemImage: "square.and.arrow.up")
             }
             .disabled(isExporting)
 
             Button {
-                player.toggleStopAfterEpisode()
-            } label: {
-                Label(
-                    "Stop after this episode",
-                    systemImage: player.stopAfterCurrentEpisode ? "checkmark" : "stop.circle"
-                )
-            }
-
-            Button {
-                showingBookmarks = true
+                closeOptionsThen { showingBookmarks = true }
             } label: {
                 Label("Bookmarks", systemImage: "bookmark")
             }
@@ -807,13 +866,20 @@ struct NowPlayingScreen: View {
             } label: {
                 Label("Refresh episode audio", systemImage: "arrow.clockwise")
             }
-        } label: {
-            Image(systemName: "ellipsis.circle")
+    }
+
+    private func closeOptionsThen(_ action: @escaping () -> Void) {
+        restoresOptionsFocus = true
+        pendingOptionAction = action
+        showingControls = false
+    }
+
+    private func restoreOptionsFocus() {
+        guard restoresOptionsFocus else { return }
+        restoresOptionsFocus = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            moreOptionsFocused = true
         }
-        .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
-        .accessibilityLabel("Episode actions")
-        .accessibilityHint("Mark as played, export audio, stop after this episode, bookmarks, and refresh episode audio")
-        .disabled(player.nowPlayingEpisode == nil)
     }
 
     /// Export label reflects the download-then-share wait so the user knows the
@@ -847,6 +913,7 @@ struct NowPlayingScreen: View {
             if let url {
                 exportURL = ExportFile(url: url)
             } else {
+                restoreOptionsFocus()
                 Announcer.announce("Could not export audio file")
             }
         }
@@ -885,6 +952,7 @@ struct NowPlayingScreen: View {
 /// `context.save()` off the drag path (the #362 main-run-loop lesson).
 private struct ScrubberView: View {
     let player: PlayerService
+    @Binding var preview: Double?
 
     @State private var isEditing = false
     @State private var dragSeconds: Double = 0
@@ -916,12 +984,12 @@ private struct ScrubberView: View {
 
     var body: some View {
         VStack(spacing: Spacing.xs) {
-            Slider(
+            PlayerPositionSlider(
                 value: Binding(
                     get: { displaySeconds },
-                    set: { dragSeconds = $0 }
+                    set: { dragSeconds = $0; preview = $0 }
                 ),
-                in: 0...(hasDuration ? duration : 1),
+                maximum: hasDuration ? duration : 1,
                 onEditingChanged: { editing in
                     if editing {
                         // Seed from the live position so the thumb doesn't jump on
@@ -929,13 +997,16 @@ private struct ScrubberView: View {
                         // pending adjust latch so it can't shadow the drag.
                         dragSeconds = player.currentPositionSeconds
                         adjustTarget = nil
+                        preview = dragSeconds
                         isEditing = true
                     } else {
                         player.seek(to: dragSeconds)
                         isEditing = false
+                        preview = nil
                     }
                 }
             )
+            .frame(height: 56)
             .disabled(!hasDuration)
             // Clear the VoiceOver-adjust latch once the live position converges on
             // the target, so subsequent ticks drive the display normally again.
@@ -973,17 +1044,6 @@ private struct ScrubberView: View {
                 }
             }
 
-            HStack {
-                Text(BookmarkLogic.clock(Int(displaySeconds)))
-                Spacer()
-                Text(hasDuration ? BookmarkLogic.clock(Int(duration)) : "--:--")
-            }
-            .font(.footnote)
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
-            // The slider element already speaks the elapsed time; keep these
-            // visual labels out of the VoiceOver tree so they aren't stray stops.
-            .accessibilityHidden(true)
         }
     }
 
@@ -992,7 +1052,9 @@ private struct ScrubberView: View {
     /// on by the caller only when a duration is known.
     private var scrubberAccessibilityElement: some View {
         Color.clear
+            .frame(height: 56)
             .accessibilityElement()
+            .accessibilityIdentifier("player.position")
             // The label is static so VoiceOver isn't re-reading it every second as
             // the 1Hz position tick rebuilds this view. The live time rides in the
             // value, which an adjustable control is expected to update. Previously
@@ -1009,5 +1071,90 @@ private struct ScrubberView: View {
         let elapsed = BookmarkLogic.spoken(Int(displaySeconds))
         guard hasDuration else { return elapsed }
         return "\(elapsed) of \(BookmarkLogic.spoken(Int(duration)))"
+    }
+}
+
+/// Native slider rendering with a full-height interaction region. UISlider's
+/// default narrow tracking region does not match an enlarged SwiftUI wrapper.
+private struct PlayerPositionSlider: UIViewRepresentable {
+    @Binding var value: Double
+    let maximum: Double
+    let onEditingChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeUIView(context: Context) -> FullAreaSlider {
+        let slider = FullAreaSlider()
+        slider.isAccessibilityElement = false // SwiftUI supplies the time-based adjustable element.
+        slider.onBegin = { [weak coordinator = context.coordinator] in coordinator?.began($0) }
+        slider.addTarget(context.coordinator, action: #selector(Coordinator.changed), for: .valueChanged)
+        slider.onEnd = { [weak coordinator = context.coordinator] in coordinator?.ended($0) }
+        return slider
+    }
+    func updateUIView(_ slider: FullAreaSlider, context: Context) {
+        context.coordinator.parent = self
+        slider.isEnabled = context.environment.isEnabled
+        slider.maximumValue = Float(maximum)
+        slider.minimumValue = 0
+        slider.tintColor = UIColor(Color.accentColor)
+        if !slider.isTracking { slider.value = Float(value) }
+    }
+    @MainActor
+    final class Coordinator {
+        var parent: PlayerPositionSlider
+        init(_ parent: PlayerPositionSlider) { self.parent = parent }
+        @objc func began(_ sender: FullAreaSlider) { parent.onEditingChanged(true) }
+        @objc func changed(_ sender: FullAreaSlider) { parent.value = Double(sender.value) }
+        @objc func ended(_ sender: FullAreaSlider) {
+            parent.value = Double(sender.value)
+            parent.onEditingChanged(false)
+        }
+    }
+    final class FullAreaSlider: UIControl {
+        private let visual = UISlider()
+        var minimumValue: Float { get { visual.minimumValue } set { visual.minimumValue = newValue } }
+        var maximumValue: Float { get { visual.maximumValue } set { visual.maximumValue = newValue } }
+        var value: Float { get { visual.value } set { visual.value = newValue } }
+        var onBegin: ((FullAreaSlider) -> Void)?
+        var onEnd: ((FullAreaSlider) -> Void)?
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            visual.isUserInteractionEnabled = false
+            visual.isAccessibilityElement = false
+            addSubview(visual)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override var intrinsicContentSize: CGSize { CGSize(width: UIView.noIntrinsicMetric, height: 56) }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            visual.frame = bounds
+        }
+        override var isEnabled: Bool { didSet { visual.isEnabled = isEnabled } }
+
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            isEnabled && bounds.contains(point)
+        }
+        private func move(to touch: UITouch) {
+            let track = visual.trackRect(forBounds: visual.bounds)
+            let fraction = min(1, max(0, (touch.location(in: self).x - track.minX) / max(1, track.width)))
+            value = minimumValue + Float(fraction) * (maximumValue - minimumValue)
+            sendActions(for: .valueChanged)
+        }
+        override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
+            guard isEnabled else { return false }
+            onBegin?(self)
+            move(to: touch)
+            return true
+        }
+        override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
+            move(to: touch)
+            return true
+        }
+        override func endTracking(_ touch: UITouch?, with event: UIEvent?) {
+            if let touch { move(to: touch) }
+            onEnd?(self)
+        }
+        override func cancelTracking(with event: UIEvent?) {
+            onEnd?(self)
+        }
     }
 }

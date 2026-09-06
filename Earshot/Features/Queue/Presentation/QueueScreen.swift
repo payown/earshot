@@ -65,6 +65,7 @@ struct QueueScreen: View {
 
     @Query(sort: \QueueItem.position) private var items: [QueueItem]
 
+    @State private var confirmingClearQueue = false
     @State private var showNotesEpisode: Episode?
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
     // queue itself is never touched — rows are hidden from display only.
@@ -118,6 +119,18 @@ struct QueueScreen: View {
             .searchable(text: $searchText, prompt: "Search queue")
             .onSubmit(of: .search) { announceMatches() }
             .toolbar { toolbar }
+            .alert("Clear the entire Queue?", isPresented: $confirmingClearQueue) {
+                Button("Clear entire Queue", role: .destructive) {
+                    let saved = repo.clear()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        focusLaunchHeading = true
+                        Announcer.announce(saved ? "Queue cleared" : "Could not clear Queue. Please try again.")
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Removes all \(episodes.count) episodes from Queue, including episodes hidden by search. " + (settings.deleteDownloadAfterPlayed ? "Downloaded audio for these episodes will also be deleted." : "Downloaded audio is kept."))
+            }
             .confirmationDialog(
                 downloadAllRequest.map {
                     $0.deferredCount > 0
@@ -490,57 +503,47 @@ struct QueueScreen: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Picker("Group queue", selection: queueGrouping) {
-                    ForEach(QueueGrouping.allCases) { mode in
-                        Text(mode.optionLabel).tag(mode)
+                Section("Organization") {
+                    Picker("Group queue", selection: queueGrouping) {
+                        ForEach(QueueGrouping.allCases) { mode in
+                            Text(mode.optionLabel).tag(mode)
+                        }
                     }
                 }
                 if !episodes.isEmpty {
-                    Button {
-                        lineupRequest = .save(
-                            queueCount: episodes.count,
-                            replacing: savedLineupCount
-                        )
-                    } label: {
-                        Label(
-                            savedLineupCount > 0 ? "Replace saved lineup" : "Save as lineup",
-                            systemImage: "bookmark"
-                        )
-                    }
-
-                    Button {
-                        let filteredEpisodes = EpisodeSearchFilter.filter(
-                            episodes, query: searchText
-                        )
-                        downloadAllRequest = QueueDownloadAllRequest(
-                            candidates: filteredEpisodes,
-                            scope: searchActive ? "current filtered Queue" : "Queue"
-                        )
-                    } label: {
-                        Label(
-                            searchActive ? "Download filtered Queue" : "Download all",
-                            systemImage: "arrow.down.circle"
-                        )
-                    }
-
-                    Button(role: .destructive) {
-                        repo.clear()
-                        Announcer.announce("Queue cleared")
-                    } label: {
-                        Label("Clear queue", systemImage: "trash")
+                    Section("Downloads") {
+                        Button {
+                            downloadAllRequest = QueueDownloadAllRequest(
+                                candidates: EpisodeSearchFilter.filter(episodes, query: searchText),
+                                scope: searchActive ? "current filtered Queue" : "Queue"
+                            )
+                        } label: {
+                            Label(searchActive ? "Download filtered Queue" : "Download all", systemImage: "arrow.down.circle")
+                        }
                     }
                 }
-                if savedLineupCount > 0 {
-                    Button {
-                        lineupRequest = .apply(savedCount: savedLineupCount)
-                    } label: {
-                        Label("Apply saved lineup", systemImage: "text.badge.checkmark")
+                Section("Saved lineup") {
+                    if !episodes.isEmpty {
+                        Button {
+                            lineupRequest = .save(queueCount: episodes.count, replacing: savedLineupCount)
+                        } label: {
+                            Label(savedLineupCount > 0 ? "Replace saved lineup" : "Save as lineup", systemImage: "bookmark")
+                        }
                     }
-
-                    Button(role: .destructive) {
-                        lineupRequest = .clear(savedCount: savedLineupCount)
-                    } label: {
-                        Label("Clear saved lineup", systemImage: "bookmark.slash")
+                    if savedLineupCount > 0 {
+                        Button { lineupRequest = .apply(savedCount: savedLineupCount) } label: {
+                            Label("Apply saved lineup", systemImage: "text.badge.checkmark")
+                        }
+                        Button(role: .destructive) { lineupRequest = .clear(savedCount: savedLineupCount) } label: {
+                            Label("Clear saved lineup", systemImage: "bookmark.slash")
+                        }
+                    }
+                }
+                if !episodes.isEmpty {
+                    Section {
+                        Button(role: .destructive) { confirmingClearQueue = true } label: {
+                            Label("Clear queue", systemImage: "trash")
+                        }
                     }
                 }
             } label: {

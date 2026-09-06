@@ -70,8 +70,24 @@ enum ScreenshotHarness {
             }
         case .nowPlaying:
             guard let episode = nowPlayingEpisode(in: context) else { return }
+            if CommandLine.arguments.contains("-playerLayoutTransition") { episode.episodeDescription = "Layout test notes without chapters." }
             player.load(episode)
             player.pendingFullPlayerPresentation = true
+            if CommandLine.arguments.contains("-playerLayoutTransition") {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(12))
+                    player.currentTitle = String(repeating: "A long episode title for layout testing. ", count: 6)
+                    player.currentArtist = String(repeating: "A long podcast name. ", count: 4)
+                    episode.episodeDescription = nil
+                    episode.artworkURL = nil
+                    episode.podcast?.artworkURL = nil
+                    player.setChapters([Chapter(index: 0, startTime: 0, title: "A chapter arriving after the Player opens")])
+                    let folder = PodcastFolder(name: "A folder context arriving after loading")
+                    context.insert(folder)
+                    player.showLayoutTestFailure(folderID: folder.persistentModelID)
+                    player.sleepTimer.set(.fiveMinutes)
+                }
+            }
         }
     }
 

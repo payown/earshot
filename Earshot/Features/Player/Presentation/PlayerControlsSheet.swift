@@ -1,15 +1,11 @@
 import SwiftUI
 
-/// Expanded player controls: sleep timer and chapter navigation for the loaded
-/// episode. Opened by tapping the Now Playing bar.
-struct PlayerControlsSheet: View {
+/// One scrollable destination for secondary episode actions and playback settings.
+/// Frequent transport controls and the chapter list remain on Now Playing.
+struct PlayerControlsSheet<EpisodeActions: View>: View {
+    @ViewBuilder let episodeActions: () -> EpisodeActions
     @Environment(PlayerService.self) private var player
     @Environment(\.dismiss) private var dismiss
-
-    // Opens the shared chapter list (#509). The controls sheet and the Now
-    // Playing chapter line present the SAME ``ChapterListView`` so there is one
-    // chapter UI, not two divergent ones.
-    @State private var showingChapters = false
 
     private var sleepTimer: SleepTimerController { player.sleepTimer }
 
@@ -24,20 +20,40 @@ struct PlayerControlsSheet: View {
                     }
                 }
 
-                sleepTimerSection
-                volumeBoostSection
-                chaptersSection
-            }
-            .navigationTitle("Player")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                Section("Episode actions") {
+                    episodeActions()
+                }
+                Section {
+                    sleepTimerControls
+                    volumeBoostControls
+                    Button {
+                        player.toggleStopAfterEpisode()
+                    } label: {
+                        Label("Stop after this episode", systemImage: player.stopAfterCurrentEpisode ? "checkmark" : "stop.circle")
+                    }
+                    .accessibilityValue(player.stopAfterCurrentEpisode ? "On" : "Off")
+                } header: {
+                    Text("Playback settings")
+                } footer: {
+                    Text("Use Global follows the volume boost selected in Playback Settings. Boost is limited to reduce clipping.")
                 }
             }
-            .sheet(isPresented: $showingChapters) {
-                ChapterListView()
+            .navigationTitle("More options")
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Text("Done")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, Spacing.lg)
+                .background(.regularMaterial)
             }
+
         }
     }
 
@@ -66,28 +82,22 @@ struct PlayerControlsSheet: View {
     }
 
     @ViewBuilder
-    private var volumeBoostSection: some View {
+    private var volumeBoostControls: some View {
         if player.nowPlayingEpisode != nil {
-            Section {
-                AdjustableOptionPicker(
+            AdjustableOptionPicker(
                     "Boost for this episode",
                     options: volumeBoostOptions,
                     selection: volumeBoostBinding,
                     hint: "Flick up for more boost, down for less or use global"
                 )
-            } header: {
-                Text("Volume boost")
-            } footer: {
-                Text("Use Global follows the volume boost selected in Playback Settings. Boost is limited to reduce clipping.")
-            }
         }
     }
 
     // MARK: Sleep timer
 
     @ViewBuilder
-    private var sleepTimerSection: some View {
-        Section("Sleep timer") {
+    private var sleepTimerControls: some View {
+        Group {
             // VoiceOver: flick up for a longer timer, down for shorter, all the
             // way down to Off (which cancels). The visual menu still opens on tap
             // for sighted/low-vision users. Setting the value here is what speaks
@@ -159,32 +169,4 @@ struct PlayerControlsSheet: View {
         return ""
     }
 
-    // MARK: Chapters
-
-    /// Entry point to the shared chapter list (#509). The full list — jump,
-    /// include/skip toggles, current-chapter marker — lives in
-    /// ``ChapterListView``, reachable from here and from the Now Playing chapter
-    /// line. `chapterCount` is an observed engine property (the engine loads
-    /// chapters on episode load), so this stays in sync without re-loading here.
-    @ViewBuilder
-    private var chaptersSection: some View {
-        Section("Chapters") {
-            if player.chapterCount > 0 {
-                Button {
-                    showingChapters = true
-                } label: {
-                    LabeledContent("Chapters", value: "\(player.chapterCount)")
-                        .frame(minHeight: Spacing.minTouchTarget)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Chapters")
-                .accessibilityValue("\(player.chapterCount)")
-                .accessibilityHint("Opens the chapter list to jump or skip chapters")
-            } else {
-                Text("No chapters for this episode.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
 }
