@@ -488,6 +488,12 @@ final class PlayerService {
     /// act on the current item — e.g. bookmarking the current position.
     var nowPlayingEpisode: Episode? { currentEpisode }
 
+    /// Recovery must respect requested playback while AVPlayer buffers or a
+    /// cross-device position lookup is still finishing, not just audible state.
+    var hasActivePlaybackRequest: Bool {
+        isPlaying || intendsToPlay || playbackHandoffTask != nil
+    }
+
     /// Internal verification surface for the transport selected after #709's
     /// HTTPS probe. The URL is never persisted or included in diagnostics.
     var currentMediaURLForTesting: URL? { currentPlaybackURL }

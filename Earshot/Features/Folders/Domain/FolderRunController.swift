@@ -57,7 +57,7 @@ final class FolderRunController {
                 isConnected = true
                 if let snapshot, [.paused, .ready].contains(snapshot.state) {
                     let first = try await opened.window(id: snapshot.id, limit: 1).first
-                    if player.isPlaying {
+                    if player.hasActivePlaybackRequest {
                         // A remote command may have restored playback before
                         // root maintenance connected this controller. Adopt the
                         // matching cursor without reloading or pausing audio;

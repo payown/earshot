@@ -280,7 +280,7 @@ final class FolderRunIntegrationTests: XCTestCase {
             player.play(current)
             XCTAssertTrue(player.isPlaying)
             await player.folderRuns.connect(context: context, player: player, testStore: store)
-            XCTAssertTrue(player.isPlaying)
+            XCTAssertTrue(player.hasActivePlaybackRequest)
             XCTAssertEqual(player.nowPlayingEpisode?.guid, current.guid)
             XCTAssertEqual(player.folderRuns.driving, matchesRun)
             XCTAssertEqual(player.folderRuns.snapshot?.state, matchesRun ? .playing : .paused)
