@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional Queue wrapping continues from the first remaining unplayed episode after the last finishes. Off by default; stop preferences and sleep timers still apply. (#950)
 - Player actions now offer Previous in Queue, Next in Queue, and Mark as played and next in Queue. Previous/Next preserve skipped episodes and their saved places. (#949)
 - Followed podcasts can have personal display names, with an option to restore the publisher name. Names survive refresh, sync through private iCloud, and work in Library sorting and local search. (#947)
 

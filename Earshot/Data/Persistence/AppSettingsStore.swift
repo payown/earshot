@@ -95,6 +95,7 @@ enum SettingsKey {
     // continueAfterEpisode off → stop at every episode boundary.
     // continueAfterGroupEnds off → stop when the next queue item is a different
     // podcast. Checked tightest-first at the on-complete handler.
+    static let wrapQueue = "wrap_queue"
     static let continueAfterEpisode = "continue_after_episode"
     static let continueAfterGroupEnds = "continue_after_group_ends"
     static let defaultLaunchScreen = "default_launch_screen"
@@ -256,7 +257,7 @@ enum AppSettingScope {
         SettingsKey.morningLineup,
         SettingsKey.showEpisodeNumbers, SettingsKey.openPlayerOnPlay,
         SettingsKey.dismissPlayerWhenPlaybackEnds,
-        SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds,
+        SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds, SettingsKey.wrapQueue,
         SettingsKey.defaultLaunchScreen, SettingsKey.librarySortOrder,
         SettingsKey.episodeSortOrder, SettingsKey.statsStreaksEnabled,
         SettingsKey.inboxDefaultCount, SettingsKey.themeOverride,
@@ -318,6 +319,7 @@ enum SettingsDefault {
     static let dismissPlayerWhenPlaybackEnds = false
     // Auto-advance defaults true: preserves today's unconditional auto-advance
     // until the user opts to stop at a boundary (#446).
+    static let wrapQueue = false
     static let continueAfterEpisode = true
     static let continueAfterGroupEnds = true
     static let onboardingComplete = false

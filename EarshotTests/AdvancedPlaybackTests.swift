@@ -1116,6 +1116,88 @@ final class AdvancedPlaybackTests: XCTestCase {
         })
     }
 
+    func testNaturalEndWrapsGroupedQueueAndPreservesCountdown() async throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episodes = makeInterleavedShowsQueue(ctx)
+        let settings = AppSettingsStore(context: ctx)
+        settings.setQueueGrouping(.podcast)
+        settings.setBool(true, for: SettingsKey.wrapQueue)
+        episodes.x1.isPlayed = true
+        episodes.x2.positionSeconds = 123
+        try ctx.save()
+        player.load(episodes.y2)
+        player.sleepTimer.set(.thirtyMinutes)
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: nil)
+        for _ in 0..<200 {
+            if player.nowPlayingEpisodeID == episodes.x2.persistentModelID { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(player.nowPlayingEpisodeID, episodes.x2.persistentModelID)
+        XCTAssertEqual(episodes.x2.positionSeconds, 123)
+        XCTAssertTrue(player.sleepTimer.isActive)
+        XCTAssertTrue(episodes.y2.isPlayed)
+        XCTAssertFalse(QueueRepository(context: ctx).queue().contains { $0.persistentModelID == episodes.y2.persistentModelID })
+    }
+
+    func testTimerExpiryImmediatelyBeforeCompletionPreventsWrap() async {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episodes = makeInterleavedShowsQueue(ctx)
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.wrapQueue)
+        player.load(episodes.x3)
+        player.sleepTimer.onExpired?()
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: nil)
+        try? await Task.sleep(nanoseconds: 750_000_000)
+        XCTAssertEqual(player.nowPlayingEpisodeID, episodes.x3.persistentModelID)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertFalse(episodes.x1.isPlayed)
+    }
+
+    func testWrappingWithUnusableTargetStopsAndKeepsRemainingQueue() async throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episodes = makeInterleavedShowsQueue(ctx)
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.wrapQueue)
+        episodes.x1.audioURL = ""
+        try ctx.save()
+        player.load(episodes.x3)
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: nil)
+        for _ in 0..<200 {
+            if player.nowPlayingEpisodeID == nil { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertTrue(episodes.x3.isPlayed)
+        XCTAssertFalse(episodes.x1.isPlayed)
+        XCTAssertTrue(QueueRepository(context: ctx).queue().contains { $0.persistentModelID == episodes.x1.persistentModelID })
+    }
+
+    func testNaturalEndWrapRespectsStopAfterCurrent() async {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episodes = makeInterleavedShowsQueue(ctx)
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.wrapQueue)
+        player.load(episodes.x3)
+        player.toggleStopAfterEpisode()
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: nil)
+        for _ in 0..<200 {
+            if player.nowPlayingEpisodeID == nil { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertTrue(episodes.x3.isPlayed)
+        XCTAssertFalse(episodes.x1.isPlayed)
+    }
+
     func test_markCurrentPlayedAndAdvance_groupedDisplayOn_followsGroupedOrderNotRawInterleavedOrder() {
         let ctx = TestStore.freshContext()
         let player = PlayerService()
