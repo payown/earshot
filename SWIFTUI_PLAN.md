@@ -2,6 +2,31 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: feedback TestFlight 1.2.2 (256)
+
+Michael separately authorized upload and distribution to both existing groups,
+including notifications and beta-review submission. The documented release
+script allocated build 256 (App Store Connect's previous highest was 255),
+generated the project, archived/exported, uploaded, and submitted beta review.
+A linked release-record branch based on merged main 4d74a01 preserves the main
+checkout and protected-branch workflow. App source and native/UI tests are
+unchanged from the device-approved integration.
+
+App Store Connect build 5031fe18-3ef5-4ec1-be97-d11684dc0611 processed VALID.
+Internal Testing Group (0d4027e4-f63b-4798-a882-5c8c29b16d89) receives all builds
+and is IN_BETA_TESTING. Public Testers
+(9a7512e9-a451-4917-9554-51931777c252) has explicit membership and is
+WAITING_FOR_BETA_REVIEW as of 18:29 Pacific. Automatic notification is enabled;
+no claim is made that external testers can install before Apple approves it.
+The external review submission is WAITING_FOR_REVIEW. This is the only
+outstanding distribution gate at this checkpoint.
+
+Kashe Chapter 82 is in docs/kashe.md and is the exact en-US What to Test text,
+verified against App Store Connect after trimming the trailing newline. No new
+character facts were introduced. Archive signature and IPA 1.2.2/256 metadata
+were verified. No production App Store submission, tag or release publication.
+This authorization supersedes the distribution hold in older entries below.
+
 ## September 5, 2026: feedback batch complete, approved and unreleased
 
 Michael approved the final middle-position Player layout and the complete
