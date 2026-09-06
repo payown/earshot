@@ -2,6 +2,38 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: middle Player placement trial (#951)
+
+Michael requested a focused comfort trial near the vertical middle. The simplest
+layout shares remaining height between two flexible ScrollViews around the
+unchanged playback area. Artwork/title scroll above; errors, chapters, speed,
+timer and transcript scroll below. This reuses lower space for content instead
+of adding a blank spacer. No device coordinate, content-based position, overlay,
+or accessibility sort priority is used. Playback position remains above transport,
+with native AirPlay and always-present Show notes side by side underneath.
+Targets, actions, header, options and focus restoration are unchanged. At
+accessibility text sizes below an 800pt available-height budget, one combined
+scroll region above stable playback preserves usable content space. The fallback
+depends on viewport/text settings, not device identity or episode content.
+
+Required earshot-accessibility source gate PASS. Initial native/UI run passed:
+183 playback/Queue/sleep-timer tests; five SE UI flows and three Pro Max flows.
+Both normal/AX5 geometry checks preserved positions through long titles, missing
+artwork, late chapters, errors, folder context, timer and notes-availability
+changes. Final adaptive-layout checks passed on SE and Pro Max at standard/AX5 text,
+including title and lower-detail reachability. An added title test initially
+flicked past the heading on SE AX5; short directed drags corrected the test
+and confirmed reachability. This test failure did not prove a product defect.
+The compact AX fallback provides a single usable scrolling region.
+
+Measured Play/Pause center, in screen points: Pro Max standard text 806 -> 520
+(286pt higher, on a 956pt screen); AX5 about 731.83 -> 544.5. SE standard text
+551 -> 376.5; AX5 retains the previous lower placement through the fallback.
+Signed Release 1.2.2 (255), app code 69bf17f, passed signature verification
+and was installed/launched over Wi-Fi; running process verified. Physical
+comfort at Michael’s actual text setting is not inferred from simulator measurements. This remains a trial,
+awaiting his iPhone VoiceOver verification; no merge/closure/TestFlight/release.
+
 ## September 5, 2026: bottom Player row (#951)
 
 Michael requested a focused comfort adjustment: playback position remains above

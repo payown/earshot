@@ -7,29 +7,43 @@ is pending. The final Release build and signature verification passed.
 Michael requested direct device testing first; do not upload to TestFlight.
 Do not merge the feature PRs or close #947–#951 until Michael confirms.
 
-## Final bottom-row Player checklist
+## Middle-placement Player trial
 
-The latest local revision keeps version 1.2.2 (255). The anchored area now reads
-Playback position, Skip back / Play-Pause / Skip forward, then AirPlay (audio
-destination) and Show notes side by side. The bottom row raises transport while
-preserving its physical position for a given screen and text setting.
+The latest local revision remains 1.2.2 (255). On a sufficiently tall screen,
+artwork/title scroll above the playback area, while chapters, speed, timer,
+errors and transcript scroll below it. The two regions share available space,
+keeping playback around the middle without a device-specific position.
+Playback position stays above transport; AirPlay and Show notes stay side by
+side below. Shorter screens at accessibility text sizes use one scrolling
+content region above stable playback so content remains usable.
 
-1. Explore playback position, then move down to Play/Pause and the skips. Check
-   whether they feel comfortably placed; their enlarged targets should remain
-   separate. The position slider must stay above transport.
-2. Find AirPlay and Show notes below transport. Open each, then return. AirPlay
-   should present the native destination picker. Actual destination selection
-   is a physical-device check; the simulator did not expose that system sheet.
-3. Compare episodes with and without notes. Show notes must stay in place and
-   announce its unavailable/disabled state when absent. Transport must not move.
-4. Change long/short episodes, wait for chapters/artwork, and start/cancel a timer.
-   Scroll all details and repeat at larger text. Controls should stay anchored,
-   notes should wrap without clipping, and the Home indicator should stay clear.
-5. Confirm artwork and its Actions remain reachable, and returning from More
-   options still restores focus. No delayed opening request should steal focus.
+1. Open Player and find Play/Pause by touch near the middle. Move upward to
+   playback position and sideways to skips. Does this placement feel better?
+2. Compare short/long episodes, missing artwork, arriving chapters and timer
+   changes. Scroll above and below the playback area. Primary positions should
+   remain predictable for the same screen and text setting.
+3. Reach the title and artwork above, including artwork Actions, and all lower
+   details. Repeat at larger text. On a small screen, the adaptive fallback
+   prioritizes content access over an exact midpoint.
+4. Open AirPlay and Show notes, including an episode without notes. Confirm
+   the row stays in place and unavailable notes are announced. Return from
+   More options/Bookmarks and check focus restoration.
 
-Measured simulator bounds and native test results are documented below. They do
-not establish physical VoiceOver touch accuracy, focus, or comfort.
+Pro Max simulator standard text: Play/Pause center moved from 806 to 520 screen
+points (286pt higher, near the middle of a 956pt screen). At AX5 it moved from
+about 732 to 545pt. These measurements do not establish physical comfort or
+VoiceOver focus/touch accuracy at Michael's current settings. That is the
+purpose of this local trial. No TestFlight, merge, issue closure or release.
+
+Final trial validation: required earshot-accessibility source review PASS;
+183 focused playback/Queue/sleep-timer tests passed. Standard/AX5 stability,
+slider edge-tap and content-access checks passed on SE and Pro Max. Notes and
+More options flows passed. The SE AX5 title test initially flicked past the
+heading; shorter directed drags confirmed it was reachable. Source revision
+69bf17f was built as signed Release 1.2.2 (255), signature-verified, installed
+and launched over Wi-Fi, and its running process verified. Simulator checks
+establish measured bounds/hit testing, not physical VoiceOver accuracy or
+native audio-destination selection. Those remain the phone checklist above.
 
 ## Original VoiceOver checklist (passed on iPhone)
 
