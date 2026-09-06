@@ -45,6 +45,7 @@ struct NowPlayingScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(SettingsStore.self) private var settings
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.playbackFolderNavigation) private var openPlaybackFolder
     @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
     private var folders: [PodcastFolder]
@@ -82,40 +83,40 @@ struct NowPlayingScreen: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                playerHeader
-                ScrollView {
-                    VStack(spacing: Spacing.xl) {
-                        artworkBlock
-                            .padding(.top, Spacing.lg)
-                        titleBlock
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, Spacing.lg)
-                    .padding(.bottom, Spacing.xl)
-                }
-                .frame(maxHeight: .infinity)
-                .accessibilityIdentifier("player.episodeContent")
-                playbackDock
-                ScrollView {
-                    VStack(spacing: Spacing.xl) {
-                        if let failure = player.playbackFailureMessage {
-                            Label(failure, systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.secondary)
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel(failure)
+            GeometryReader { geometry in
+                // Two readable regions plus enlarged header/controls need this
+                // height budget at accessibility text sizes. This breakpoint
+                // depends only on available space and text size, never an episode.
+                let separateDetails = !dynamicTypeSize.isAccessibilitySize || geometry.size.height >= 800
+                VStack(spacing: 0) {
+                    playerHeader
+                    ScrollView {
+                        VStack(spacing: Spacing.xl) {
+                            artworkBlock
+                                .padding(.top, Spacing.lg)
+                            titleBlock
+                            if !separateDetails { playerDetails }
                         }
-                        chapterRow
-                        speedRow
-                        sleepTimerRow
-                        if hasTranscript { transcriptButton }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Spacing.lg)
+                        .padding(.bottom, Spacing.xl)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, Spacing.lg)
-                    .padding(.vertical, Spacing.lg)
+                    .frame(maxHeight: .infinity)
+                    .accessibilityIdentifier("player.episodeContent")
+                    playbackDock
+                    if separateDetails {
+                        ScrollView {
+                            VStack(spacing: Spacing.xl) {
+                                playerDetails
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, Spacing.lg)
+                            .padding(.vertical, Spacing.lg)
+                        }
+                        .frame(maxHeight: .infinity)
+                        .accessibilityIdentifier("player.details")
+                    }
                 }
-                .frame(maxHeight: .infinity)
-                .accessibilityIdentifier("player.details")
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingControls, onDismiss: {
@@ -164,8 +165,8 @@ struct NowPlayingScreen: View {
         }
     }
 
-    // Two equally flexible scroll regions share the space around the playback
-    // area. Episode content cannot change its position. Visual and semantic
+    // When space permits, two equally flexible scroll regions share the space
+    // around playback. Episode content cannot change its position. Visual and semantic
     // order match without an overlay or sort priority. System initial
     // focus is left alone: no delayed request can steal focus after a first touch.
     private var playerHeader: some View {
@@ -195,6 +196,21 @@ struct NowPlayingScreen: View {
         .padding(.horizontal, Spacing.lg)
         .background(.regularMaterial)
         .accessibilityElement(children: .contain)
+    }
+
+    private var playerDetails: some View {
+        VStack(spacing: Spacing.xl) {
+            if let failure = player.playbackFailureMessage {
+                Label(failure, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(failure)
+            }
+            chapterRow
+            speedRow
+            sleepTimerRow
+            if hasTranscript { transcriptButton }
+        }
     }
 
     private var playbackDock: some View {
