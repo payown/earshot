@@ -1,9 +1,50 @@
 import AVFoundation
+import MediaPlayer
 import XCTest
 @testable import Earshot
 
 @MainActor
 final class PlayerAudioSessionTests: XCTestCase {
+    func testExplicitPauseAndBackgroundPreserveNowPlayingWithoutReactivation() throws {
+        let session = MockPlayerAudioSession()
+        let player = PlayerService(audioSession: session)
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        player.playPreview(guid: "paused", title: "Paused episode", audioURL: audioURL.absoluteString, showTitle: "Show")
+        player.pause()
+        player.persistForBackground()
+
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(player.currentTitle, "Paused episode")
+        XCTAssertEqual(session.activationCount, 1)
+        let info = MPNowPlayingInfoCenter.default().nowPlayingInfo
+        XCTAssertEqual(info?[MPMediaItemPropertyTitle] as? String, "Paused episode")
+        XCTAssertEqual((info?[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue, 0)
+        player.stopAndUnload()
+    }
+
+    func testInterruptionDoesNotResumeExplicitlyPausedEpisode() async throws {
+        let session = MockPlayerAudioSession()
+        let player = PlayerService(audioSession: session)
+        let container = try ModelContainerFactory.makeInMemory()
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        player.configure(context: container.mainContext)
+        player.playPreview(guid: "paused", title: "Paused episode", audioURL: audioURL.absoluteString, showTitle: "Show")
+        player.pause()
+        NotificationCenter.default.post(name: AVAudioSession.interruptionNotification, object: session.notificationObject, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+            AVAudioSessionInterruptionReasonKey: AVAudioSession.InterruptionReason.default.rawValue,
+        ])
+        try await Task.sleep(for: .milliseconds(50))
+        postInterruption(.ended, options: .shouldResume, session: session)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(session.activationCount, 1)
+        XCTAssertNotNil(MPNowPlayingInfoCenter.default().nowPlayingInfo)
+        player.stopAndUnload()
+    }
+
     func testPlaybackStartConfiguresAndActivatesProductionRoutingOptions() {
         let session = MockPlayerAudioSession()
         let player = PlayerService(audioSession: session)
