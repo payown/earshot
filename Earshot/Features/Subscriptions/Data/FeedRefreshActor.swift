@@ -518,6 +518,7 @@ actor FeedRefreshActor {
                 if let fetchResult = fetched.result {
                     do {
                         if case let .notModified(validators) = fetchResult {
+                            let dismissed = try enforceInboxLimits(for: podcast, now: .now)
                             LocalStateStore.setRefreshedAt(.now, on: podcast, in: modelContext)
                             try FeedRefreshValidatorStore.set(
                                 validators,
@@ -531,7 +532,8 @@ actor FeedRefreshActor {
                                 outcome: RefreshOutcome(
                                     added: 0,
                                     wasBackfill: false,
-                                    newestNewEpisodeGUID: nil
+                                    newestNewEpisodeGUID: nil,
+                                    inboxDismissedEpisodeIDs: dismissed.map(\.persistentModelID)
                                 ),
                                 wasNotModified: true
                             )
@@ -564,13 +566,14 @@ actor FeedRefreshActor {
                             "ActorApply",
                             "inputIndex=\(inputIndex) candidateCount=\(repairGUIDs.count)"
                         )
-                        let applyOutcome = apply(
+                        var applyOutcome = apply(
                             parsed,
                             to: podcast,
                             autoQueueEnabled: autoQueueEnabled,
                             reconcileExistingEpisodeMetadata:
                                 trigger.reconcilesExistingEpisodeMetadata
                         )
+                        applyOutcome.inboxDismissedEpisodes = try enforceInboxLimits(for: podcast, now: .now)
                         try FeedRefreshValidatorStore.set(
                             validators,
                             feedURL: url,
@@ -690,12 +693,13 @@ actor FeedRefreshActor {
         let repair = try IdentityRepairService(context: modelContext)
             .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
         if repair.didChange { try saveWithSignpost() }
-        let applyOutcome = apply(
+        var applyOutcome = apply(
             parsed,
             to: podcast,
             autoQueueEnabled: autoQueueEnabled,
             reconcileExistingEpisodeMetadata: true
         )
+        applyOutcome.inboxDismissedEpisodes = try enforceInboxLimits(for: podcast, now: .now)
         // Save BEFORE resolving `newEpisodeIDs` — persistentModelID is temporary
         // for a newly-inserted Episode until the context saves (same reason
         // `subscribe(feedURL:feed:inboxSeedCount:)` above saves before `result()`).
@@ -1469,6 +1473,7 @@ actor FeedRefreshActor {
         let inboxReentryEpisodes: [Episode]
         let insertedCount: Int
         var metadataUpdatedCount = 0
+        var inboxDismissedEpisodes: [Episode] = []
         var correctedMediaEpisodes: [(
             episode: Episode,
             restoreDownloadIntent: Bool,
@@ -1479,6 +1484,7 @@ actor FeedRefreshActor {
             var outcome = refreshOutcome
             outcome.newEpisodeIDs = newEpisodes.map(\.persistentModelID)
             outcome.inboxReentryEpisodeIDs = inboxReentryEpisodes.map(\.persistentModelID)
+            outcome.inboxDismissedEpisodeIDs = inboxDismissedEpisodes.map(\.persistentModelID)
             outcome.metadataUpdatedCount = metadataUpdatedCount
             outcome.correctedMedia = correctedMediaEpisodes.map {
                 CorrectedEpisodeMedia(
@@ -1489,6 +1495,67 @@ actor FeedRefreshActor {
             }
             return outcome
         }
+    }
+
+    /// Enforce on this actor's context before the refresh checkpoint saves.
+    /// Read only undismissed, unplayed candidates for one show in GUID-keyed
+    /// pages; never walk the podcast's entire inverse episode relationship.
+    /// Keep at most the count cap's newest candidates while scanning. Mutating
+    /// dismissal cannot move the GUID cursor or cause skipped pages.
+    private func enforceInboxLimits(for podcast: Podcast, now: Date) throws -> [Episode] {
+        let cap = podcast.inboxMaxEpisodes.flatMap { $0 >= 0 ? $0 : nil }
+        guard cap != nil || podcast.inboxAgeLimitHours != nil else { return [] }
+        let optInOnly = LocalAppSettingIdentity.value(for: SettingsKey.inboxOptInOnly, in: modelContext)
+            .map { ($0 as NSString).boolValue } ?? SettingsDefault.inboxOptInOnly
+        guard optInOnly ? podcast.inboxIncluded : !InboxLogic.isExcluded(
+            inboxExcluded: podcast.inboxExcluded, inboxIncluded: podcast.inboxIncluded
+        ) else { return [] }
+        let podcastID = podcast.persistentModelID
+        var cursor: String?
+        var newest: [Episode] = []
+        var dismissed: [Episode] = []
+        while true {
+            try Task.checkCancellation()
+            let predicate: Predicate<Episode>
+            if let cursor {
+                predicate = #Predicate {
+                    $0.podcast?.persistentModelID == podcastID && !$0.inboxDismissed
+                        && $0.playedAt == nil && $0.guid > cursor
+                }
+            } else {
+                predicate = #Predicate {
+                    $0.podcast?.persistentModelID == podcastID && !$0.inboxDismissed && $0.playedAt == nil
+                }
+            }
+            var query = FetchDescriptor<Episode>(predicate: predicate,
+                sortBy: [SortDescriptor(\Episode.guid, comparator: .lexical)])
+            query.fetchLimit = 100
+            let page = try modelContext.fetch(query)
+            guard let last = page.last else { break }
+            cursor = last.guid
+            for episode in page where episode.status == .newEpisode {
+                if let hours = podcast.inboxAgeLimitHours, episode.positionSeconds == 0,
+                   let date = episode.pubDate, date < now.addingTimeInterval(-Double(hours) * 3_600) {
+                    episode.inboxDismissed = true
+                    dismissed.append(episode)
+                    continue
+                }
+                if let cap {
+                    newest.append(episode)
+                    newest.sort {
+                        let lhs = $0.pubDate ?? .distantPast
+                        let rhs = $1.pubDate ?? .distantPast
+                        return lhs == rhs ? $0.guid < $1.guid : lhs > rhs
+                    }
+                    if newest.count > cap {
+                        let overflow = newest.removeLast()
+                        overflow.inboxDismissed = true
+                        dismissed.append(overflow)
+                    }
+                }
+            }
+        }
+        return dismissed
     }
 
     private struct OrdinaryCandidateSelection {

@@ -22,6 +22,20 @@ Recently Expired appears in Downloads for episodes that automatically expired fr
 
 5. Choose whether to enable Delete downloads when done. It defaults to Off. When on, Earshot removes downloaded audio when you finish an episode, mark it played, deliberately remove it from Queue, or clear it from Inbox using Clear inbox.
 
+## Keep only the latest news episode in Inbox
+
+For an hourly news podcast that you want to download only after choosing it:
+
+1. In Settings, Downloads, set Auto-download new episodes per podcast to Off. A value of 1 means up to one new download per podcast on each refresh, not a one-file storage limit.
+2. Leave Auto-download queued episodes on if adding an episode to Queue should download it.
+3. In that podcast's settings, turn Add new episodes to queue off and include the podcast in Inbox.
+4. Set Inbox episode limit to 1. Leave Remove from inbox after at No limit if you want the latest episode to remain regardless of age.
+5. Refresh. After a successful refresh, older Inbox entries are dismissed and the newest eligible entry remains. This also works when the server reports no new feed content.
+
+The count and age limits are independent. No limit for age does not disable a count limit. Age removal uses publication time and leaves partially played episodes alone; the count limit still keeps the newest entries. These limits hide Inbox entries without deleting downloaded files, marking episodes played, or removing episodes from the podcast's library. Existing downloads remain until you remove them or another download-cleanup rule applies. Increasing a limit does not automatically restore entries already dismissed.
+
+Earlier versions, including 1.2.1 (255), did not consistently apply Inbox count and age limits after refresh. The correction is included in this guide's accompanying update.
+
 ## Download the current Inbox or Queue
 
 1. Open Inbox or Queue and check the folder and search scope. Clear a search if you intend to download every eligible episode in that scope.
