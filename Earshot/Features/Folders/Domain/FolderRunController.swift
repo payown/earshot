@@ -293,6 +293,7 @@ final class FolderRunController {
         if let snapshot, snapshot.state != .cancelled {
             Announcer.announce("\(folderName) finished. \(snapshot.completed) completed, \(snapshot.skipped) already played, \(snapshot.unavailableEpisodes) unavailable episodes. \(snapshot.unavailablePodcasts) feeds could not be fully checked.")
             if autoplay { player?.resumeOrdinaryQueueAfterFolderRun() }
+            else { player?.clearFolderRunPresentation() }
         }
     }
 

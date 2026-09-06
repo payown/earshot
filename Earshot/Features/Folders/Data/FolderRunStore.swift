@@ -102,7 +102,7 @@ actor FolderRunStore {
         var offset = 0
         while true {
             try Task.checkCancellation()
-            let count = try numberPage(id: id, offset: offset)
+            let count = try autoreleasepool { try numberPage(id: id, offset: offset) }
             offset += count
             if count < FolderRunPolicy.batchSize { break }
         }
