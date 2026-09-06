@@ -289,12 +289,13 @@ struct PodcastSettingsView: View {
     }
 
     private var foldersSection: some View {
-        Section {
-            if containingFolders.isEmpty {
+        let folders = containingFolders
+        return Section {
+            if folders.isEmpty {
                 Text(Self.notInAnyFolderText)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(containingFolders, id: \.persistentModelID) { folder in
+                ForEach(folders, id: \.persistentModelID) { folder in
                     let path = FolderLogic.pathString(folder)
                     Label {
                         Text(path)
@@ -655,11 +656,7 @@ struct PodcastSettingsView: View {
 
     private func persistPodcastProjectionChange() {
         do {
-            if modelContext.hasChanges { try modelContext.save() }
-            NotificationCenter.default.post(
-                name: .earshotSubscriptionsDidChange,
-                object: nil
-            )
+            try PodcastSettingsPersistence.save(podcast, in: modelContext)
         } catch {
             AppLog.data.error(
                 "Failed to persist podcast settings: \(error.localizedDescription, privacy: .public)"
@@ -682,6 +679,25 @@ struct PodcastSettingsView: View {
             ? String(Int(value))
             : String(value)
         return "\(formatted) times speed"
+    }
+}
+
+/// Scalar preference edits do not change folder membership or subscription state.
+/// Keep the save immediate, but scope downstream work to this one podcast.
+@MainActor
+enum PodcastSettingsPersistence {
+    nonisolated static let settingsOnlyKey = "podcastSettingsOnly"
+
+    static func save(
+        _ podcast: Podcast, in context: ModelContext,
+        center: NotificationCenter = .default
+    ) throws {
+        if context.hasChanges { try context.save() }
+        center.post(
+            name: .earshotSubscriptionsDidChange,
+            object: podcast.feedURL,
+            userInfo: [settingsOnlyKey: true]
+        )
     }
 }
 

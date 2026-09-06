@@ -209,7 +209,10 @@ struct FolderDetailScreen: View {
             .onReceive(
                 NotificationCenter.default.publisher(for: .earshotSubscriptionsDidChange)
                     .receive(on: DispatchQueue.main)
-            ) { _ in
+            ) { notification in
+                // Changing a scalar podcast preference cannot change this snapshot.
+                guard notification.userInfo?[PodcastSettingsPersistence.settingsOnlyKey] as? Bool != true
+                else { return }
                 scheduleSnapshotReload()
             }
     }

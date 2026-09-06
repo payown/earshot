@@ -8,6 +8,36 @@ import SwiftData
 @MainActor
 final class PodcastSettingsViewTests: XCTestCase {
 
+    func testInboxCapSavePublishesOnlyTheEditedPodcastAfterDurableSave() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx)
+        try ctx.save()
+        let center = NotificationCenter()
+        let notice = expectation(description: "Targeted settings notification")
+        notice.assertForOverFulfill = true
+        let feed = podcast.feedURL
+        let settingsOnlyKey = PodcastSettingsPersistence.settingsOnlyKey
+        let observer = center.addObserver(
+            forName: .earshotSubscriptionsDidChange, object: nil, queue: nil
+        ) { notification in
+            XCTAssertEqual(notification.object as? String, feed)
+            XCTAssertEqual(notification.userInfo?[settingsOnlyKey] as? Bool, true)
+            notice.fulfill()
+        }
+        defer { center.removeObserver(observer) }
+
+        podcast.inboxMaxEpisodes = 1
+        AppSettingsStore(context: ctx).setPodcastInboxCap(1, forFeedURL: feed)
+        try PodcastSettingsPersistence.save(podcast, in: ctx, center: center)
+
+        let fresh = ModelContext(ctx.container)
+        let persisted = try XCTUnwrap(fresh.fetch(FetchDescriptor<Podcast>()).first)
+        XCTAssertEqual(persisted.inboxMaxEpisodes, 1)
+        XCTAssertEqual(AppSettingsStore(context: fresh).podcastInboxCap(forFeedURL: feed), 1)
+        XCTAssertFalse(ctx.hasChanges)
+        wait(for: [notice], timeout: 1)
+    }
+
     func testPersonalNameSurvivesRefreshAndFreshContextAndRestore() throws {
         let ctx = TestStore.freshContext()
         let podcast = makePodcast(ctx)

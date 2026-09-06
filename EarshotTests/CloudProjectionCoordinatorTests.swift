@@ -336,19 +336,19 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: center,
             deviceID: "phone"
         )
-        try await coordinator.start()
+        try await coordinator.start(performInitialReconciliation: false)
         let first = Podcast(feedURL: "https://example.com/first", title: "First")
         let second = Podcast(feedURL: "https://example.com/second", title: "Second")
         app.mainContext.insert(first)
         app.mainContext.insert(second)
         try app.mainContext.save()
-        center.post(name: .earshotSubscriptionsDidChange, object: nil)
-        try await waitForProjectionPodcastCount(2, in: projection)
+        // Seed synchronously so no earlier graph reconciliation is still in flight.
+        try await coordinator.publishLocalSubscriptionGraphChange(feedURL: nil)
 
         first.speedOverride = 1.5
         second.speedOverride = 1.75
         try app.mainContext.save()
-        center.post(name: .earshotSubscriptionsDidChange, object: first.feedURL)
+        try PodcastSettingsPersistence.save(first, in: app.mainContext, center: center)
         try await waitForProjectedSpeed(1.5, feedURL: first.feedURL, in: projection)
         projection.mainContext.rollback()
 
@@ -358,6 +358,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let values = Dictionary(uniqueKeysWithValues: rows.map { ($0.feedURL, $0.speedOverride) })
         XCTAssertEqual(values[first.feedURL]!, 1.5)
         XCTAssertNil(values[second.feedURL]!)
+        await coordinator.stop()
     }
 
     func testBurstOfRemoteImportNotificationsCoalescesAndStopsCleanly() async throws {

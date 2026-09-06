@@ -155,12 +155,12 @@ final class FolderRepository {
     /// The folders a podcast currently belongs to.
     func folders(containing podcast: Podcast) -> [PodcastFolder] {
         let podcastID = podcast.persistentModelID
-        let folderIDs: Set<PersistentIdentifier> = Set(allMemberships().compactMap {
-            membership -> PersistentIdentifier? in
-            membership.podcast?.persistentModelID == podcastID
-                ? membership.folder?.persistentModelID
-                : nil
-        })
+        // Settings redraws must not fault every other podcast's memberships.
+        let descriptor = FetchDescriptor<FolderMembership>(
+            predicate: #Predicate { $0.podcast?.persistentModelID == podcastID }
+        )
+        let memberships = (try? context.fetch(descriptor)) ?? []
+        let folderIDs = Set(memberships.compactMap { $0.folder?.persistentModelID })
         return folders().filter { folderIDs.contains($0.persistentModelID) }
     }
 

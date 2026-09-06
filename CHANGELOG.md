@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Podcast setting edits use targeted subscription updates and narrower settings/folder lookups, reducing unnecessary work while adjusting Inbox limits. Immediate persistence and VoiceOver controls are unchanged.
+
 - Inbox count and age limits now apply after successful refreshes, including unchanged feeds. Keeping one Inbox episode does not delete older downloaded audio.
 
 - System playback controls can resume the saved episode when Earshot relaunches in the background after a pause. Corrected audio-session configuration and prevented late startup work from interrupting resumed playback.
