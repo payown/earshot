@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Player Skip back, Skip forward, and episode artwork now explain where to find their additional VoiceOver actions. (#948)
+
 - Add Podcast places search directly below its heading before the RSS-feed option. VoiceOver announces the result count once instead of repeating a position on every podcast, and expandable categories no longer carry a redundant heading trait.
 - Removed the Voice Enhance setting because it selected a spoken-audio session mode and mono output but did not perform speech-enhancement processing. Playback continues to use stereo output and the stable time-stretch algorithm.
 
