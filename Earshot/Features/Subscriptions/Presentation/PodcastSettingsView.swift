@@ -26,6 +26,9 @@ struct PodcastSettingsView: View {
     /// this token owns the async `requestAuthorization()` call so it runs with
     /// the view's lifetime rather than in an unowned `Task {}` that SwiftUI may
     /// tear down before it reaches the system prompt (#421).
+    @State private var showingNameEditor = false
+    @State private var nameFeedback: String?
+    @AccessibilityFocusState private var nameButtonFocused: Bool
     @State private var authRequestToken = 0
     /// iOS-level notification authorization, or `nil` before the first check
     /// completes. Checked on appear, after any authorization request, and
@@ -144,6 +147,14 @@ struct PodcastSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if podcast.isFollowed {
+                    Section("Podcast name") {
+                        Button("Rename podcast") { showingNameEditor = true }
+                            .accessibilityValue(podcast.displayName)
+                            .accessibilityFocused($nameButtonFocused)
+                        Text("Publisher name: \(podcast.title)")
+                    }
+                }
                 playbackSection
                 queueSection
                 inboxSection
@@ -161,6 +172,17 @@ struct PodcastSettingsView: View {
                     .accessibilityLabel("Done")
                     .accessibilityHint("Closes podcast settings")
                 }
+            }
+            .sheet(isPresented: $showingNameEditor, onDismiss: {
+                nameButtonFocused = true
+                if let message = nameFeedback {
+                    nameFeedback = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        Announcer.announce(message)
+                    }
+                }
+            }) {
+                PodcastNameEditor(podcast: podcast) { nameFeedback = $0 }
             }
             .sheet(isPresented: $showingFolderPicker) {
                 PodcastFolderPickerView(podcast: podcast)
@@ -660,5 +682,69 @@ struct PodcastSettingsView: View {
             ? String(Int(value))
             : String(value)
         return "\(formatted) times speed"
+    }
+}
+
+/// A draft is isolated from the saved preference until Save succeeds.
+private struct PodcastNameEditor: View {
+    let podcast: Podcast
+    let onSaved: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+    @State private var draft = ""
+    @State private var errorMessage: String?
+    @FocusState private var editingName: Bool
+    @AccessibilityFocusState private var nameFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Podcast name", text: $draft)
+                        .accessibilityLabel("Podcast name")
+                        .focused($editingName)
+                        .accessibilityFocused($nameFocused)
+                        .submitLabel(.done)
+                        .onSubmit { if PodcastNamePolicy.normalized(draft) != nil { save(draft) } }
+                    Text("Publisher name: \(podcast.title)")
+                    Button("Restore original name") { save(nil) }
+                } footer: {
+                    Text("Your personal name appears throughout Earshot and syncs with your private iCloud library. Shared files keep the publisher's name.")
+                }
+            }
+            .navigationTitle("Rename podcast")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save(draft) }
+                        .disabled(PodcastNamePolicy.normalized(draft) == nil)
+                }
+            }
+            .task {
+                draft = podcast.displayName
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                editingName = true
+                nameFocused = true
+            }
+            .alert("Could not save podcast name", isPresented: Binding(
+                get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { nameFocused = true }
+            } message: { Text(errorMessage ?? "Please try again.") }
+        }
+    }
+
+    private func save(_ name: String?) {
+        do {
+            try PodcastDisplayNames.shared.save(name, for: podcast, context: context)
+            onSaved(name == nil ? "Original podcast name restored" : "Podcast name saved")
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }

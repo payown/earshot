@@ -80,7 +80,7 @@ struct AddFeedView: View {
         defer { isLoading = false }
         do {
             let podcast = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: urlString)
-            Announcer.announce("Now following \(podcast.title)")
+            Announcer.announce("Now following \(podcast.displayName)")
             dismiss()
         } catch {
             // Keep the raw error for diagnostics, but never surface it: a raw

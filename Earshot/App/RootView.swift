@@ -515,6 +515,10 @@ struct RootView: View {
                 .receive(on: DispatchQueue.main)
         ) { _ in
             settings.configure(context: modelContext)
+            player.refreshPodcastDisplayName()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotPodcastNamesDidChange)) { _ in
+            player.refreshPodcastDisplayName()
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotFolderSyncConflictRepaired)

@@ -189,9 +189,10 @@ struct EpisodeListView: View {
             filter = AppSettingsStore(context: context).episodeListFilter(forFeedURL: podcast.feedURL)
             resetEpisodePage(moveFocusToResults: false)
         }
-        .navigationTitle(podcast.title)
+        .navigationTitle(podcast.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search episodes")
+        .onChange(of: podcast.displayName) { reloadEpisodePage() }
         .onChange(of: searchText) {
             scheduleSearchReload()
         }
@@ -288,7 +289,7 @@ struct EpisodeListView: View {
                 .accessibilityHint(
                     unplayedCount == 0
                         ? "No unplayed episodes"
-                        : "Marks all \(unplayedCount) unplayed episodes in \(podcast.title) as played"
+                        : "Marks all \(unplayedCount) unplayed episodes in \(podcast.displayName) as played"
                 )
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -356,7 +357,7 @@ struct EpisodeListView: View {
             Button("Unfollow", role: .destructive) { unfollow(podcast) }
             Button("Cancel", role: .cancel) { pendingUnfollow = nil }
         } message: { podcast in
-            Text("This removes \(podcast.title) and its episodes from your library. This can't be undone.")
+            Text("This removes \(podcast.displayName) and its episodes from your library. This can't be undone.")
         }
         // Confirmation for the bulk "Mark all as played" action (#640),
         // reached from either the toolbar button or the rotor action above.
@@ -515,7 +516,7 @@ struct EpisodeListView: View {
     /// announce and pop only on `true`; this screen's subject no longer exists,
     /// so it dismisses back to the list it was pushed from.
     private func unfollow(_ podcast: Podcast) {
-        let title = podcast.title
+        let title = podcast.displayName
         let removed = SubscriptionRepository(context: context).unsubscribe(podcast)
         pendingUnfollow = nil
         guard removed else { return }
@@ -538,7 +539,7 @@ struct EpisodeListView: View {
     /// Body copy for the "Mark all as played" confirmation, naming the show
     /// and stating the action can't be undone.
     private var markAllPlayedConfirmationMessage: String {
-        MarkAllPlayedConfirmationCopy.message(unplayedCount: unplayedCount, podcastTitle: podcast.title)
+        MarkAllPlayedConfirmationCopy.message(unplayedCount: unplayedCount, podcastTitle: podcast.displayName)
     }
 
     /// Runs the batched repository call (#640) and announces the result.
@@ -573,7 +574,7 @@ struct EpisodeListView: View {
     private var header: some View {
         VStack(alignment: .center, spacing: Spacing.sm) {
             PodcastArtwork(urlString: podcast.artworkURL, size: 120, cornerRadius: 12)
-            Text(podcast.title)
+            Text(podcast.displayName)
                 .font(.headline)
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
@@ -654,14 +655,14 @@ struct EpisodeListView: View {
             )
             if outcome.rejectedAllNewCandidates {
                 Announcer.announce(
-                    "\(podcast.title) refreshed. Episode filters excluded all new episodes. Review this podcast's filters."
+                    "\(podcast.displayName) refreshed. Episode filters excluded all new episodes. Review this podcast's filters."
                 )
             } else {
-                Announcer.announce("\(podcast.title) refreshed")
+                Announcer.announce("\(podcast.displayName) refreshed")
             }
         } catch {
             AppLog.subscriptions.error("Refresh failed: \(error.localizedDescription, privacy: .public)")
-            Announcer.announce("Couldn't refresh \(podcast.title)")
+            Announcer.announce("Couldn't refresh \(podcast.displayName)")
         }
     }
 
@@ -726,11 +727,14 @@ struct EpisodeListView: View {
 
     @discardableResult
     private func ensureEpisodeList() -> EpisodeListDataSource {
-        if let episodeList { return episodeList }
+        if let episodeList {
+            episodeList.podcastTitle = "\(podcast.title) \(podcast.displayName)"
+            return episodeList
+        }
         let source = EpisodeListDataSource(
             context: context,
             podcastID: podcast.persistentModelID,
-            podcastTitle: podcast.title
+            podcastTitle: "\(podcast.title) \(podcast.displayName)"
         )
         episodeList = source
         return source
@@ -750,6 +754,7 @@ struct EpisodeListView: View {
 
     private func reloadEpisodePage() {
         guard !podcast.isDeleted, let episodeList else { return }
+        episodeList.podcastTitle = "\(podcast.title) \(podcast.displayName)"
         episodeList.reloadKeepingLoadedLimit(
             filter: filter,
             sort: settings.episodeSortOrder,
