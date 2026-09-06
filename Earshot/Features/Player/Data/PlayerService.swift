@@ -2630,10 +2630,11 @@ final class PlayerService {
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            let reported = notification.object as? AVPlayerItem
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let expected = self.player.currentItem
-                if let reported = notification.object as? AVPlayerItem, reported !== expected { return }
+                if let reported, reported !== expected { return }
                 Task { @MainActor [weak self, weak expected] in
                     guard let self, let expected, expected === self.player.currentItem else { return }
                     self.handlePlaybackEnded()
@@ -3181,7 +3182,10 @@ final class PlayerService {
         let episodeID = episode.persistentModelID
         if mediaRecoveryInProgressEpisodeID == episodeID { return }
         guard currentPlaybackURL?.isFileURL == true else {
-            folderRuns.playbackFailed(episode)
+            let unavailable = player.currentItem?.errorLog()?.events.contains {
+                $0.errorStatusCode == 404 || $0.errorStatusCode == 410
+            } == true
+            folderRuns.playbackFailed(episode, unavailable: unavailable)
             // A normal remote stream can fail transiently while the player is
             // still resolving or buffering it. Only surface a remote failure
             // when it is the retry from a known-bad downloaded copy.

@@ -25,8 +25,9 @@ the prepared run. Unfollowed shows and deleted or already-played episodes are
 skipped when their turn arrives.
 
 Preparation includes stored episodes and older episodes still exposed by RSS.
-It cannot restore a publisher's unavailable archive. Failed or empty feeds are
-counted, and stored episodes from those shows remain eligible. Imported history
+It cannot restore a publisher's unavailable archive. Failed or empty feeds and
+fully numbered feeds starting above episode one are flagged as unavailable or
+possibly incomplete; stored episodes from those shows remain eligible. Imported history
 does not arrive in Inbox, send notifications, or trigger automatic downloads.
 Episodes stream unless already downloaded; preparation is not Download all.
 
@@ -42,6 +43,8 @@ Deliberately playing something else pauses it. Relaunch restores active playback
 paused at the saved position, never starts audio automatically, and cancels
 unfinished preparation. A failed stream retains its place and unplayed state:
 Resume retries, while Skip unavailable folder episode explicitly skips it.
+An explicit HTTP 404 or 410 in the player's error log skips automatically;
+ambiguous failures never silently advance or mark an episode played.
 
 ## Ownership and durability
 

@@ -31,7 +31,7 @@ struct FolderRunScreen: View {
                     LabeledContent("Remaining", value: String(snapshot.remaining))
                     LabeledContent("Completed", value: String(snapshot.completed))
                     LabeledContent("Already played or unavailable", value: String(snapshot.skipped + snapshot.unavailableEpisodes))
-                    LabeledContent("Feeds not fully checked", value: String(snapshot.unavailablePodcasts))
+                    LabeledContent("Feeds unavailable or possibly incomplete", value: String(snapshot.unavailablePodcasts))
                     if !snapshot.state.isTerminal {
                         if snapshot.state != .preparing {
                             Button("Resume folder run") { confirmPlayback = true }

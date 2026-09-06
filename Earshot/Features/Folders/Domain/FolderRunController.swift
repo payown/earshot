@@ -198,10 +198,15 @@ final class FolderRunController {
 
     /// A failed stream is not proof of a permanently missing episode. Keep the
     /// cursor and played state; only an explicit skip records it as unavailable.
-    func playbackFailed(_ episode: Episode) {
+    func playbackFailed(_ episode: Episode, unavailable: Bool = false) {
         guard driving, identity(episode) == currentItem?.identity else { return }
         player?.pause()
         hasPlaybackFailure = true
+        if unavailable {
+            Announcer.announce("Skipping unavailable folder episode. It has not been marked played.")
+            skipFailedEpisode()
+            return
+        }
         message = "This folder episode could not play. Resume to retry, or skip it in Folder run status. It has not been marked played."
         Announcer.announce(message ?? "Folder episode could not play")
     }

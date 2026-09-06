@@ -90,7 +90,7 @@ final class FolderRunIntegrationTests: XCTestCase {
         let before = QueueRepository(context: context).queue().map(\.guid)
         let parsed = (0..<3_005).map { index in
             ParsedEpisode(guid: "rss-\(index)", title: "Older \(index)", audioURL: "https://example.invalid/audio.mp3",
-                          pubDate: .now.addingTimeInterval(-Double(index + 1)))
+                          pubDate: .now.addingTimeInterval(-Double(index + 1)), episodeNumber: index + 10)
         }
         let feed = FolderRunTestFeed(episodes: parsed, failing: [b.feedURL])
         let catalog = FolderRunCatalog(container: context.container)
@@ -99,7 +99,7 @@ final class FolderRunIntegrationTests: XCTestCase {
         try await catalog.prepare(feeds: [a.feedURL, b.feedURL], runID: run.id, store: store, feed: feed) { _ in }
         let ready = try await store.seal(id: run.id)
         XCTAssertEqual(ready.discovered, 3_007)
-        XCTAssertEqual(ready.unavailablePodcasts, 1)
+        XCTAssertEqual(ready.unavailablePodcasts, 2, "One failed feed and one possibly truncated numbered archive")
         let calls = await feed.counts()
         XCTAssertEqual(calls, [a.feedURL: 1, b.feedURL: 1])
         let fresh = ModelContext(context.container)
@@ -273,9 +273,11 @@ final class FolderRunIntegrationTests: XCTestCase {
         XCTAssertEqual(player.nowPlayingEpisode?.guid, "second")
         XCTAssertFalse(first.isPlayed)
         XCTAssertEqual(run.snapshot?.unavailableEpisodes, 1)
-        XCTAssertTrue(run.completeCurrent(second, continuePlayback: false))
+        run.playbackFailed(second, unavailable: true)
         await run.waitForOperationForTesting()
         XCTAssertFalse(player.isPlaying)
+        XCTAssertFalse(second.isPlayed)
+        XCTAssertEqual(run.snapshot?.unavailableEpisodes, 2)
         player.stopAndUnload()
         await run.release()
     }

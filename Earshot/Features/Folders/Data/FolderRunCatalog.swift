@@ -59,17 +59,19 @@ actor FolderRunCatalog {
                     let end = min(parsed.episodes.count, start + FolderRunPolicy.batchSize)
                     try importHistory(Array(parsed.episodes[start..<end]), feedURL: url)
                 }
-                // RSS cannot prove that a publisher's entire archive is present.
-                // An empty feed is explicitly incomplete; UI always states the
-                // available-history boundary, even for successful nonempty feeds.
-                if parsed.episodes.isEmpty { unavailable += 1 }
+                // Numbered feeds beginning after episode one may be truncated.
+                // This is a warning, not proof that missing audio can be fetched.
+                let numbers = parsed.episodes.compactMap(\.episodeNumber)
+                if parsed.episodes.isEmpty || (numbers.count == parsed.episodes.count && (numbers.min() ?? 1) > 1) {
+                    unavailable += 1
+                }
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
                 try Task.checkCancellation()
                 // A feed failure must not discard this show's existing catalog.
-                // Save/identity failures must surface instead of silently losing
-                // known episodes; importHistory errors are handled below too.
+                // Import failures also make history incomplete. Errors scanning
+                // the existing catalog below still surface instead of dropping it.
                 unavailable += 1
             }
             var afterGUID: String?
