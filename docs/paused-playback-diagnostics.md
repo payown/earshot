@@ -95,3 +95,12 @@ The 79 focused tests passed, covering early play and toggle, late restoration,
 pause, missing content, normal paused startup, manual playback preservation,
 activation failure, and existing advanced playback/route changes. Result:
 `/tmp/earshot-paused-fix-tests.xcresult`. Physical confirmation remains required.
+
+Full non-StoreKit unit validation passed: 2,278 executed, 29 skipped, zero
+failures (`/tmp/earshot-paused-fix-full.xcresult`). Signed Release build and
+strict code-signature verification passed. Version 1.2.2 (258), built from
+`1720d7e` with diagnostic and version command-line overrides, was installed and
+launched on Michael's phone over Wi-Fi. Installed version query confirmed 258;
+wireless log retrieval succeeded at `/tmp/earshot-paused-fix-phone-baseline`.
+No data reset, debugger attachment, TestFlight upload, or merge was performed.
+Awaiting Michael's repeat two-minute pause/resume test.
