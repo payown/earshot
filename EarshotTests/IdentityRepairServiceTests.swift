@@ -4,6 +4,31 @@ import XCTest
 
 @MainActor
 final class IdentityRepairServiceTests: XCTestCase {
+    func testInboxCapNamespaceLookupStillMergesLegacyAliases() throws {
+        let context = TestStore.freshContext()
+        let prefix = SettingsKey.podcastInboxCapPrefix
+        let canonical = prefix + "https://example.com/feed"
+        context.insert(AppSetting(key: canonical, value: "3"))
+        context.insert(AppSetting(key: prefix + "HTTPS://Example.COM:443/feed#old", value: "5"))
+        for index in 0..<1_000 {
+            context.insert(AppSetting(key: "unrelated_\(index)", value: "unchanged"))
+        }
+        let other = prefix + "https://other.example/feed"
+        context.insert(AppSetting(key: other, value: "20"))
+        try context.save()
+
+        try AppSettingIdentity.setValue("1", for: canonical, in: context)
+        try context.save()
+        let matches = try AppSettingIdentity.rows(for: canonical, in: context)
+        XCTAssertEqual(matches.count, 1)
+        XCTAssertEqual(matches.first?.value, "1")
+        XCTAssertEqual(AppSettingIdentity.value(for: other, in: context), "20")
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<AppSetting>()), 1_002)
+
+        try AppSettingIdentity.setValue("null", for: canonical, in: context)
+        try context.save()
+        XCTAssertEqual(AppSettingIdentity.value(for: canonical, in: context), "null")
+    }
     func testOrdinaryHydrationProjectsOrphanPodcastStateWithoutRepair() throws {
         let container = try ModelContainerFactory.makeInMemory()
         let context = container.mainContext

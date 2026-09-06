@@ -600,7 +600,12 @@ actor CloudProjectionCoordinator: ModelActor {
             queue: .main
         ) { [weak self] notification in
             let changedFeedURL = notification.object as? String
-            Task { await self?.handleLocalSubscriptionChange(feedURL: changedFeedURL) }
+            let settingsOnly = notification.userInfo?[PodcastSettingsPersistence.settingsOnlyKey] as? Bool == true
+            Task {
+                await self?.handleLocalSubscriptionChange(
+                    feedURL: changedFeedURL, settingsOnly: settingsOnly
+                )
+            }
         }
         episodeObserver = center.addObserver(
             forName: .earshotEpisodeUserStateDidChange,
@@ -685,11 +690,14 @@ actor CloudProjectionCoordinator: ModelActor {
         }
     }
 
-    private func handleLocalSubscriptionChange(feedURL: String?) {
+    private func handleLocalSubscriptionChange(feedURL: String?, settingsOnly: Bool) {
         guard !isApplyingRemote else { return }
         do {
             try publishLocalSubscriptionGraphChange(feedURL: feedURL)
-            scheduleReconciliation()
+            // A saved scalar edit only needs its outbound projection. Full
+            // reconciliation republishes every subscription and defeats the
+            // targeted path. Graph changes and remote imports still reconcile.
+            if !settingsOnly || feedURL == nil { scheduleReconciliation() }
         } catch {
             AppLog.data.error(
                 "Cloud subscription projection failed: \(error.localizedDescription, privacy: .public)"

@@ -6,6 +6,24 @@ import Synchronization
 @MainActor
 final class FolderRepositoryTests: XCTestCase {
 
+    func testSettingsFolderLookupDeduplicatesAndIgnoresOtherPodcasts() throws {
+        let ctx = TestStore.freshContext()
+        let repository = FolderRepository(context: ctx)
+        let podcast = makePodcast(ctx, "Target")
+        let unrelated = makePodcast(ctx, "Other")
+        let first = repository.createFolder(name: "First")
+        let second = repository.createFolder(name: "Second")
+        ctx.insert(FolderMembership(folder: first, podcast: podcast))
+        ctx.insert(FolderMembership(folder: first, podcast: podcast))
+        ctx.insert(FolderMembership(folder: second, podcast: unrelated))
+        ctx.insert(FolderMembership(folder: nil, podcast: podcast))
+        try ctx.save()
+        XCTAssertEqual(repository.folders(containing: podcast).map(\.name), ["First"])
+        ctx.insert(FolderMembership(folder: second, podcast: podcast))
+        try ctx.save()
+        XCTAssertEqual(repository.folders(containing: podcast).map(\.name), ["First", "Second"])
+    }
+
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
     private func makePodcast(_ ctx: ModelContext, _ title: String) -> Podcast {

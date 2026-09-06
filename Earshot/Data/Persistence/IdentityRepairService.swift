@@ -211,12 +211,18 @@ enum AppSettingIdentity {
         var matches = try context.fetch(
             FetchDescriptor<AppSetting>(predicate: #Predicate { $0.key == key })
         )
-        if key.hasPrefix(SettingsKey.podcastFilterPrefix)
-            || key.hasPrefix(SettingsKey.podcastInboxCapPrefix)
-            || key.hasPrefix(SettingsKey.episodeFilterConfigurationPrefix) {
+        if let prefix = [SettingsKey.podcastFilterPrefix,
+                         SettingsKey.podcastInboxCapPrefix,
+                         SettingsKey.episodeFilterConfigurationPrefix]
+            .first(where: { key.hasPrefix($0) }) {
             let existingIDs = Set(matches.map(\.persistentModelID))
+            // Legacy feed spellings can only alias keys in the same namespace.
+            // Do not materialize every saved setting during a picker adjustment.
+            let candidates = try context.fetch(FetchDescriptor<AppSetting>(
+                predicate: #Predicate { $0.key.starts(with: prefix) }
+            ))
             matches.append(
-                contentsOf: try context.fetch(FetchDescriptor<AppSetting>()).filter {
+                contentsOf: candidates.filter {
                     !existingIDs.contains($0.persistentModelID) && canonicalKey($0.key) == key
                 }
             )
