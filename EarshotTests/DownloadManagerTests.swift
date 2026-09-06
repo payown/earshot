@@ -128,7 +128,7 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(
             report,
             DownloadBatchReport(
-                eligible: 1, started: 0, skipped: 3, deferred: 0,
+                eligible: 1, skipped: 3, deferred: 0,
                 failed: 1, wasCancelled: false
             )
         )
@@ -139,13 +139,13 @@ final class DownloadManagerTests: XCTestCase {
 
     func testDownloadBatchAnnouncementIncludesEveryOutcomeOnce() {
         let report = DownloadBatchReport(
-            eligible: 9, started: 5, skipped: 3, deferred: 0,
+            eligible: 9, downloading: 5, waitingForWifi: 3, skipped: 3, deferred: 0,
             failed: 1, wasCancelled: false
         )
 
         XCTAssertEqual(
             report.announcement,
-            "Download batch complete. Eligible 9, started 5, skipped 3, deferred 0, failed 1."
+            "Download requests prepared. Eligible 9, accepted 8, downloading 5, waiting for Wi-Fi 3, already finished 0, skipped 3, deferred 0, could not start 1. Open Download activity in Downloads to check progress or retry failures."
         )
     }
 
@@ -184,7 +184,7 @@ final class DownloadManagerTests: XCTestCase {
         let report = await manager.downloadAll(episodes)
 
         XCTAssertEqual(report.eligible, 60)
-        XCTAssertEqual(report.started, 0)
+        XCTAssertEqual(report.accepted, 0)
         XCTAssertEqual(report.skipped, 0)
         XCTAssertEqual(report.deferred, 10)
         XCTAssertEqual(report.failed, 50)

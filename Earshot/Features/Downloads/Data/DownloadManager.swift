@@ -5,22 +5,32 @@ import SwiftData
 
 struct DownloadBatchReport: Equatable, Sendable {
     let eligible: Int
-    let started: Int
+    var downloading: Int = 0
+    var waitingForWifi: Int = 0
+    var completed: Int = 0
     let skipped: Int
     let deferred: Int
     let failed: Int
     let wasCancelled: Bool
 
+    var accepted: Int { downloading + waitingForWifi + completed }
+
     var announcement: String {
         var parts = [
             "Eligible \(eligible)",
-            "started \(started)",
+            "accepted \(accepted)",
+            "downloading \(downloading)",
+            "waiting for Wi-Fi \(waitingForWifi)",
+            "already finished \(completed)",
             "skipped \(skipped)",
             "deferred \(deferred)",
-            "failed \(failed)",
+            "could not start \(failed)",
         ]
-        if wasCancelled { parts.append("cancelled") }
-        return "Download batch complete. " + parts.joined(separator: ", ") + "."
+        if wasCancelled {
+            parts.append("cancelled before requesting \(max(0, eligible - deferred - accepted - failed))")
+        }
+        return "Download requests prepared. " + parts.joined(separator: ", ")
+            + ". Open Download activity in Downloads to check progress or retry failures."
     }
 }
 
@@ -94,6 +104,23 @@ final class DownloadManager {
     @ObservationIgnored private let monitor = NWPathMonitor()
     /// Observer for `.earshotQueueDidChange`, so queued episodes auto-download.
     @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
+    @ObservationIgnored private let startTransfer: (URL, String) -> Void
+
+    init(startTransfer: @escaping (URL, String) -> Void = { url, key in
+        let task = DownloadManager.session.downloadTask(with: url)
+        task.taskDescription = key
+        task.resume()
+    }) {
+        self.startTransfer = startTransfer
+    }
+
+    #if DEBUG
+    func configureForTesting(context: ModelContext, isOnWifi: Bool) {
+        self.context = context
+        self.settings = AppSettingsStore(context: context)
+        self.isOnWifi = isOnWifi
+    }
+    #endif
 
     // MARK: Shared background session (one per identifier per process)
 
@@ -282,7 +309,8 @@ final class DownloadManager {
 
     private func download(_ episode: Episode, announceWaiting: Bool) async {
         guard let context else { return }
-        guard episode.downloadStatus != .downloaded else { return }
+        guard episode.downloadStatus != .downloaded,
+              episode.downloadStatus != .downloading else { return }
         guard downloadsAllowed else {
             ActiveDownload.setDownloadStatus(.pending, on: episode, in: context)
             save()
@@ -292,7 +320,9 @@ final class DownloadManager {
             AppLog.networking.info("Download gated (no Wi-Fi): \(episode.title, privacy: .public)")
             return
         }
-        guard let rawURL = URL(string: episode.audioURL) else {
+        guard let rawURL = URL(string: episode.audioURL),
+              ["http", "https"].contains(rawURL.scheme?.lowercased() ?? ""),
+              rawURL.host != nil else {
             ActiveDownload.setDownloadStatus(.failed, on: episode, in: context)
             save()
             return
@@ -308,7 +338,6 @@ final class DownloadManager {
         ActiveDownload.setDownloadStatus(.downloading, on: episode, in: context)
         save()
 
-        let task = Self.session.downloadTask(with: url)
         // taskDescription (unlike taskIdentifier) survives an app relaunch, so a
         // completion delivered after the app was killed still resolves the
         // episode. The composite "feedURL|guid" key (#576) disambiguates guids
@@ -317,11 +346,11 @@ final class DownloadManager {
             feedURL: episode.podcast?.feedURL,
             guid: episode.guid
         )
-        task.taskDescription = DownloadTransferKey.key(
+        let transferKey = DownloadTransferKey.key(
             identityKey: identityKey,
             sourceURL: url
         )
-        task.resume()
+        startTransfer(url, transferKey)
         AppLog.networking.info("Download started (background): \(episode.title, privacy: .public)")
     }
 
@@ -333,7 +362,9 @@ final class DownloadManager {
     func downloadAll(_ episodes: [Episode]) async -> DownloadBatchReport {
         let plan = ManualDownloadBatchPlan.make(statuses: episodes.map(\.downloadStatus))
         let eligibleEpisodes = plan.selectedIndices.map { episodes[$0] }
-        var started = 0
+        var downloading = 0
+        var waitingForWifi = 0
+        var completed = 0
         var failed = 0
         var wasCancelled = false
 
@@ -345,8 +376,9 @@ final class DownloadManager {
 
             await download(episode, announceWaiting: false)
             switch episode.downloadStatus {
-            case .pending, .downloading, .downloaded:
-                started += 1
+            case .pending: waitingForWifi += 1
+            case .downloading: downloading += 1
+            case .downloaded: completed += 1
             case .failed, .none:
                 failed += 1
             }
@@ -358,7 +390,9 @@ final class DownloadManager {
 
         return DownloadBatchReport(
             eligible: plan.eligibleCount,
-            started: started,
+            downloading: downloading,
+            waitingForWifi: waitingForWifi,
+            completed: completed,
             skipped: plan.skippedCount,
             deferred: plan.deferredCount,
             failed: failed,
@@ -860,7 +894,9 @@ final class DownloadManager {
         ActiveDownload.setDownloadStatus(.downloaded, on: episode, in: context)
         save(context, action: "complete")
         resolveWaiters(for: identityKey, success: true)
-        Announcer.announce("Downloaded \(episode.title)")
+        // Status is durable and readable in Download activity. Per-episode
+        // speech here can queue dozens of announcements after a bulk request;
+        // users can read one live summary there, or opt into notifications below.
         let shouldNotify = AppSettingsStore(context: context).bool(
             SettingsKey.downloadCompletionNotifications,
             default: SettingsDefault.downloadCompletionNotifications

@@ -58,6 +58,9 @@ enum ScreenshotHarness {
         case .library:
             selectTab(.library)
         case .downloads:
+            if CommandLine.arguments.contains("-downloadActivityTest") {
+                seedDownloadActivity(in: context)
+            }
             selectTab(.downloads)
         case .settings:
             // RootView renders DownloadsSettingsView as the Settings-tab root in
@@ -88,6 +91,26 @@ enum ScreenshotHarness {
                     player.sleepTimer.set(.fiveMinutes)
                 }
             }
+        }
+    }
+
+    @MainActor
+    private static func seedDownloadActivity(in context: ModelContext) {
+        let podcast = Podcast(feedURL: "https://activity.test/ui", title: "Download activity test")
+        context.insert(podcast)
+        let failed = Episode(guid: "activity-failed", title: "Failed test episode", audioURL: "")
+        let delayed = Episode(guid: "activity-delayed", title: "Delayed test episode", audioURL: "")
+        for episode in [failed, delayed] {
+            episode.podcast = podcast
+            context.insert(episode)
+        }
+        ActiveDownload.setDownloadStatus(.failed, on: failed, in: context)
+        ActiveDownload.setDownloadStatus(.downloading, on: delayed, in: context)
+        try? context.save()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(8))
+            ActiveDownload.setDownloadStatus(.failed, on: delayed, in: context)
+            try? context.save()
         }
     }
 
