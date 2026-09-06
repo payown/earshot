@@ -89,6 +89,16 @@ struct NowPlayingScreen: View {
                         artworkBlock
                             .padding(.top, Spacing.lg)
                         titleBlock
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.bottom, Spacing.xl)
+                }
+                .frame(maxHeight: .infinity)
+                .accessibilityIdentifier("player.episodeContent")
+                playbackDock
+                ScrollView {
+                    VStack(spacing: Spacing.xl) {
                         if let failure = player.playbackFailureMessage {
                             Label(failure, systemImage: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.secondary)
@@ -102,9 +112,10 @@ struct NowPlayingScreen: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, Spacing.lg)
-                    .padding(.bottom, Spacing.xl)
+                    .padding(.vertical, Spacing.lg)
                 }
-                playbackDock
+                .frame(maxHeight: .infinity)
+                .accessibilityIdentifier("player.details")
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingControls, onDismiss: {
@@ -153,8 +164,9 @@ struct NowPlayingScreen: View {
         }
     }
 
-    // Header, scroll region and dock are layout siblings in visual and semantic
-    // order. No overlay or accessibility sort priority is needed. System initial
+    // Two equally flexible scroll regions share the space around the playback
+    // area. Episode content cannot change its position. Visual and semantic
+    // order match without an overlay or sort priority. System initial
     // focus is left alone: no delayed request can steal focus after a first touch.
     private var playerHeader: some View {
         HStack(spacing: Spacing.sm) {
