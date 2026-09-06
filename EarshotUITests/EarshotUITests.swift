@@ -41,13 +41,15 @@ final class EarshotUITests: XCTestCase {
         position.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.92)).tap()
         XCTAssertNotEqual(position.value as? String, first)
         // Changes arrive after the initial measurements, without reopening the sheet.
-        let changed = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A long episode title")).firstMatch
+        let changed = app.scrollViews["player.episodeContent"].staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A long episode title")).firstMatch
         XCTAssertTrue(changed.waitForExistence(timeout: 20))
         for (control, rect) in zip(controls, initial) {
             XCTAssertEqual(control.frame.minY, rect.minY, accuracy: 1)
             XCTAssertEqual(control.frame.height, rect.height, accuracy: 1)
         }
-        app.scrollViews.firstMatch.swipeUp()
+        let episodeContent = app.scrollViews["player.episodeContent"]
+        for _ in 0..<12 where !changed.isHittable { episodeContent.swipeUp(velocity: .slow) }
+        XCTAssertTrue(changed.isHittable)
         for (control, rect) in zip(controls, initial) {
             XCTAssertEqual(control.frame.minY, rect.minY, accuracy: 1)
         }
@@ -58,7 +60,7 @@ final class EarshotUITests: XCTestCase {
         XCTAssertFalse(notes.isEnabled)
         XCTAssertGreaterThan(notes.frame.minY, play.frame.maxY)
         XCTAssertLessThan(notes.frame.maxY, app.frame.maxY)
-        let scroll = app.scrollViews.firstMatch
+        let scroll = app.scrollViews["player.details"]
         let extend = scroll.buttons["Extend sleep timer by 5 minutes"]
         for _ in 0..<20 {
             if extend.exists && extend.isHittable && extend.frame.maxY <= scroll.frame.maxY { break }
@@ -66,7 +68,10 @@ final class EarshotUITests: XCTestCase {
         }
         XCTAssertTrue(extend.isHittable, app.debugDescription)
         XCTAssertLessThanOrEqual(extend.frame.maxY, scroll.frame.maxY)
-        XCTAssertLessThanOrEqual(scroll.frame.maxY, position.frame.minY)
+        XCTAssertGreaterThanOrEqual(scroll.frame.minY, notes.frame.maxY)
+        XCTAssertLessThanOrEqual(app.scrollViews["player.episodeContent"].frame.maxY, position.frame.minY)
+        XCTAssertLessThan(play.frame.midY, app.frame.height * 0.65)
+        XCTAssertGreaterThan(play.frame.midY, app.frame.height * 0.4)
         XCTAssertEqual(play.frame.minY, initial[2].minY, accuracy: 1)
         for control in [app.buttons["Close player"], app.buttons["More options"]] {
             XCTAssertGreaterThanOrEqual(control.frame.width, 44)
