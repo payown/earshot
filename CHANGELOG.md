@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Folders can prepare a device-local, oldest-first run of unheard episodes across their followed shows and subfolders, including older history still available through RSS. Runs preserve saved positions and the normal Queue, with progress, resume, cancel, and unavailable-audio recovery. (#944)
 - Download activity shows downloading, Wi-Fi-waiting, failed, and completed counts, with individual and bounded batch retries. Available from Downloads and download settings. (#958)
 - An offline Inbox, Queue, and Downloads workflow guide is available in Help & About and download settings. The [same guide](docs/inbox-queue-downloads-guide.md) explains automatic downloads, clearing, and troubleshooting. (#959)
 

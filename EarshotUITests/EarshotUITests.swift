@@ -6,6 +6,35 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testFolderRunPreparesHistoryConfirmsLargeCountAndCanBeCancelled() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library", "-folderRunTest"]
+        app.launch()
+        let folders = app.buttons["Folders"].firstMatch
+        XCTAssertTrue(folders.waitForExistence(timeout: 10))
+        folders.tap()
+        let folder = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Folder path: Backlog test")).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 5), app.debugDescription)
+        folder.tap()
+        app.buttons["Folder listening actions"].tap()
+        app.buttons["Play unheard oldest first"].firstMatch.tap()
+        let prepare = app.buttons["Check feeds and prepare"].firstMatch
+        XCTAssertTrue(prepare.waitForExistence(timeout: 5))
+        prepare.tap()
+        let confirmation = app.staticTexts["Play 60 unheard episodes from Backlog test, oldest first?"].firstMatch
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 20))
+        let deferPlayback = app.buttons["Not now"].firstMatch
+        XCTAssertTrue(deferPlayback.waitForExistence(timeout: 5), app.debugDescription)
+        deferPlayback.tap()
+        let cancel = app.buttons["Cancel folder run"].firstMatch
+        for _ in 0..<4 where !cancel.isHittable { app.swipeUp() }
+        XCTAssertTrue(cancel.isHittable)
+        cancel.tap()
+        for _ in 0..<4 { app.swipeDown() }
+        XCTAssertTrue(app.staticTexts["Cancelled"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Resume folder run"].exists)
+    }
+
     func testDownloadActivityUpdatesAfterDelayedFailureAndOffersBoundedRetry() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "downloads", "-downloadActivityTest"]
