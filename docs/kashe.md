@@ -76,6 +76,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- She works through saved interviews across shows in oldest-first order while
+  keeping only the latest news in her Inbox (Chapter 83).
 - She has too many podcast subscriptions and knows it
 - She was quietly done with her previous app for two months before switching
 - Renata mentioned Earshot in passing during a phone call
@@ -3067,6 +3069,36 @@ Kashe had twelve minutes to leave and forty minutes of interview. She moved to t
 That evening the same answer waited. After reading the notes she found Pause where her hand expected it, and set the phone beside the windowsill speaker. She checked her place once more before leaving it there. Trust had improved faster than the habit.
 
 Before bed she chose Stop after this episode. Tomorrow was allowed to keep something.
+
+---
+
+### Chapter 83 - Build 261
+
+*Kashe wants yesterday's interviews, but not yesterday's news.*
+
+Kashe gave the news show one place in her Inbox. After refreshing, the latest bulletin had it. The older download was still in Downloads. Two shelves, she decided. She could work with that.
+
+The interviews were different. She opened their folder and chose Play unheard oldest first. A conversation from one show led into another she'd been meaning to hear for months.
+
+Renata called while Kashe was folding towels. The podcast waited through the call and a search for the towel that had fallen behind the chair. When she resumed, the same voice came back.
+
+"Still listening to last winter?" Renata asked later.
+
+"I'm catching up in order. That's different from being behind."
+
+She folded the last towel and left the argument unfinished.
+
+What to test
+
+Change a podcast's Inbox episode limit from unlimited to one, then immediately move to the next control with VoiceOver. The adjustment should feel responsive. Refresh: only the newest eligible Inbox episode should remain. Older downloaded audio should stay in Downloads. No Limit for age does not disable the count limit.
+
+For downloads only when you queue episodes, turn automatic downloads of new episodes Off and automatic downloads of queued episodes On. Check Download all feedback for accepted requests, Wi-Fi waits, and failures. The offline workflow guide explains the separate settings.
+
+In Library, open a folder and choose Play unheard oldest first, then Check feeds and prepare. Try a large folder while browsing and typing. More than 50 episodes asks for confirmation. Check oldest-first playback across shows, status, cancellation, and returning to your original Queue. Preparation is not Download all, and unavailable publisher archives cannot be restored.
+
+Test folder playback while locked or backgrounded, after another audio app interrupts, and after reopening Earshot. Check saved places, sleep timers, Stop after this episode, and retry or skip for missing audio.
+
+Play a downloaded episode, pause with AirPods or VoiceOver's two-finger double tap, wait at least 15 minutes while using the phone normally, then resume the same way. Earshot should resume its saved episode. Report if another app starts, Control Center says Not Playing, or anything feels slow.
 
 ---
 

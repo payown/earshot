@@ -37,7 +37,9 @@ Result: `/tmp/earshot-inbox-setting-performance-final.xcresult`.
 Signed Release build and strict signature verification passed. Version 1.2.2
 build 260 (command-line version override) was installed directly over Michael's
 existing app via Wi-Fi, without a data reset or diagnostic logging. Source:
-`fd31290`. Physical responsiveness acceptance remains pending.
+`fd31290`. Michael subsequently reported “much better tests pass,” accepting
+the build-260 setting-adjustment check. PR #966 passed the full CI retry
+(`34054948271`, attempt 2) and merged as `9180708`.
 
 Device acceptance: in the same podcast, change unlimited to one, immediately
 flick to the next control, and repeat in both directions. Check spoken value,
