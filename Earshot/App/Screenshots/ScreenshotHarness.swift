@@ -24,6 +24,8 @@ enum ScreenshotScreen: String {
 /// See `ScreenshotFixtures` for exactly which seeded data is real vs synthesized.
 enum ScreenshotHarness {
 
+    static var isFolderRunTest: Bool { isSeeding && CommandLine.arguments.contains("-folderRunTest") }
+
     static var isSeeding: Bool {
         CommandLine.arguments.contains("-uiTestScreenshotSeed")
     }
@@ -56,6 +58,13 @@ enum ScreenshotHarness {
         case .queue:
             selectTab(.queue)
         case .library:
+            if isFolderRunTest {
+                let folder = FolderRepository(context: context).createFolder(name: "Backlog test")
+                let podcast = Podcast(feedURL: "https://folder.test/feed", title: "Folder test show")
+                context.insert(podcast)
+                FolderRepository(context: context).add(podcast, to: folder)
+                try? context.save()
+            }
             selectTab(.library)
         case .downloads:
             if CommandLine.arguments.contains("-downloadActivityTest") {
@@ -128,6 +137,16 @@ enum ScreenshotHarness {
         var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == guid })
         descriptor.fetchLimit = 1
         return (try? context.fetch(descriptor))?.first
+    }
+}
+
+struct FolderRunUITestFeed: FeedFetching {
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        try await Task.sleep(for: .seconds(1))
+        return ParsedFeed(title: "Folder test show", episodes: (0..<60).map {
+            ParsedEpisode(guid: "history-\($0)", title: "History \($0)", audioURL: "https://folder.test/audio.mp3",
+                          pubDate: Date(timeIntervalSince1970: Double(1_000_000 + $0)))
+        })
     }
 }
 #endif

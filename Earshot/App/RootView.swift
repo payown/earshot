@@ -592,6 +592,7 @@ struct RootView: View {
                 )
             }
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
+            await player.folderRuns.connect(context: modelContext, player: player)
         }
         guard activationCompleted else { return }
         if selectedTab == nil { selectedTab = RootTab(launchScreen: settings.launchScreen) }

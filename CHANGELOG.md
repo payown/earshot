@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- System playback controls can resume the saved episode when Earshot relaunches in the background after a pause. Corrected audio-session configuration and prevented late startup work from interrupting resumed playback.
+
 ### Added
 
+- Folders can prepare a device-local, oldest-first run of unheard episodes across their followed shows and subfolders, including older history still available through RSS. Runs preserve saved positions and the normal Queue, with progress, resume, cancel, and unavailable-audio recovery. (#944)
 - Download activity shows downloading, Wi-Fi-waiting, failed, and completed counts, with individual and bounded batch retries. Available from Downloads and download settings. (#958)
 - An offline Inbox, Queue, and Downloads workflow guide is available in Help & About and download settings. The [same guide](docs/inbox-queue-downloads-guide.md) explains automatic downloads, clearing, and troubleshooting. (#959)
 
@@ -36,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The offline workflow guide now correctly explains that Clear inbox also removes downloaded audio when Delete downloads when done is enabled, unlike dismissing an individual Inbox episode.
 - Download all now reports requests accepted and waiting for Wi-Fi separately from completion. Failed episodes are visibly and audibly identified; download completions no longer queue per-episode VoiceOver announcements. Repeated requests no longer start duplicate active transfers. (#958)
 
 - Discover podcast search no longer becomes unresponsive after directory results

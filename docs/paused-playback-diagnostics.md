@@ -104,3 +104,12 @@ launched on Michael's phone over Wi-Fi. Installed version query confirmed 258;
 wireless log retrieval succeeded at `/tmp/earshot-paused-fix-phone-baseline`.
 No data reset, debugger attachment, TestFlight upload, or merge was performed.
 Awaiting Michael's repeat two-minute pause/resume test.
+
+Michael subsequently reported successful short and 15-minute tests on build 258.
+Both device logs confirm background process relaunch, early remote toggle,
+saved-episode restoration, successful session activation, and resumed playback.
+The long-run log shows about 17 minutes between pause and resume:
+`/tmp/earshot-paused-fix-phone-15min/events.log`. The original process termination
+cause remains unconfirmed. These results validate Michael's reported scenario,
+not all OS versions or AirPods routes. Folder playback still requires its own
+physical-device acceptance before release.

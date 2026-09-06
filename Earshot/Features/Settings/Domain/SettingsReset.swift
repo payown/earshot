@@ -70,6 +70,7 @@ enum SettingsReset {
         let quarantine = paths.applicationSupport.appending(path: quarantineName, directoryHint: .isDirectory)
         try fm.createDirectory(at: quarantine, withIntermediateDirectories: false)
         var candidates = storeFiles(paths.primary) + storeFiles(paths.local)
+        candidates.append(paths.applicationSupport.appending(path: "FolderRuns", directoryHint: .isDirectory))
         candidates += [paths.backups, paths.downloads]
         if let artwork = paths.artwork { candidates.append(artwork) }
         let existing = candidates.filter { fm.fileExists(atPath: $0.path) }
