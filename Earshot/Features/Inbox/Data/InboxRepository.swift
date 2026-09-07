@@ -384,6 +384,7 @@ final class InboxRepository {
     func dismiss(_ episode: Episode) {
         guard !episode.inboxDismissed else { return }
         episode.inboxDismissed = true
+        DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
         save(changedEpisodes: [episode], inboxDismissedChangedExplicitly: true)
     }
 

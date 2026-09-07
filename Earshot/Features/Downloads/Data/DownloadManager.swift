@@ -716,6 +716,18 @@ final class DownloadManager {
         for task in await allTasks() { task.cancel() }
     }
 
+    /// Request cancellation without delaying synchronous episode actions. Resetting
+    /// download state in the caller makes late terminal events discard their file.
+    static func cancelDownload(identityKey: String, using downloadSession: URLSession? = nil) {
+        (downloadSession ?? session).getAllTasks { tasks in
+            for task in tasks {
+                guard let raw = task.taskDescription,
+                      DownloadTransferKey.identityKey(from: raw) == identityKey else { continue }
+                task.cancel()
+            }
+        }
+    }
+
     private static func cancelTasks(matchingIdentityKeys keys: Set<String>) async {
         guard !keys.isEmpty else { return }
         for task in await allTasks() {
@@ -1036,11 +1048,16 @@ enum DownloadCleanup {
     /// Deletes `episode`'s downloaded file and resets its download state — the
     /// same file+state contract as ``DownloadManager/removeDownload(_:)`` (delete
     /// via the resolved ``Episode/localAudioURL``, reset through
-    /// ``ActiveDownload/setDownloadStatus(_:on:in:)``). No-op unless the episode
-    /// is actually `.downloaded`, so an in-flight transfer is never touched. The
-    /// caller saves the context (every mark-played path already saves right after).
+    /// ``ActiveDownload/setDownloadStatus(_:on:in:)``). Pending requests are removed
+    /// and active transfers are cancelled. The caller saves the context immediately
+    /// so late completion events cannot restore a removed download.
     static func removeDownloadFileAndState(_ episode: Episode, in context: ModelContext) {
-        guard episode.downloadStatus == .downloaded else { return }
+        guard episode.downloadStatus != .none || episode.downloadPath != nil else { return }
+        if episode.downloadStatus == .downloading {
+            DownloadManager.cancelDownload(identityKey: DownloadTaskKey.key(
+                feedURL: episode.podcast?.feedURL, guid: episode.guid
+            ))
+        }
         if let url = episode.localAudioURL {
             try? FileManager.default.removeItem(at: url)
         }

@@ -603,6 +603,74 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, .downloaded)
     }
 
+    func test_inboxCleanup_respectsPreferenceAcrossActionsAndDownloadStates() throws {
+        for enabled in [false, true] {
+            for status in [DownloadStatus.downloaded, .pending, .downloading] {
+                for action in ["dismiss", "clear", "played"] {
+                    let context = TestStore.freshContext()
+                    AppSettingsStore(context: context).setBool(enabled, for: SettingsKey.deleteDownloadAfterPlayed)
+                    let name = "earshot-inbox-cleanup-\(UUID().uuidString).mp3"
+                    let file = status == .downloaded ? try plantDownloadFile(named: name) : nil
+                    let episode = Episode(
+                        guid: UUID().uuidString, title: "Cleanup", audioURL: "https://h/cleanup.mp3",
+                        downloadStatus: status, downloadPath: file == nil ? nil : name
+                    )
+                    try persistLocalDownloadState(for: [episode], in: context)
+                    ActiveDownload.setDownloadStatus(status, on: episode, in: context)
+                    try context.save()
+                    let repo = InboxRepository(context: context)
+                    switch action {
+                    case "dismiss": repo.dismiss(episode)
+                    case "clear": repo.clearInbox([episode])
+                    default: repo.markPlayed(episode)
+                    }
+                    let scenario = "\(action), \(status), cleanup=\(enabled)"
+                    XCTAssertTrue(episode.inboxDismissed, scenario)
+                    XCTAssertEqual(episode.isPlayed, action == "played", scenario)
+                    XCTAssertEqual(episode.downloadStatus, enabled ? .none : status, scenario)
+                    if let file {
+                        XCTAssertEqual(FileManager.default.fileExists(atPath: file.path), !enabled, scenario)
+                        XCTAssertEqual(episode.downloadPath, enabled ? nil : name, scenario)
+                    }
+                    if enabled {
+                        XCTAssertEqual(ActiveDownload.rows(for: episode, in: context).count, 0, scenario)
+                        if status == .downloading {
+                            DownloadManager.setContainerForTesting(context.container)
+                            defer { DownloadManager.setContainerForTesting(nil) }
+                            let lateName = "earshot-late-cleanup-\(UUID().uuidString).mp3"
+                            let lateFile = try plantDownloadFile(named: lateName)
+                            let key = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+                            DownloadManager.handle(PendingDownloadTerminalEvent(taskKey: key, outcome: .finished(fileName: lateName)))
+                            XCTAssertFalse(FileManager.default.fileExists(atPath: lateFile.path), scenario)
+                            XCTAssertEqual(episode.downloadStatus, .none, scenario)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func test_cancelDownload_onlyCancelsMatchingEpisode() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CleanupHoldingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let matching = session.downloadTask(with: URL(string: "https://h/matching.mp3")!)
+        matching.taskDescription = DownloadTransferKey.key(
+            identityKey: "target", sourceURL: URL(string: "https://h/matching.mp3")!
+        )
+        let unrelated = session.downloadTask(with: URL(string: "https://h/unrelated.mp3")!)
+        unrelated.taskDescription = "unrelated"
+        matching.resume()
+        unrelated.resume()
+        DownloadManager.cancelDownload(identityKey: "target", using: session)
+        for _ in 0..<100 where matching.state == .running {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(matching.state == .canceling || matching.state == .completed)
+        XCTAssertEqual(unrelated.state, .running)
+    }
+
     func test_queueRemoval_withAutomaticCleanupOn_removesDownloadWithoutMarkingPlayed() throws {
         let context = TestStore.freshContext()
         AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
@@ -1051,4 +1119,12 @@ final class DownloadEventJournalTests: XCTestCase {
         XCTAssertEqual(handled, 0)
         XCTAssertEqual(journal.pendingEvents().count, 1)
     }
+}
+
+/// Keeps transfers active without network access until the test cancels them.
+private final class CleanupHoldingURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {}
+    override func stopLoading() {}
 }
