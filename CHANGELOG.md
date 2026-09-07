@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Remove from Inbox now deletes downloaded audio when Delete downloads when done is enabled, without marking the episode played. Automatic cleanup also cancels pending and active downloads. With the setting off, downloads are kept.
+
 - Podcast setting edits use targeted subscription updates and narrower settings/folder lookups, reducing unnecessary work while adjusting Inbox limits. Immediate persistence and VoiceOver controls are unchanged.
 
 - Inbox count and age limits now apply after successful refreshes, including unchanged feeds. Keeping one Inbox episode does not delete older downloaded audio.
@@ -45,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The offline workflow guide now correctly explains that Clear inbox also removes downloaded audio when Delete downloads when done is enabled, unlike dismissing an individual Inbox episode.
+- The offline workflow guide now correctly explains that Clear inbox also removes downloaded audio when Delete downloads when done is enabled, including when dismissing an individual Inbox episode.
 - Download all now reports requests accepted and waiting for Wi-Fi separately from completion. Failed episodes are visibly and audibly identified; download completions no longer queue per-episode VoiceOver announcements. Repeated requests no longer start duplicate active transfers. (#958)
 
 - Discover podcast search no longer becomes unresponsive after directory results

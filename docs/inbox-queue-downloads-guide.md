@@ -20,7 +20,7 @@ Recently Expired appears in Downloads for episodes that automatically expired fr
 
 4. Choose whether to keep Auto-download queued episodes on. It defaults to On and requests audio for episodes you add to Queue, including older episodes. This is separate from the new-episode setting. Both settings respect Wi-Fi-only.
 
-5. Choose whether to enable Delete downloads when done. It defaults to Off. When on, Earshot removes downloaded audio when you finish an episode, mark it played, deliberately remove it from Queue, or clear it from Inbox using Clear inbox.
+5. Choose whether to enable Delete downloads when done. It defaults to Off. When on, Earshot removes downloaded audio when you finish an episode, mark it played, remove it from Inbox or Queue, or use Clear inbox. Pending and active downloads for those episodes are cancelled too.
 
 ## Keep only the latest news episode in Inbox
 
@@ -66,11 +66,11 @@ Notify when downloads finish, in Settings, Downloads, optionally sends local not
 
 Clear inbox hides the current Inbox episodes without marking them played or removing their podcasts. If Delete downloads when done is on, Clear inbox also removes those episodes' downloaded audio. If that setting is off, their downloaded audio stays on this device. You can still find the episodes in the podcast's episode list. Clearing Inbox does not prevent future episodes from arriving.
 
-Dismissing an individual episode from Inbox is different from Clear inbox: it hides that episode without deleting its downloaded audio or marking it played.
+Remove from Inbox hides an individual episode without marking it played. Like Clear inbox, it deletes downloaded audio and cancels pending or active downloads when Delete downloads when done is on. With that setting off, downloads are kept.
 
 Clear all downloads removes local audio and cancels active or Wi-Fi-waiting requests. It does not dismiss Inbox episodes or remove podcasts. Removing an individual download likewise removes the file rather than the episode. A later manual or automatic request can download an episode again.
 
-Marking an episode played removes it from Inbox. Delete downloads when done also removes its completed audio if that setting is on. Removing an episode from Queue can also remove its completed download when that setting is on. Turning the setting off lets you manage downloaded audio yourself.
+Marking an episode played removes it from Inbox. Delete downloads when done also removes its audio or cancels its pending or active download if that setting is on. Removing an episode from Queue also removes its download or cancels a pending or active transfer when that setting is on. Turning the setting off lets you manage downloaded audio yourself.
 
 ## When Inbox and Downloads counts differ
 

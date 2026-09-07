@@ -76,6 +76,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- She keeps a small stone a client gave her in the side pocket of her work
+  bag, smooth on one side and rough on the other (Chapter 84).
 - She works through saved interviews across shows in oldest-first order while
   keeping only the latest news in her Inbox (Chapter 83).
 - She has too many podcast subscriptions and knows it
@@ -3099,6 +3101,30 @@ In Library, open a folder and choose Play unheard oldest first, then Check feeds
 Test folder playback while locked or backgrounded, after another audio app interrupts, and after reopening Earshot. Check saved places, sleep timers, Stop after this episode, and retry or skip for missing audio.
 
 Play a downloaded episode, pause with AirPods or VoiceOver's two-finger double tap, wait at least 15 minutes while using the phone normally, then resume the same way. Earshot should resume its saved episode. Report if another app starts, Control Center says Not Playing, or anything feels slow.
+
+---
+
+### Chapter 84 - Build 262
+
+*Kashe saves plenty for later. Sometimes she means to let one go.*
+
+**What to test:**
+
+In Settings, Downloads, turn on Delete downloads when done. Remove a downloaded episode from Inbox. It should leave Inbox and Downloads while remaining unplayed in the podcast's episode list. Check the setting description and offline workflow guide for the updated explanation.
+
+With that setting on, try Remove from Inbox, Clear inbox, and Mark as played on episodes whose downloads are waiting or still running. Those downloads should stop and stay removed when the connection returns. Repeat with completed downloads. Only Mark as played should mark an unplayed episode played.
+
+Also try Remove from queue and Clear queue with unfinished downloads. With cleanup enabled, those downloads should stop too. Repeat these actions with Delete downloads when done off: downloads should remain, and pending transfers may continue normally.
+
+Keep cleanup on and lower a podcast's Inbox episode limit. Episodes removed by that automatic limit should still keep their downloaded audio. Please report any download that stays after manual cleanup, returns later, or disappears when it should stay.
+
+Kashe was sorting the side pocket of her work bag when the little stone fell into her palm. A client had pressed it on her months ago, smooth on one side, rough on the other. She put it back. The three old receipts could go.
+
+On the phone, an interview she'd kept postponing was still in her Inbox. She read the description again and knew she wasn't going to listen. Removing it used to leave a second chore waiting in Downloads. This time the file went with it. In the show's list, the episode still said unplayed.
+
+She checked once more. Letting something go wasn't the same as having finished it. She liked being able to leave that distinction alone.
+
+Her thumb found the stone through the pocket. That could stay another month. She zipped the bag and went to her next client.
 
 ---
 
