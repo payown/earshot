@@ -57,6 +57,7 @@ final class EarshotUITests: XCTestCase {
         app.launch()
         let speed = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Playback speed")).firstMatch
         XCTAssertTrue(speed.waitForExistence(timeout: 10))
+        XCTAssertNotEqual(speed.elementType, .button, "Playback speed must remain an adjustable element for VoiceOver rate feedback")
         speed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let input = app.textFields["Custom playback speed"]
         XCTAssertTrue(input.waitForExistence(timeout: 5))

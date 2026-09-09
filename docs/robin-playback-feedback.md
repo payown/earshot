@@ -5,8 +5,9 @@ version or build number, or publish an App Store or TestFlight build.
 
 ## Custom playback speed
 
-Open Playback Speed from the full player. With VoiceOver, use the existing
-“Open speed options” action on Playback speed. Enter a value in Custom playback
+Open Playback Speed from the full player. With VoiceOver, double-tap Playback
+speed or use its “Open speed options” action. The control includes a hint about
+double-tapping to choose a custom speed; flicking up or down still adjusts it. Enter a value in Custom playback
 speed and choose Apply custom speed. The selected scope applies: this podcast or
 all podcasts. The allowed range is 0.5×–5×, with up to two decimal places.
 Both the local decimal separator and a period are accepted.
