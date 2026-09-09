@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- She mends the hems of her work trousers herself while listening at night
+  (Chapter 85).
+
 - She keeps a small stone a client gave her in the side pocket of her work
   bag, smooth on one side and rough on the other (Chapter 84).
 - She works through saved interviews across shows in oldest-first order while
@@ -3125,6 +3128,32 @@ On the phone, an interview she'd kept postponing was still in her Inbox. She rea
 She checked once more. Letting something go wasn't the same as having finished it. She liked being able to leave that distinction alone.
 
 Her thumb found the stone through the pocket. That could stay another month. She zipped the bag and went to her next client.
+
+---
+
+### Chapter 85 - Build 263
+
+*Kashe can be tired without being quite ready to stop listening.*
+
+**What to test:**
+
+In Now Playing, focus Playback speed with VoiceOver hints on. It should say “Double-tap to choose a custom playback speed.” Double-tap, enter 0.98, and choose Apply custom speed. Try This podcast and All podcasts, then reopen the options to check the saved rate. Flicking up or down should still change the rate and speak the new value. Quick choices, including 1.25 and 1.75, should play at their stated speeds.
+
+Flick from the last Inbox or Queue episode to the mini player. It should say “Mini player” before the episode title and podcast name in one stop. Double-tap to open the full player. Check that its separate playback buttons remain reachable.
+
+In More options, turn on Reset sleep timer on interaction and start a countdown. After some time passes, try VoiceOver navigation, adjusting controls, scrolling, and typing. The countdown should restart from its selected duration without interrupting speech. Starting another episode should restart it too. Any added extension is replaced by the selected duration on the next interaction.
+
+Lock the phone and leave it alone: the timer should still stop playback. Cancelled timers must stay off. Turn reset off and check the original countdown behavior. End of episode should still stop at the episode boundary. Please report anything that resets unexpectedly or fails to reset.
+
+The needle had found the hem again, but Kashe had lost the sentence. She backed up the interview and slowed the voice a little. There was no prize for getting through either job quickly.
+
+Her work trousers needed three more stitches. She had been saying three for the last ten minutes. Beside her, the small speaker carried on while she checked her place and gave the night a little longer.
+
+Renata's message asked whether she was still awake.
+
+“Technically,” Kashe dictated. “The trousers are doing most of the work.”
+
+She finished the seam, put the needle away, and left the phone alone. Tomorrow's first visit was early. The interview could keep the rest of its questions until then.
 
 ---
 

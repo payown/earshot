@@ -1,7 +1,7 @@
 # Robin's playback requests
 
-This change adds three features for the next release. It does not change the
-version or build number, or publish an App Store or TestFlight build.
+Build 263 packages these three features for TestFlight version 1.2.2, with
+Kashe Chapter 85. Distribution status is recorded separately after upload.
 
 ## Custom playback speed
 

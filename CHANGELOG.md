@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Custom playback speeds from 0.5× to 5× with two decimal places. VoiceOver users can double-tap Playback speed to open the options, with a hint explaining the action.
+- Optional sleep-timer reset on app interaction, including VoiceOver navigation. The mini player now identifies itself before its episode title in one VoiceOver stop.
+
 - Folders can prepare a device-local, oldest-first run of unheard episodes across their followed shows and subfolders, including older history still available through RSS. Runs preserve saved positions and the normal Queue, with progress, resume, cancel, and unavailable-audio recovery. (#944)
 - Download activity shows downloading, Wi-Fi-waiting, failed, and completed counts, with individual and bounded batch retries. Available from Downloads and download settings. (#958)
 - An offline Inbox, Queue, and Downloads workflow guide is available in Help & About and download settings. The [same guide](docs/inbox-queue-downloads-guide.md) explains automatic downloads, clearing, and troubleshooting. (#959)
