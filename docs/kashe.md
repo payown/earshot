@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- She sometimes follows a show for one interview Renata recommends and keeps
+  it long after listening (Chapter 86).
+
 - She mends the hems of her work trousers herself while listening at night
   (Chapter 85).
 
@@ -3158,3 +3161,35 @@ She finished the seam, put the needle away, and left the phone alone. Tomorrow's
 ---
 
 More chapters added here as Earshot ships.
+
+### Chapter 86 - Build 264
+
+*Kashe finds one small thing she can finish before leaving the house.*
+
+**What to test:**
+
+Open a followed podcast, then Podcast settings. Find Unfollow at the bottom of the settings. Activate it and check that the confirmation names the podcast and explains that its episodes will be removed. Cancel first: the podcast and its episodes should stay unchanged.
+
+Try again with a podcast you are ready to remove. Confirm Unfollow. Its settings and episode list should close, leaving you in the Library. With VoiceOver, check that focus lands somewhere useful and that you can keep navigating. Try this at your preferred text size too. Existing Unfollow actions on podcast rows should still work.
+
+This is still version 1.2.2, now build 264. Custom playback speeds, the optional sleep timer reset, and the mini player announcement from build 263 are included.
+
+Kashe had followed the show because Renata said there was one interview she would like. Renata had been right about the interview. The forty-seven episodes after it were nobody's fault, but they were still there.
+
+She opened the podcast's settings and found Unfollow at the bottom. The question named the show. She cancelled once, checked that she had listened to the interview, and came back.
+
+This time she confirmed.
+
+Her Library was a little shorter. The kitchen still needed attention, and her work bag had somehow acquired another receipt, but neither of those had a button.
+
+She sent Renata a message before leaving.
+
+“Finished that interview you recommended.”
+
+“Which one?”
+
+Kashe checked the date.
+
+“I'm choosing not to answer that.”
+
+---
