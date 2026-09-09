@@ -6,6 +6,78 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testSleepTimerInteractionAcrossSheets() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        app.launch()
+        let more = app.buttons["More options"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        func reveal(_ element: XCUIElement) {
+            let list = app.collectionViews.firstMatch
+            for _ in 0..<12 {
+                let top = app.navigationBars["More options"].frame.maxY + 8
+                let bottom = app.buttons["Done"].frame.minY - 8
+                if element.exists, element.isHittable, element.frame.minY >= top, element.frame.maxY <= bottom { return }
+                let upwards = !element.exists || element.frame.maxY > bottom
+                list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upwards ? 0.75 : 0.35))
+                    .press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upwards ? 0.35 : 0.75)))
+            }
+        }
+        let reset = app.switches["Reset sleep timer on interaction"]
+        reveal(reset)
+        XCTAssertTrue(reset.isHittable)
+        XCTAssertEqual(reset.value as? String, "0")
+        reset.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(reset.value as? String, "1")
+        let picker = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Sleep timer")).firstMatch
+        reveal(picker)
+        picker.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).tap()
+        app.buttons["5 minutes"].tap()
+        let extend = app.buttons["Extend by 5 minutes"]
+        reveal(extend)
+        XCTAssertTrue(extend.isHittable)
+        extend.tap()
+        let remaining = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Sleep timer remaining")).firstMatch
+        XCTAssertTrue((remaining.value as? String ?? "").contains("10 minutes"))
+        app.buttons["Done"].tap()
+        more.tap()
+        reveal(remaining)
+        XCTAssertTrue((remaining.value as? String ?? "").contains("5 minutes"))
+        XCTAssertEqual(reset.value as? String, "1")
+        let cancel = app.buttons["Cancel sleep timer"]
+        reveal(cancel)
+        cancel.tap()
+        XCTAssertFalse(app.buttons["Cancel sleep timer"].exists)
+    }
+
+    func testCustomSpeedAndMiniPlayerLabel() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        app.launch()
+        let speed = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Playback speed")).firstMatch
+        XCTAssertTrue(speed.waitForExistence(timeout: 10))
+        speed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let input = app.textFields["Custom playback speed"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !input.isHittable { app.swipeUp() }
+        input.tap()
+        let existing = input.value as? String ?? ""
+        input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count) + "0.98")
+        let apply = app.buttons["Apply custom speed"]
+        for _ in 0..<4 where !apply.isHittable { app.swipeUp() }
+        apply.tap()
+        app.buttons["Done"].tap()
+        XCTAssertTrue(speed.waitForExistence(timeout: 5))
+        XCTAssertTrue((speed.value as? String ?? "").contains("0.98"))
+        app.buttons["Close player"].tap()
+        let miniPlayer = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Mini player, ")).firstMatch
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(miniPlayer.label.count, "Mini player, ".count)
+        miniPlayer.tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5))
+    }
+
     func testFolderRunPreparesHistoryConfirmsLargeCountAndCanBeCancelled() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library", "-folderRunTest"]
