@@ -108,6 +108,16 @@ struct PlayerControlsSheet<EpisodeActions: View>: View {
                 selection: sleepTimerBinding,
                 hint: "Flick up for a longer timer, down for shorter or off"
             )
+            Toggle("Reset sleep timer on interaction", isOn: Binding(
+                get: { sleepTimer.resetsOnInteraction },
+                set: { player.setSleepTimerResetsOnInteraction($0) }
+            ))
+            .accessibilityHint("Restarts the selected countdown when you touch, navigate with VoiceOver, or type in the app. Does not change End of episode.")
+            if sleepTimer.resetsOnInteraction {
+                Text("App interaction restarts the selected countdown duration, including when you start another episode. Any extra time from Extend is replaced by that duration. End of episode is unchanged.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             if sleepTimer.isActive {
                 // Visual shows the live countdown; the spoken value is coarse and
                 // stable so a parked VoiceOver cursor isn't re-spoken every second.
