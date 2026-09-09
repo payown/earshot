@@ -18,6 +18,38 @@ private struct CorrectedMediaFeedStub: FeedFetching {
 @MainActor
 final class AdvancedPlaybackTests: XCTestCase {
 
+    func testCustomSpeedsPersistForPodcastAndGlobalScopes() throws {
+        let context = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context)
+        player.load(episode)
+        player.setPodcastSpeedOverride(0.98, announce: false)
+        XCTAssertEqual(episode.podcast?.speedOverride, 0.98)
+        XCTAssertEqual(player.effectiveRate, 0.98)
+        try context.save()
+        player.setGlobalSpeed(1.01, announce: false)
+        XCTAssertNil(episode.podcast?.speedOverride)
+        XCTAssertEqual(player.effectiveRate, 1.01)
+        XCTAssertEqual(AppSettingsStore(context: context).double(SettingsKey.globalSpeed, default: 1), 1.01)
+    }
+
+    func testSleepTimerInteractionPreferenceIsRestored() {
+        let context = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        XCTAssertFalse(player.sleepTimer.resetsOnInteraction)
+        player.setSleepTimerResetsOnInteraction(true)
+        let restored = PlayerService()
+        restored.configure(context: context)
+        defer { restored.stopAndUnload() }
+        XCTAssertTrue(restored.sleepTimer.resetsOnInteraction)
+        XCTAssertFalse(restored.sleepTimer.isActive)
+        XCTAssertTrue(AppSettingScope.isLocal(SettingsKey.sleepTimerResetsOnInteraction))
+    }
+
     func testManualEpisodeAudioRefreshUpdatesSameGUIDAndPreservesUserState() async throws {
         let context = TestStore.freshContext()
         let podcast = Podcast(feedURL: "https://x/feed", title: "Show")

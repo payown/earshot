@@ -8,6 +8,8 @@ import Observation
 @MainActor
 @Observable
 final class SleepTimerController {
+    /// Device-local preference, restored and saved by PlayerService.
+    var resetsOnInteraction = false
     private(set) var isActive = false
     private(set) var endOfEpisode = false
     private(set) var preset: SleepTimerPreset?
@@ -45,6 +47,31 @@ final class SleepTimerController {
         remainingSeconds = SleepTimerLogic.remaining(endDate: end, now: now)
     }
 
+    /// Restart only a running countdown. A late input must not revive a timer
+    /// whose deadline passed while its tick was delayed or the app was suspended.
+    func recordInteraction(now: Date = .now) {
+        guard resetsOnInteraction, isActive, !endOfEpisode,
+              let duration = preset?.duration, let endDate else { return }
+        guard now < endDate else {
+            expire()
+            return
+        }
+        self.endDate = now.addingTimeInterval(duration)
+        if remainingSeconds != duration { remainingSeconds = duration }
+    }
+
+    /// Returns true only when the traditional cancel-on-episode-change applies.
+    @discardableResult
+    func manualEpisodeStarted(now: Date = .now) -> Bool {
+        guard isActive else { return false }
+        if resetsOnInteraction, !endOfEpisode {
+            recordInteraction(now: now)
+            return false
+        }
+        cancel()
+        return true
+    }
+
     func cancel() {
         ticker?.invalidate()
         ticker = nil
@@ -74,7 +101,7 @@ final class SleepTimerController {
         ticker = timer
     }
 
-    private func tick(now: Date = .now) {
+    func tick(now: Date = .now) {
         guard let endDate else { return }
         if SleepTimerLogic.isExpired(endDate: endDate, now: now) {
             expire()

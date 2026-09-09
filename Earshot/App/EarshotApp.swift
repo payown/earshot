@@ -1244,6 +1244,10 @@ struct EarshotApp: App {
                         Color.clear
                     } else {
                         RootView()
+                            .background {
+                                SleepTimerInteractionMonitor(timer: runtime.player.sleepTimer)
+                                    .accessibilityHidden(true)
+                            }
                             .id(generation)
                             .modelContainer(container)
                             .environment(runtime)

@@ -223,3 +223,91 @@ final class SleepTimerControllerTests: XCTestCase {
         XCTAssertEqual(remaining, 900, accuracy: 1.0)
     }
 }
+
+@MainActor
+final class SleepTimerInteractionTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    func testInteractionRestartsSelectedDurationAndEventuallyExpires() {
+        let timer = SleepTimerController()
+        defer { timer.cancel() }
+        timer.resetsOnInteraction = true
+        var expirations = 0
+        timer.onExpired = { expirations += 1 }
+        timer.set(.fiveMinutes, now: now)
+        timer.tick(now: now.addingTimeInterval(100))
+        XCTAssertEqual(timer.remainingSeconds, 200)
+        timer.recordInteraction(now: now.addingTimeInterval(100))
+        XCTAssertEqual(timer.remainingSeconds, 300)
+        timer.tick(now: now.addingTimeInterval(301))
+        XCTAssertEqual(timer.remainingSeconds, 99)
+        XCTAssertEqual(expirations, 0)
+        timer.tick(now: now.addingTimeInterval(400))
+        XCTAssertFalse(timer.isActive)
+        XCTAssertEqual(expirations, 1)
+    }
+
+    func testDisabledModeDoesNotReset() {
+        let timer = SleepTimerController()
+        defer { timer.cancel() }
+        timer.set(.fiveMinutes, now: now)
+        timer.recordInteraction(now: now.addingTimeInterval(100))
+        timer.tick(now: now.addingTimeInterval(200))
+        XCTAssertEqual(timer.remainingSeconds, 100)
+    }
+
+    func testLateInteractionDoesNotReviveExpiredCountdown() {
+        let timer = SleepTimerController()
+        timer.resetsOnInteraction = true
+        var expirations = 0
+        timer.onExpired = { expirations += 1 }
+        timer.set(.fiveMinutes, now: now)
+        timer.recordInteraction(now: now.addingTimeInterval(300))
+        timer.recordInteraction(now: now.addingTimeInterval(301))
+        XCTAssertFalse(timer.isActive)
+        XCTAssertEqual(expirations, 1)
+    }
+
+    func testCancelledAndEndOfEpisodeTimersIgnoreInteraction() {
+        let timer = SleepTimerController()
+        defer { timer.cancel() }
+        timer.resetsOnInteraction = true
+        timer.set(.fiveMinutes, now: now)
+        timer.cancel()
+        timer.recordInteraction(now: now)
+        XCTAssertFalse(timer.isActive)
+        timer.set(.endOfEpisode, now: now)
+        timer.recordInteraction(now: now.addingTimeInterval(100))
+        XCTAssertTrue(timer.endOfEpisode)
+        XCTAssertNil(timer.remainingSeconds)
+        timer.episodeEnded()
+        XCTAssertFalse(timer.isActive)
+    }
+
+    func testManualEpisodeChangeRestartsOnlyOptedInCountdown() {
+        let timer = SleepTimerController()
+        defer { timer.cancel() }
+        timer.set(.fiveMinutes, now: now)
+        XCTAssertTrue(timer.manualEpisodeStarted(now: now))
+        XCTAssertFalse(timer.isActive)
+        timer.resetsOnInteraction = true
+        timer.set(.fiveMinutes, now: now)
+        XCTAssertFalse(timer.manualEpisodeStarted(now: now.addingTimeInterval(100)))
+        timer.tick(now: now.addingTimeInterval(350))
+        XCTAssertEqual(timer.remainingSeconds, 50)
+        timer.set(.endOfEpisode, now: now)
+        XCTAssertTrue(timer.manualEpisodeStarted(now: now))
+        XCTAssertFalse(timer.isActive)
+    }
+
+    func testInteractionReplacesExtensionWithSelectedDuration() {
+        let timer = SleepTimerController()
+        defer { timer.cancel() }
+        timer.resetsOnInteraction = true
+        timer.set(.fiveMinutes, now: now)
+        timer.extend(now: now)
+        XCTAssertEqual(timer.remainingSeconds, 600)
+        timer.recordInteraction(now: now.addingTimeInterval(100))
+        XCTAssertEqual(timer.remainingSeconds, 300)
+    }
+}
