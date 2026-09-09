@@ -146,6 +146,48 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(inbox.isHittable)
     }
 
+    func testPodcastSettingsUnfollowConfirmsCancelsAndReturnsToLibrary() {
+        verifyPodcastSettingsUnfollow(largeText: false)
+    }
+
+    func testPodcastSettingsUnfollowAtLargestText() {
+        verifyPodcastSettingsUnfollow(largeText: true)
+    }
+
+    private func verifyPodcastSettingsUnfollow(largeText: Bool) {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        app.launch()
+        let settings = app.buttons["Podcast settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        let unfollow = app.buttons["Unfollow"].firstMatch
+        let form = app.collectionViews.firstMatch
+        for _ in 0..<16 {
+            if unfollow.exists, unfollow.isHittable,
+               unfollow.frame.maxY < app.frame.maxY - 35,
+               unfollow.frame.minY > app.navigationBars["Podcast Settings"].frame.maxY { break }
+            form.swipeUp()
+        }
+        XCTAssertTrue(unfollow.isHittable)
+        XCTAssertGreaterThanOrEqual(unfollow.frame.height, 44)
+        unfollow.tap()
+        let cancel = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.tap()
+        XCTAssertTrue(app.navigationBars["Podcast Settings"].exists)
+        XCTAssertTrue(unfollow.isHittable)
+        unfollow.tap()
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        app.alerts.buttons["Unfollow"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Podcast Settings"].exists)
+        XCTAssertFalse(app.buttons["Podcast settings"].exists)
+    }
+
     func testPodcastNameEditorSavesAndRestoresPublisherName() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]

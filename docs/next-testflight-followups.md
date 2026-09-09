@@ -2,19 +2,15 @@
 
 ## Unfollow in Podcast Settings
 
-Requested by Michael on 2026-09-09 while build 263 was processing. This belongs
-to the next TestFlight build; it is not included in build 263.
+Implemented for version 1.2.2, build 264, at Michael's request on 2026-09-09.
+Build 263 does not include this control.
 
-Add a visible, VoiceOver-accessible Unfollow button to Podcast Settings. Retain
-the existing Actions rotor entries and use the existing unfollow confirmation
-and centralized subscription-removal behavior. Cancel must leave the podcast
-unchanged. After a successful unfollow, leave the deleted podcast's settings
-safely and place focus on a valid destination.
+Podcast Settings now has a native Unfollow button for followed podcasts. It
+names the podcast in a confirmation and uses the existing centralized removal
+behavior. Cancel leaves the podcast unchanged. Successful removal closes the
+settings and the owning episode list; its announcement waits for dismissal.
+Existing configurable row, rotor, swipe, and context-menu actions are unchanged.
 
-Current behavior: PodcastSettingsView has no Unfollow control. Library podcast
-rows offer the configurable Unfollow rotor action; episode rows in a podcast
-can offer Unfollow this podcast. With VoiceOver off, Library rows also expose
-swipe and context-menu actions.
-
-Check discovery, confirmation/cancellation, navigation and focus after removal,
-and that existing rotor actions still work.
+Automated checks cover confirmation, cancellation, removal, navigation back to
+Library, and the largest Dynamic Type size. Physical VoiceOver focus after
+removal remains an on-device check; it is not established by XCTest.

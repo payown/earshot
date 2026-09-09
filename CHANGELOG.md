@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Podcast Settings includes an Unfollow button with confirmation, in addition to the existing podcast row actions.
+
 - Custom playback speeds from 0.5× to 5× with two decimal places. VoiceOver users can double-tap Playback speed to open the options, with a hint explaining the action.
 - Optional sleep-timer reset on app interaction, including VoiceOver navigation. The mini player now identifies itself before its episode title in one VoiceOver stop.
 
