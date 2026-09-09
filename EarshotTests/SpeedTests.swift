@@ -82,6 +82,27 @@ final class SpeedTests: XCTestCase {
         XCTAssertEqual(PlaybackLogic.clampedSpeed(3.5), 3.5)
     }
 
+    func testCustomPrecisionAndShortcutsSurviveClamping() {
+        for speed in [0.98, 1.01, 1.25, 1.75, 4.99] {
+            XCTAssertEqual(PlaybackLogic.clampedSpeed(speed), speed)
+        }
+        XCTAssertEqual(PlaybackLogic.clampedSpeed(0.984), 0.98)
+        XCTAssertEqual(PlaybackLogic.spokenRate(0.98), "0.98 times")
+    }
+
+    func testCustomEntryAcceptsDecimalSeparators() {
+        XCTAssertEqual(PlaybackLogic.customSpeed(" 0.98 ", locale: Locale(identifier: "en_US")), 0.98)
+        XCTAssertEqual(PlaybackLogic.customSpeed("0,98", locale: Locale(identifier: "fr_FR")), 0.98)
+        XCTAssertEqual(PlaybackLogic.customSpeed("0.98", locale: Locale(identifier: "fr_FR")), 0.98)
+        XCTAssertEqual(PlaybackLogic.customSpeed("5", locale: Locale(identifier: "en_US")), 5)
+    }
+
+    func testCustomEntryRejectsInvalidAndOutOfRangeInput() {
+        for text in ["", "abc", "NaN", "inf", "0.49", "5.01", "0.981", "1.", "1e0", "1,000", "1.2.3", "-1"] {
+            XCTAssertNil(PlaybackLogic.customSpeed(text, locale: Locale(identifier: "en_US")), text)
+        }
+    }
+
     // MARK: spokenRate
 
     func testSpokenRateWholeNumber() {
