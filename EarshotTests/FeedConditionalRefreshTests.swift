@@ -29,6 +29,39 @@ final class FeedConditionalRefreshTests: XCTestCase {
         """.utf8)
     }
 
+    func testFailedFeedRetryWithExistingEpisodeDoesNotDuplicateOrRemoveDownload() async throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: url, title: "Show")
+        context.insert(podcast)
+        let episode = Episode(guid: "one", title: "One", audioURL: "https://example.com/one.mp3")
+        episode.podcast = podcast
+        context.insert(episode)
+        context.insert(LocalEpisodeState(podcastFeedURL: url, episodeGUID: "one",
+                                         downloadStatus: .downloaded, downloadPath: "retained.mp3"))
+        try context.save()
+        let monitor = FeedRefreshStatusMonitor()
+        monitor.configure(context: context)
+        let repository = SubscriptionRepository(context: context, feed: service())
+        MockURLProtocol.setOutcomes([.response(statusCode: 500, data: Data())])
+        let failed = await repository.refreshAllReport(trigger: .backgroundTask)
+        monitor.finish(failed)
+        XCTAssertEqual(failed.failed, 1)
+        let failure = try XCTUnwrap(failed.failures.first)
+        XCTAssertTrue(failure.reason.contains("500"))
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: validFeed)])
+        let retry = await BackgroundFeedRefresher.retryFeed(failure: failure, monitor: monitor) {
+            try await repository.refresh(podcast)
+        }
+        guard case .success(let outcome) = retry else { return XCTFail("Expected successful retry") }
+        XCTAssertEqual(outcome.added, 0)
+        XCTAssertEqual(monitor.snapshot.state, .completed)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 1)
+        let state = try XCTUnwrap(context.fetch(FetchDescriptor<LocalEpisodeState>()).first)
+        XCTAssertEqual(state.downloadStatus, .downloaded)
+        XCTAssertEqual(state.downloadPath, "retained.mp3")
+        XCTAssertEqual(FeedRefreshStatusStore.load(from: context), monitor.snapshot)
+    }
+
     func testConditionalRequestSendsETagAndLastModified() async throws {
         MockURLProtocol.setOutcomes([.response(statusCode: 304, data: Data())])
         let original = FeedHTTPValidators(

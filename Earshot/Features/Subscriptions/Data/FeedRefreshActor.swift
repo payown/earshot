@@ -83,6 +83,7 @@ actor FeedRefreshActor {
         let url: String
         let result: FeedRefreshFetchResult?
         let errorDescription: String?
+        let failureReason: String?
     }
 
     /// A single-consumer, back-pressured bridge between cooperative network
@@ -172,14 +173,16 @@ actor FeedRefreshActor {
                                         validators: candidate.validators,
                                         trigger: trigger
                                     )),
-                                    errorDescription: nil
+                                    errorDescription: nil,
+                                    failureReason: nil
                                 )
                             } catch {
                                 return FetchedFeed(
                                     index: candidate.index,
                                     url: candidate.url,
                                     result: nil,
-                                    errorDescription: error.localizedDescription
+                                    errorDescription: error.localizedDescription,
+                                    failureReason: FeedCheckFailure.reason(for: error)
                                 )
                             }
                         }
@@ -631,7 +634,7 @@ actor FeedRefreshActor {
                         index: inputIndex,
                         feedURL: url,
                         title: title,
-                        reason: "Could not download or read this feed."
+                        reason: fetched.failureReason ?? "Could not check for new episodes. Try again."
                     )
                     AppLog.subscriptions.error(
                         "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=fetch-failure error=\(Self.sanitized(fetched.errorDescription ?? "Unknown error"), privacy: .public)"

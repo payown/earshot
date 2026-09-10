@@ -1,12 +1,14 @@
 import Foundation
 
 enum FeedError: LocalizedError {
+    case notFollowed
     case badURL
     case network(String)
     case parse
 
     var errorDescription: String? {
         switch self {
+        case .notFollowed: return "This podcast is no longer followed."
         case .badURL: return "That doesn't look like a valid feed URL."
         case .network(let message): return message
         case .parse: return "Couldn't read that feed. Is it a podcast RSS link?"
@@ -121,3 +123,20 @@ struct FeedService {
 // RetryPolicy, a @Sendable closure) already is. `FeedFetching` refines
 // `Sendable`, which is why the conformance can't live in SubscriptionRepository.swift.
 extension FeedService: FeedFetching {}
+
+/// A shareable explanation of a feed check failure. Avoid exposing private feed
+/// URLs (which may include subscription tokens) in status text or copied reports.
+enum FeedCheckFailure {
+    static func reason(for error: Error) -> String {
+        if error is CancellationError || (error as? URLError)?.code == .cancelled {
+            return "The feed check was interrupted. Try again while Earshot is open."
+        }
+        if case FeedError.parse = error {
+            return "The publisher returned a feed Earshot could not read. Try again later."
+        }
+        let detail = error.localizedDescription
+            .replacingOccurrences(of: #"https?://[^\s]+"#, with: "[feed address]", options: .regularExpression)
+            .replacingOccurrences(of: "\n", with: " ")
+        return "Could not check for new episodes. \(String(detail.prefix(300)))"
+    }
+}

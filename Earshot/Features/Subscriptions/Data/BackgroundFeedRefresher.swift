@@ -8,6 +8,12 @@ extension Notification.Name {
     )
 }
 
+enum FeedCheckRetryResult: Sendable {
+    case success(RefreshOutcome)
+    case failure(String)
+    case cancelled
+}
+
 /// Drives periodic background feed refresh via `BGAppRefreshTask`.
 ///
 /// Responsibilities:
@@ -29,6 +35,7 @@ enum BackgroundFeedRefresher {
     private enum ActiveRefreshResult: Sendable {
         case automatic(Bool)
         case userInitiated(SubscriptionRefreshReport)
+        case feedRetry(FeedCheckRetryResult)
     }
 
     /// Stable identifier, registered in Info.plist. Matches the app bundle id
@@ -167,6 +174,37 @@ enum BackgroundFeedRefresher {
             enabled: hapticFeedbackEnabled
         )
         return report
+    }
+
+    /// Retry one feed without replacing the results for the rest of the library.
+    /// This shares ownership, cancellation and overlap protection with full refresh.
+    @MainActor
+    static func retryFeed(
+        failure: FeedRefreshFailure,
+        monitor: FeedRefreshStatusMonitor = .shared,
+        operation: @escaping @MainActor () async throws -> RefreshOutcome
+    ) async -> FeedCheckRetryResult? {
+        guard activeRefreshTask == nil else { return nil }
+        let refreshID = UUID()
+        let task = Task { @MainActor in
+            let result: FeedCheckRetryResult
+            do {
+                result = .success(try await operation())
+            } catch {
+                if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
+                    result = .cancelled
+                } else {
+                    result = .failure(FeedCheckFailure.reason(for: error))
+                }
+            }
+            monitor.recordRetry(result, failure: failure)
+            return ActiveRefreshResult.feedRetry(result)
+        }
+        begin(task: task, id: refreshID, trigger: .manualToolbar)
+        let result = await task.value
+        finish(id: refreshID)
+        guard case .feedRetry(let retry) = result else { return nil }
+        return retry
     }
 
     @MainActor
