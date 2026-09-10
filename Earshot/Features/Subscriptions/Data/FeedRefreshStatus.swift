@@ -18,6 +18,7 @@ struct FeedRefreshStatusSnapshot: Codable, Equatable, Sendable {
     var startedAt: Date?
     var endedAt: Date?
     var lastCompletedAt: Date?
+    var lastRetryAt: Date?
     var lastSkippedAt: Date?
     var lastSkippedTrigger: FeedRefreshTrigger?
     var checked = 0
@@ -28,7 +29,7 @@ struct FeedRefreshStatusSnapshot: Codable, Equatable, Sendable {
     var failureDetails: [FeedRefreshFailure] = []
 
     private enum CodingKeys: String, CodingKey {
-        case state, trigger, scheduledAt, startedAt, endedAt, lastCompletedAt
+        case state, trigger, scheduledAt, startedAt, endedAt, lastCompletedAt, lastRetryAt
         case lastSkippedAt, lastSkippedTrigger, checked, total, newEpisodes
         case unchangedFeeds, failedFeeds, failureDetails
     }
@@ -43,6 +44,7 @@ struct FeedRefreshStatusSnapshot: Codable, Equatable, Sendable {
         startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
         endedAt = try values.decodeIfPresent(Date.self, forKey: .endedAt)
         lastCompletedAt = try values.decodeIfPresent(Date.self, forKey: .lastCompletedAt)
+        lastRetryAt = try values.decodeIfPresent(Date.self, forKey: .lastRetryAt)
         lastSkippedAt = try values.decodeIfPresent(Date.self, forKey: .lastSkippedAt)
         lastSkippedTrigger = try values.decodeIfPresent(FeedRefreshTrigger.self, forKey: .lastSkippedTrigger)
         checked = try values.decodeIfPresent(Int.self, forKey: .checked) ?? 0
@@ -61,6 +63,7 @@ struct FeedRefreshStatusSnapshot: Codable, Equatable, Sendable {
         try values.encodeIfPresent(startedAt, forKey: .startedAt)
         try values.encodeIfPresent(endedAt, forKey: .endedAt)
         try values.encodeIfPresent(lastCompletedAt, forKey: .lastCompletedAt)
+        try values.encodeIfPresent(lastRetryAt, forKey: .lastRetryAt)
         try values.encodeIfPresent(lastSkippedAt, forKey: .lastSkippedAt)
         try values.encodeIfPresent(lastSkippedTrigger, forKey: .lastSkippedTrigger)
         try values.encode(checked, forKey: .checked)
@@ -155,6 +158,7 @@ final class FeedRefreshStatusMonitor {
         snapshot.trigger = trigger
         snapshot.startedAt = now
         snapshot.endedAt = nil
+        snapshot.lastRetryAt = nil
         snapshot.checked = 0
         snapshot.total = total
         snapshot.newEpisodes = 0
@@ -203,6 +207,35 @@ final class FeedRefreshStatusMonitor {
         snapshot.unchangedFeeds = report.unchangedFeeds
         snapshot.failedFeeds = report.failed
         snapshot.failureDetails = report.failures
+        persist()
+    }
+
+    /// Called while the retry still owns the app-wide refresh gate. Keep the
+    /// original pass counts and timestamp, with the retry time shown separately.
+    func recordRetry(_ result: FeedCheckRetryResult, failure: FeedRefreshFailure, now: Date = Date()) {
+        guard snapshot.state != .running,
+              let index = snapshot.failureDetails.firstIndex(where: { $0.id == failure.id }) else { return }
+        switch result {
+        case .success(let outcome):
+            snapshot.failureDetails.remove(at: index)
+            snapshot.failedFeeds = max(0, snapshot.failedFeeds - 1)
+            snapshot.newEpisodes += outcome.added
+            if snapshot.state == .failed || snapshot.state == .completedWithErrors {
+                if snapshot.checked < snapshot.total {
+                    snapshot.state = .interrupted
+                } else {
+                    snapshot.state = snapshot.failedFeeds == 0 ? .completed : .completedWithErrors
+                    if snapshot.failedFeeds == 0 { snapshot.lastCompletedAt = now }
+                }
+            }
+        case .failure(let reason):
+            snapshot.failureDetails[index] = FeedRefreshFailure(
+                feedURL: failure.feedURL, podcastTitle: failure.podcastTitle, reason: reason
+            )
+        case .cancelled:
+            return
+        }
+        snapshot.lastRetryAt = now
         persist()
     }
 

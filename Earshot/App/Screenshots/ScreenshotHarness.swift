@@ -11,6 +11,7 @@ enum ScreenshotScreen: String {
     case nowPlaying
     case settings
     case downloads
+    case feedRefresh
 }
 
 /// DEBUG-only App Store screenshot harness (#643). Never compiled into a Release
@@ -23,6 +24,7 @@ enum ScreenshotScreen: String {
 ///
 /// See `ScreenshotFixtures` for exactly which seeded data is real vs synthesized.
 enum ScreenshotHarness {
+    static let feedRetryFetcher = FeedRetryScreenshotFeed()
 
     static var isFolderRunTest: Bool { isSeeding && CommandLine.arguments.contains("-folderRunTest") }
 
@@ -71,6 +73,20 @@ enum ScreenshotHarness {
                 seedDownloadActivity(in: context)
             }
             selectTab(.downloads)
+        case .feedRefresh:
+            let podcast = Podcast(feedURL: "https://feed-retry.test/rss", title: "Feed retry test")
+            context.insert(podcast)
+            let episode = Episode(guid: "existing", title: "Already downloaded", audioURL: "https://feed-retry.test/audio.mp3")
+            episode.podcast = podcast
+            context.insert(episode)
+            try? context.save()
+            FeedRefreshStatusMonitor.shared.finish(SubscriptionRefreshReport(
+                notifications: [], attempted: 1, total: 1, succeeded: 0,
+                failed: 1, cancelled: false, intendedInsertions: 0, durableInsertions: 0,
+                failures: [FeedRefreshFailure(feedURL: podcast.feedURL, podcastTitle: podcast.title,
+                                             reason: "Could not download or read this feed.")]
+            ))
+            selectTab(.settings)
         case .settings:
             // RootView renders DownloadsSettingsView as the Settings-tab root in
             // screenshot mode, so selecting the tab is all that's needed.
@@ -147,6 +163,21 @@ struct FolderRunUITestFeed: FeedFetching {
             ParsedEpisode(guid: "history-\($0)", title: "History \($0)", audioURL: "https://folder.test/audio.mp3",
                           pubDate: Date(timeIntervalSince1970: Double(1_000_000 + $0)))
         })
+    }
+}
+/// The first retry fails and the next returns the already-known episode.
+/// Exercises the real retry controller, repository and persistence without a network.
+actor FeedRetryScreenshotFeed: FeedFetching {
+    private var attempts = 0
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        attempts += 1
+        try await Task.sleep(for: .milliseconds(200))
+        if attempts == 1 { throw HTTPError.server(status: 503) }
+        return ParsedFeed(title: "Feed retry test", episodes: [
+            ParsedEpisode(guid: "existing", title: "Already downloaded", audioURL: "https://feed-retry.test/audio.mp3",
+                          description: nil, pubDate: nil, durationSeconds: nil)
+        ])
     }
 }
 #endif

@@ -75,6 +75,7 @@ struct DownloadActivityScreen: View {
         let page = Page(records: Array(visible.prefix(limit)))
         List {
             Section("Status across all podcasts") {
+                Text("This screen tracks episode audio downloads. To retry a failed check for new episodes, open Settings, Feed Refresh.")
                 Text(summary.text)
                     .accessibilityIdentifier("downloadActivitySummary")
                 Button("Read download status") { Announcer.announce(summary.text) }

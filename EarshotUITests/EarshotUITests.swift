@@ -6,6 +6,36 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testFeedFailureOpensPodcastAndRetryRecoversWithoutNewEpisodes() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "feedRefresh"]
+        app.launch()
+        let retry = app.buttons["Retry feed check for Feed retry test"]
+        func reveal(_ element: XCUIElement) {
+            for _ in 0..<12 where !element.isHittable { app.swipeUp() }
+            XCTAssertTrue(element.isHittable, app.debugDescription)
+        }
+        XCTAssertTrue(app.navigationBars["Feed Refresh"].waitForExistence(timeout: 15))
+        reveal(retry)
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Feed retry test. Refresh failed.")).firstMatch
+        XCTAssertTrue(row.isHittable, app.debugDescription)
+        row.tap()
+        XCTAssertTrue(app.navigationBars["Feed retry test"].waitForExistence(timeout: 5), app.debugDescription)
+        app.navigationBars.buttons["Feed Refresh"].tap()
+        reveal(retry)
+        retry.tap()
+        let status = app.staticTexts["feedRetryStatus"]
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "503"), evaluatedWith: status)
+        waitForExpectations(timeout: 15)
+        reveal(retry)
+        XCTAssertTrue(retry.isEnabled)
+        retry.tap()
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "Feed check succeeded. No new episodes found."), evaluatedWith: status)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(retry.exists, app.debugDescription)
+        XCTAssertFalse(row.exists)
+    }
+
     func testSleepTimerInteractionAcrossSheets() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]

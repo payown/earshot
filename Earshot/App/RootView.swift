@@ -361,7 +361,9 @@ struct RootView: View {
                 // pushed destination in production. Rather than convert Settings'
                 // rows to value-based navigation just for a screenshot, render it
                 // as the tab root in screenshot mode only. No production change.
-                if ScreenshotHarness.requestedScreen == .settings {
+                if ScreenshotHarness.requestedScreen == .feedRefresh {
+                    FeedRefreshSettingsView(feed: ScreenshotHarness.feedRetryFetcher)
+                } else if ScreenshotHarness.requestedScreen == .settings {
                     DownloadsSettingsView()
                 } else {
                     SettingsScreen()
