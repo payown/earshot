@@ -3193,3 +3193,29 @@ Kashe checked the date.
 “I'm choosing not to answer that.”
 
 ---
+
+### Chapter 87 - Build 265
+
+*Kashe has already heard the episode. She would still like to know what the warning means.*
+
+The podcast had a warning beside it, but yesterday's interview was still on her phone. She had listened to it while folding the towels. She remembered disagreeing with the guest about nearly everything.
+
+Downloads said nothing had failed. That should have been reassuring. Instead, she went back and read the warning again.
+
+This time Feed Refresh explained that Earshot hadn't been able to check for new episodes. The interview was fine. There might not even be another episode yet.
+
+She chose Retry feed check. The publisher was still having trouble, and Earshot said so. Later, she tried once more. The check succeeded, found nothing new, and cleared the warning.
+
+There was no interview to catch up on and no file to rescue. Kashe put the phone down and finished the towels. She could disagree with somebody else tomorrow.
+
+**What to test:**
+
+In Settings, Feed Refresh, find a podcast needing attention. Activate its row to open the podcast. Return and choose Retry feed check for that podcast. Check that VoiceOver can reach both controls and reads the result after retrying.
+
+A successful retry should clear that podcast's warning even when there are no new episodes. Other failed podcasts should remain listed. Close and reopen Earshot to check the saved result. Refreshing the podcast from its episode list should also clear a recovered warning.
+
+If the publisher or connection still fails, the warning should remain with a more useful reason, and retry should remain available. Retry controls should be unavailable while another feed check is running. Existing downloaded episodes should remain available.
+
+Download activity now explains that its retry controls are for episode audio and directs feed-check problems to Settings, Feed Refresh. Please report silent results, controls that do nothing, or a warning that remains after a successful check.
+
+---
