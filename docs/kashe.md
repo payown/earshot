@@ -76,6 +76,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- She uses a rubber band for grip on a stubborn thermos lid (Chapter 88).
+
 - She sometimes follows a show for one interview Renata recommends and keeps
   it long after listening (Chapter 86).
 
@@ -3217,5 +3219,35 @@ A successful retry should clear that podcast's warning even when there are no ne
 If the publisher or connection still fails, the warning should remain with a more useful reason, and retry should remain available. Retry controls should be unavailable while another feed check is running. Existing downloaded episodes should remain available.
 
 Download activity now explains that its retry controls are for episode audio and directs feed-check problems to Settings, Feed Refresh. Please report silent results, controls that do nothing, or a warning that remains after a successful check.
+
+---
+
+### Chapter 88 - Build 266
+
+**What to test:**
+
+In Settings, Siri and Search, enable Include Library in Siri and Search. Wait for the searchable episode count, then search iPhone Spotlight for a followed show or recent episode title. An episode result should open its show notes without starting audio.
+
+On iOS 27, say “Play the latest episode of [show name] in Earshot” for a followed podcast. Also try “Play [episode title] in Earshot.” Confirm Earshot is playing, then repeat while locked. Latest means the newest episode already stored in Earshot; the request does not check the feed.
+
+In Shortcuts, add “Play Latest Podcast Episode in Earshot,” select a show, and run it. Try “Resume listening in Earshot” after pausing. Switch shows and return: saved places and queue order should remain intact.
+
+Turn library search off and confirm a new Siri episode request cannot select content. Turn it back on, wait for the count, and retry. If you unfollow a show you no longer want, check that its search results disappear after updating.
+
+On iOS 27, “Suggest episodes I choose to play” is a separate, optional switch, off by default. If enabled, choose Play on an episode row and let audio start. Suggestions may appear during ordinary use; there is no immediate suggestion test. Report failures with the exact command and iOS version.
+
+**Verification notes:**
+
+Spotlight, named/latest playback, locked-phone playback, opt-out/re-enable, and saved positions passed phone checks. All 51 selected iOS 26.5 tests passed, including synthetic queue and cleanup checks. iOS 18 support remains, but execution there is unverified. Apple's receipt of listening donations and suggestion display remain unverified. No new diagnostics were added.
+
+*Kashe's hands are busy. Her phone is within earshot.*
+
+The thermos lid would not move. Kashe hooked a rubber band around it for grip and tried again. She had already packed the bag. This was supposed to be the easy part.
+
+She asked Siri for the latest episode of her news show in Earshot. The familiar voice began while she held the thermos against the counter. Earlier that evening she'd allowed Earshot's library into search. She hadn't been sure she'd use it.
+
+The lid gave. Cold coffee, yesterday's, which explained a few things.
+
+She emptied it, rinsed it, and left the phone where it was. The news carried on. One less thing to pick up before she could finish putting things away.
 
 ---

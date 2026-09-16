@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Opt-in podcast and episode results in system search open Earshot's library and show notes. Siri and Shortcuts can resume listening and play selected episodes; iOS 27 adds podcast audio search and latest locally stored episode playback.
+- A separate, optional listening-suggestions setting shares successful manually selected playback with the system. Turning it off or removing searchable content clears the corresponding donations.
+
 - Podcast Settings includes an Unfollow button with confirmation, in addition to the existing podcast row actions.
 
 - Custom playback speeds from 0.5× to 5× with two decimal places. VoiceOver users can double-tap Playback speed to open the options, with a hint explaining the action.
