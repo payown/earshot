@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # This Mac has a single pinned Xcode (26.5 at migration) already selected
+      # This Mac has a public Xcode 27.0 already selected
       # via `xcode-select`, plus a dedicated CI simulator. No setup-xcode
       # action is needed (that was for GitHub's hosted images).
       - name: Show Xcode and CI simulator

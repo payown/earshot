@@ -36,19 +36,37 @@ final class LibraryPlaybackBridge {
         guard let container = runtime.readyContainer else { throw LibraryIntentError.notReady }
         let store = await SearchContentStore.make(container: container)
         let snapshot = try await store.snapshot()
+        guard let record = snapshot.first(where: { $0.id == id }) else { throw LibraryIntentError.unavailable }
+        try playResolved(record, runtime: runtime, container: container)
+    }
+
+    func playLatest(showID: String) async throws {
+        guard LibrarySearchIndex.isEnabled else { throw LibraryPlaybackError.searchDisabled }
+        let runtime = try await preparedRuntime()
+        guard let container = runtime.readyContainer else { throw LibraryIntentError.notReady }
+        let store = await SearchContentStore.make(container: container)
+        guard let record = try await store.latestEpisode(forShowID: showID) else { throw LibraryIntentError.unavailable }
+        try playResolved(record, runtime: runtime, container: container, requiredShowID: showID)
+    }
+
+    private func playResolved(_ record: SearchContent, runtime: AppRuntime, container: ModelContainer, requiredShowID: String? = nil) throws {
         try Task.checkCancellation()
-        // A reset or opt-out may have happened while the background query ran.
         guard LibrarySearchIndex.isEnabled else { throw LibraryPlaybackError.searchDisabled }
         guard !runtime.isResettingLocalData, runtime.readyContainer === container,
               runtime.rootServiceActivationStatus == .completed else { throw LibraryIntentError.notReady }
-        guard let record = snapshot.first(where: { $0.id == id }),
-              let guid = record.guid else { throw LibraryIntentError.unavailable }
+        guard let guid = record.guid else { throw LibraryIntentError.unavailable }
         let feed = record.feedURL
         var descriptor = FetchDescriptor<Episode>(predicate: #Predicate {
             $0.guid == guid && $0.podcast?.feedURL == feed
         })
         descriptor.fetchLimit = 1
         guard let episode = try container.mainContext.fetch(descriptor).first else { throw LibraryIntentError.unavailable }
+        if let requiredShowID {
+            guard let show = episode.podcast, show.isFollowed,
+                  SearchContent.identifier(feedURL: show.feedURL) == requiredShowID else {
+                throw LibraryIntentError.unavailable
+            }
+        }
         start(runtime.player, episode)
     }
 

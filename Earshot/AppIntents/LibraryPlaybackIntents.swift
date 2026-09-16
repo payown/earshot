@@ -29,3 +29,19 @@ struct PlayEpisodeIntent: AudioPlaybackIntent {
         return .result()
     }
 }
+
+struct PlayLatestPodcastIntent: AudioPlaybackIntent {
+    static let title: LocalizedStringResource = "Play Latest Podcast Episode in Earshot"
+    static let description = IntentDescription("Plays the newest episode already stored for the selected followed podcast. It does not refresh the feed or change your queue.")
+    static var openAppWhenRun: Bool { true }
+    @available(iOS 26.0, *) static var supportedModes: IntentModes { .foreground }
+    @Parameter(title: "Podcast") var podcast: PodcastEntity
+
+    static var parameterSummary: some ParameterSummary { Summary("Play the latest episode of \(\.$podcast)") }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        try await LibraryPlaybackBridge.shared.playLatest(showID: podcast.id)
+        return .result()
+    }
+}

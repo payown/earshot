@@ -21,15 +21,18 @@ final class LibrarySearchIndex {
     @ObservationIgnored private var dirty = true
     @ObservationIgnored private var forceReindex = false
     @ObservationIgnored private let index: any LibrarySearchWriting
+    @ObservationIgnored private let donations: ListeningDonations
     @ObservationIgnored private let grace: Duration
     @ObservationIgnored private let retryDelay: Duration
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var boundContainer: ModelContainer?
 
     init(index: any LibrarySearchWriting = SystemLibrarySearchWriter(),
+         donations: ListeningDonations = .shared,
          grace: Duration = .seconds(3), retryDelay: Duration = .seconds(30),
          now: @escaping () -> Date = { .now }) {
         self.index = index
+        self.donations = donations
         self.grace = grace
         self.retryDelay = retryDelay
         self.now = now
@@ -98,6 +101,7 @@ final class LibrarySearchIndex {
         UserDefaults.standard.set(false, forKey: Self.enabledKey)
         await stop()
         do {
+            try await donations.clear()
             try await index.deleteAllSearchableItems()
         } catch {
             status = "Search removal failed. Earshot will retry."
@@ -114,6 +118,7 @@ final class LibrarySearchIndex {
         var lastRenewal = Date.distantPast
         var needsClear = true // Repair interrupted writes and stale prior stores.
         var wasEnabled = Self.isEnabled
+        var wasListeningEnabled = true
         dirty = true
         for await _ in events {
             do {
@@ -121,6 +126,12 @@ final class LibrarySearchIndex {
                 // Coalesce saves and let launch/VoiceOver settle before reading.
                 try await Task.sleep(for: grace)
                 let enabled = Self.isEnabled
+                // Consent removal must not wait behind content's 60-second throttle.
+                let listeningEnabled = ListeningDonations.isEnabled
+                if !listeningEnabled, wasListeningEnabled {
+                    try await donations.clear()
+                }
+                wasListeningEnabled = listeningEnabled
                 if enabled != wasEnabled {
                     needsClear = true
                     dirty = true
@@ -157,6 +168,7 @@ final class LibrarySearchIndex {
                     try Task.checkCancellation()
                     guard Self.isEnabled else { needsClear = true; requestRefresh(); continue }
                     let next = Dictionary(uniqueKeysWithValues: content.map { ($0.id, $0) })
+                    try await donations.reconcile(content)
                     let removed = previous.keys.filter { next[$0] == nil }
                     if !removed.isEmpty { try await index.deleteSearchableItems(withIdentifiers: removed) }
                     let renew = now().timeIntervalSince(lastRenewal) >= 86_400
@@ -255,7 +267,9 @@ final class SystemLibrarySearchWriter: LibrarySearchWriting {
         get { index.indexDelegate }
         set { index.indexDelegate = newValue }
     }
-    func deleteAllSearchableItems() async throws { try await index.deleteAllSearchableItems() }
+    func deleteAllSearchableItems() async throws {
+        try await index.deleteAllSearchableItems()
+    }
     func deleteSearchableItems(withIdentifiers identifiers: [String]) async throws {
         try await index.deleteSearchableItems(withIdentifiers: identifiers)
     }

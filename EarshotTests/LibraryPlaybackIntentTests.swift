@@ -144,7 +144,9 @@ final class LibraryPlaybackIntentTests: XCTestCase {
 
     func testResumeWaitsUntilRootServicesFinish() async throws {
         let container = try ModelContainerFactory.makeInMemory()
-        let episode = Episode(guid: "waiting", title: "Waiting", audioURL: "https://example.invalid/audio")
+        let audio = try makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        let episode = Episode(guid: "waiting", title: "Waiting", audioURL: audio.absoluteString)
         container.mainContext.insert(episode)
         let runtime = AppRuntime(load: .ready(container), mode: .testHost)
         var calls = 0
@@ -197,6 +199,101 @@ final class LibraryPlaybackIntentTests: XCTestCase {
         releaseRefresh?.resume()
         _ = await refresh.value
         _ = await reset.value
+    }
+
+    func testExplicitPauseAndUnloadCancelPendingListeningDonation() async throws {
+        let contentEnabled = LibrarySearchIndex.isEnabled
+        let listeningEnabled = UserDefaults.standard.bool(forKey: ListeningDonations.enabledKey)
+        defer {
+            UserDefaults.standard.set(contentEnabled, forKey: LibrarySearchIndex.enabledKey)
+            UserDefaults.standard.set(listeningEnabled, forKey: ListeningDonations.enabledKey)
+        }
+        UserDefaults.standard.set(true, forKey: LibrarySearchIndex.enabledKey)
+        UserDefaults.standard.set(true, forKey: ListeningDonations.enabledKey)
+        let audio = try makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        let container = try ModelContainerFactory.makeInMemory()
+        let show = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "selected", title: "Selected", audioURL: audio.absoluteString)
+        container.mainContext.insert(show)
+        container.mainContext.insert(episode)
+        episode.podcast = show
+        try container.mainContext.save()
+        let runtime = await readyRuntime(container)
+        defer { runtime.player.stopAndUnload(); runtime.player.releasePersistence() }
+        runtime.player.playFromEpisodeList(episode)
+        XCTAssertNotNil(runtime.player.pendingListeningDonationID)
+        runtime.player.pause()
+        XCTAssertNil(runtime.player.pendingListeningDonationID)
+        runtime.player.resume()
+        XCTAssertNil(runtime.player.pendingListeningDonationID)
+        runtime.player.playFromEpisodeList(episode)
+        XCTAssertNotNil(runtime.player.pendingListeningDonationID)
+        runtime.player.stopAndUnload()
+        XCTAssertNil(runtime.player.pendingListeningDonationID)
+        runtime.player.playFromEpisodeList(episode)
+        XCTAssertNotNil(runtime.player.pendingListeningDonationID)
+        runtime.player.cancelPendingCleartextPlayback()
+        XCTAssertNil(runtime.player.pendingListeningDonationID)
+        runtime.player.playWithHandoff(episode)
+        XCTAssertNil(runtime.player.pendingListeningDonationID, "Siri's entry point must not create a manual donation")
+    }
+
+    func testLatestPodcastUsesSelectedShowsStoreBeyondGlobalSearchCap() async throws {
+        let enabled = LibrarySearchIndex.isEnabled
+        defer { UserDefaults.standard.set(enabled, forKey: LibrarySearchIndex.enabledKey) }
+        UserDefaults.standard.set(true, forKey: LibrarySearchIndex.enabledKey)
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let show = Podcast(feedURL: "https://example.com/doubletap", title: "Double Tap")
+        let duplicate = Podcast(feedURL: "https://example.com/other", title: "Double Tap")
+        context.insert(show); context.insert(duplicate)
+        let old = Episode(guid: "old", title: "Earlier", audioURL: "https://example.com/audio", pubDate: Date(timeIntervalSince1970: 10))
+        let latest = Episode(guid: "latest", title: "Newest for this show", audioURL: "https://example.com/audio", pubDate: Date(timeIntervalSince1970: 20))
+        context.insert(old); context.insert(latest)
+        old.podcast = show; latest.podcast = show
+        latest.positionSeconds = 42
+        context.insert(QueueItem(episode: old, position: 0))
+        for number in 0..<501 {
+            let episode = Episode(guid: "other-\(number)", title: "Other feed", audioURL: "https://example.com/audio", pubDate: Date(timeIntervalSince1970: Double(100 + number)))
+            context.insert(episode)
+            episode.podcast = duplicate
+        }
+        // A played episode can still be the latest. Keep it outside both the
+        // recent global cap and the unfinished-progress inclusion rule.
+        latest.playedAt = Date()
+        try context.save()
+        let snapshot = try await SearchContentStore.make(container: container).snapshot()
+        let latestID = SearchContent.identifier(feedURL: show.feedURL, guid: latest.guid)
+        XCTAssertFalse(snapshot.contains { $0.id == latestID })
+        let runtime = await readyRuntime(container)
+        var selected: Episode?
+        let bridge = LibraryPlaybackBridge(start: { _, episode in selected = episode })
+        bridge.install(runtime: runtime)
+        let showID = SearchContent.identifier(feedURL: show.feedURL)
+        try await bridge.playLatest(showID: showID)
+        XCTAssertEqual(selected?.persistentModelID, latest.persistentModelID)
+        XCTAssertEqual(latest.positionSeconds, 42)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertNil(latest.queueItem)
+        show.subscriptionStateRaw = "catalogOnly"
+        try context.save()
+        selected = nil
+        do { try await bridge.playLatest(showID: showID); XCTFail("Unfollowed show must not resolve") }
+        catch { XCTAssertTrue(error is LibraryIntentError) }
+        XCTAssertNil(selected)
+    }
+
+    func testLatestPodcastRejectsContentOptOutBeforeStartup() async throws {
+        let enabled = LibrarySearchIndex.isEnabled
+        defer { UserDefaults.standard.set(enabled, forKey: LibrarySearchIndex.enabledKey) }
+        UserDefaults.standard.set(false, forKey: LibrarySearchIndex.enabledKey)
+        let runtime = AppRuntime(mode: .testHost)
+        let bridge = LibraryPlaybackBridge(start: { _, _ in XCTFail("Should not start") })
+        bridge.install(runtime: runtime)
+        do { try await bridge.playLatest(showID: "missing"); XCTFail("Expected opt-out") }
+        catch { XCTAssertEqual(error as? LibraryPlaybackError, .searchDisabled) }
+        XCTAssertEqual(runtime.launchAttemptCount, 0)
     }
 
     private func makeAudio() throws -> URL {
