@@ -144,11 +144,24 @@ enum PlaybackLogic {
     static let speedStep: Double = 0.1
 
     /// Clamps `speed` to the allowed [0.5, 5.0] range and rounds to the nearest
-    /// 0.1 increment so floating-point arithmetic does not produce values like
+    /// 0.01 increment so custom speeds survive storage and handoff without values like
     /// 1.1000000001.
     static func clampedSpeed(_ speed: Double) -> Double {
+        guard speed.isFinite else { return 1.0 }
         let clamped = min(max(speed, minSpeed), maxSpeed)
-        return (clamped * 10).rounded() / 10
+        return (clamped * 100).rounded() / 100
+    }
+
+    /// Accept an exact decimal speed, using the local decimal separator or a
+    /// period. Reject partial input, grouping, and excess precision instead of
+    /// silently playing at a different rate from the one entered.
+    static func customSpeed(_ text: String, locale: Locale = .current) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed.replacingOccurrences(of: locale.decimalSeparator ?? ".", with: ".")
+        guard normalized.range(of: #"^[0-9]+(?:\.[0-9]{1,2})?$"#, options: .regularExpression) != nil,
+              let speed = Double(normalized), speed.isFinite,
+              (minSpeed...maxSpeed).contains(speed) else { return nil }
+        return clampedSpeed(speed)
     }
 
     /// The human-readable form of a speed value used in VoiceOver announcements.

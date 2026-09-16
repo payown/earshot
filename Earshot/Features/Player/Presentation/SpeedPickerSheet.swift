@@ -21,6 +21,9 @@ struct SpeedPickerSheet: View {
     /// The speed value shown in the stepper. Seeded from the current effective
     /// rate on appear.
     @State private var stepperSpeed: Double
+    @State private var customSpeedText = ""
+    @State private var showsCustomSpeedError = false
+    @FocusState private var customSpeedFocused: Bool
 
     init() {
         // Defer until body runs; the @State initial values come from the player,
@@ -36,6 +39,7 @@ struct SpeedPickerSheet: View {
                 scopeSection
                 shortcutsSection
                 stepperSection
+                customSpeedSection
                 if podcastScope {
                     resetSection
                 }
@@ -47,6 +51,11 @@ struct SpeedPickerSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .alert("Enter a valid playback speed", isPresented: $showsCustomSpeedError) {
+                Button("OK") { customSpeedFocused = true }
+            } message: {
+                Text("Enter a number from 0.5 to 5 with up to two decimal places, such as 0.98.")
+            }
             .task {
                 // Seed state from the live player once the environment is available.
                 // Defaults to "This podcast" whenever a real podcast is loaded (#606,
@@ -55,6 +64,7 @@ struct SpeedPickerSheet: View {
                 // directly to the @State, NOT through `scopeBinding`, so this seed never
                 // announces a scope change the user didn't make.
                 stepperSpeed = player.effectiveRate
+                updateCustomSpeedText()
                 podcastScope = player.canOverridePerPodcast
             }
         }
@@ -144,21 +154,47 @@ struct SpeedPickerSheet: View {
             }
             // Stepper for VoiceOver increment/decrement and sighted +/- tapping.
             Stepper(
-                value: $stepperSpeed,
+                value: Binding(
+                    get: { stepperSpeed },
+                    set: { applySpeed($0) }
+                ),
                 in: PlaybackLogic.minSpeed...PlaybackLogic.maxSpeed,
                 step: PlaybackLogic.speedStep
             ) {
                 EmptyView()
             }
-            .onChange(of: stepperSpeed) { _, newValue in
-                let clamped = PlaybackLogic.clampedSpeed(newValue)
-                stepperSpeed = clamped
-                applySpeed(clamped)
-            }
             .accessibilityLabel("Speed stepper")
             .accessibilityValue(PlaybackLogic.spokenRate(stepperSpeed))
             .accessibilityHint("Swipe up or down to adjust in 0.1x steps")
         }
+    }
+
+    private var customSpeedSection: some View {
+        Section {
+            TextField("Custom playback speed", text: $customSpeedText)
+                .keyboardType(.decimalPad)
+                .autocorrectionDisabled()
+                .focused($customSpeedFocused)
+                .onSubmit { applyCustomSpeed() }
+            Button("Apply custom speed", action: applyCustomSpeed)
+        } header: {
+            Text("Custom speed")
+        } footer: {
+            Text("Enter a speed from 0.5 to 5 with up to two decimal places, such as 0.98. Then choose Apply custom speed.")
+        }
+    }
+
+    private func applyCustomSpeed() {
+        guard let speed = PlaybackLogic.customSpeed(customSpeedText) else {
+            showsCustomSpeedError = true
+            return
+        }
+        customSpeedFocused = false
+        applySpeed(speed)
+    }
+
+    private func updateCustomSpeedText() {
+        customSpeedText = stepperSpeed.formatted(.number.precision(.fractionLength(0...2)).grouping(.never))
     }
 
     // MARK: Reset to global
@@ -170,6 +206,7 @@ struct SpeedPickerSheet: View {
                 podcastScope = false
                 player.clearPodcastSpeedOverride()
                 stepperSpeed = player.effectiveRate
+                updateCustomSpeedText()
             } label: {
                 Label("Reset to global speed", systemImage: "arrow.counterclockwise")
             }
@@ -183,6 +220,7 @@ struct SpeedPickerSheet: View {
     private func applySpeed(_ speed: Double) {
         let clamped = PlaybackLogic.clampedSpeed(speed)
         stepperSpeed = clamped
+        updateCustomSpeedText()
         if podcastScope {
             player.setPodcastSpeedOverride(clamped)
         } else {

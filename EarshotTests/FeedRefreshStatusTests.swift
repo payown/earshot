@@ -313,6 +313,104 @@ final class FeedRefreshStatusTests: XCTestCase {
         XCTAssertEqual(FeedRefreshStatusStore.load(from: context), monitor.snapshot)
     }
 
+    func testRetryClearsOnlyRecoveredFeedAndPersistsAcrossRelaunch() async throws {
+        let context = TestStore.freshContext()
+        let monitor = FeedRefreshStatusMonitor()
+        monitor.configure(context: context)
+        let first = FeedRefreshFailure(feedURL: "https://example.com/one", podcastTitle: "One", reason: "Failed")
+        let second = FeedRefreshFailure(feedURL: "https://example.com/two", podcastTitle: "Two", reason: "Failed")
+        monitor.finish(SubscriptionRefreshReport(
+            notifications: [], attempted: 3, total: 3, succeeded: 1,
+            failed: 2, cancelled: false, intendedInsertions: 0,
+            durableInsertions: 0, failures: [first, second]
+        ))
+        let outcome = RefreshOutcome(added: 0, wasBackfill: false, newestNewEpisodeGUID: nil)
+        _ = await BackgroundFeedRefresher.retryFeed(failure: first, monitor: monitor) { outcome }
+        XCTAssertEqual(monitor.snapshot.failedFeeds, 1)
+        XCTAssertEqual(monitor.snapshot.failureDetails, [second])
+        XCTAssertEqual(monitor.snapshot.state, .completedWithErrors)
+        XCTAssertNotNil(monitor.snapshot.lastRetryAt)
+        _ = await BackgroundFeedRefresher.retryFeed(failure: second, monitor: monitor) { outcome }
+        XCTAssertEqual(monitor.snapshot.failedFeeds, 0)
+        XCTAssertEqual(monitor.snapshot.state, .completed)
+        XCTAssertFalse(FeedRefreshInlineStatus.shouldShow(monitor.snapshot))
+        XCTAssertEqual(monitor.snapshot.checked, 3)
+        XCTAssertEqual(monitor.snapshot.total, 3)
+        let relaunched = FeedRefreshStatusMonitor()
+        relaunched.configure(context: context)
+        XCTAssertEqual(relaunched.snapshot, monitor.snapshot)
+    }
+
+    func testFailedAndCancelledRetryKeepWarningAndOtherFeedResults() async throws {
+        let monitor = FeedRefreshStatusMonitor()
+        let failure = FeedRefreshFailure(feedURL: "https://example.com/one", podcastTitle: "One", reason: "Failed")
+        monitor.finish(SubscriptionRefreshReport(
+            notifications: [], attempted: 2, total: 2, succeeded: 1,
+            failed: 1, cancelled: false, intendedInsertions: 3,
+            durableInsertions: 3, newEpisodes: 3, failures: [failure]
+        ))
+        _ = await BackgroundFeedRefresher.retryFeed(failure: failure, monitor: monitor) {
+            throw HTTPError.server(status: 500)
+        }
+        XCTAssertEqual(monitor.snapshot.failedFeeds, 1)
+        XCTAssertEqual(monitor.snapshot.newEpisodes, 3)
+        XCTAssertTrue(monitor.snapshot.failureDetails[0].reason.contains("500"))
+        let failed = monitor.snapshot
+        _ = await BackgroundFeedRefresher.retryFeed(failure: failure, monitor: monitor) {
+            throw CancellationError()
+        }
+        XCTAssertEqual(monitor.snapshot, failed)
+    }
+
+    func testRetryOwnershipRejectsOverlappingRefreshAndCanBeCancelled() async throws {
+        let monitor = FeedRefreshStatusMonitor()
+        let failure = FeedRefreshFailure(feedURL: "https://example.com/one", podcastTitle: "One", reason: "Failed")
+        let retry = Task { @MainActor in
+            await BackgroundFeedRefresher.retryFeed(failure: failure, monitor: monitor) {
+                try await Task.sleep(for: .seconds(30))
+                return RefreshOutcome(added: 0, wasBackfill: false, newestNewEpisodeGUID: nil)
+            }
+        }
+        while !BackgroundFeedRefresher.isRefreshInProgress { await Task.yield() }
+        let overlap = await BackgroundFeedRefresher.retryFeed(failure: failure, monitor: monitor) {
+            XCTFail("Overlapping retry must not execute")
+            throw CancellationError()
+        }
+        XCTAssertNil(overlap)
+        let full = await BackgroundFeedRefresher.runUserInitiatedRefresh(trigger: .manualToolbar, total: 1) {
+            XCTFail("Full refresh must not overlap a feed retry")
+            return SubscriptionRefreshReport(notifications: [], attempted: 0, total: 1, succeeded: 0,
+                                             failed: 0, cancelled: true, intendedInsertions: 0, durableInsertions: 0)
+        }
+        XCTAssertNil(full)
+        await BackgroundFeedRefresher.cancelAndWait()
+        guard case .cancelled = await retry.value else { return XCTFail("Expected cancellation") }
+        XCTAssertFalse(BackgroundFeedRefresher.isRefreshInProgress)
+    }
+
+    func testRetryCannotClaimAnIncompleteLibraryPassCompleted() {
+        let monitor = FeedRefreshStatusMonitor()
+        let failure = FeedRefreshFailure(feedURL: "https://example.com/one", podcastTitle: "One", reason: "Failed")
+        monitor.finish(SubscriptionRefreshReport(
+            notifications: [], attempted: 1, total: 3, succeeded: 0,
+            failed: 1, cancelled: true, intendedInsertions: 0,
+            durableInsertions: 0, failures: [failure]
+        ))
+        monitor.recordRetry(.success(RefreshOutcome(added: 0, wasBackfill: false, newestNewEpisodeGUID: nil)), failure: failure)
+        XCTAssertEqual(monitor.snapshot.state, .interrupted)
+        XCTAssertEqual(monitor.snapshot.checked, 1)
+        XCTAssertEqual(monitor.snapshot.total, 3)
+        XCTAssertNil(monitor.snapshot.lastCompletedAt)
+    }
+
+    func testFeedFailureReasonDistinguishesParseAndRedactsFeedAddresses() {
+        XCTAssertTrue(FeedCheckFailure.reason(for: FeedError.parse).contains("could not read"))
+        let reason = FeedCheckFailure.reason(for: FeedError.network("Timeout at https://example.com/private?token=secret"))
+        XCTAssertTrue(reason.contains("Timeout"))
+        XCTAssertFalse(reason.contains("secret"))
+        XCTAssertFalse(reason.contains("example.com"))
+    }
+
     func testScheduledStatusExplainsIOSControlsTiming() {
         XCTAssertEqual(
             FeedRefreshStatusPresentation.scheduled(Date(timeIntervalSince1970: 1)) { _ in "10:15 AM" },

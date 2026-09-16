@@ -31,6 +31,7 @@ enum SettingsKey {
     // not enhance speech, so no current code reads or writes this key.
     static let voiceEnhanceEnabled = "voice_enhance_enabled"
     static let globalSpeed = "global_speed"
+    static let sleepTimerResetsOnInteraction = "sleep_timer_resets_on_interaction"
     /// Device-local default gain. Per-episode overrides are also device-local.
     static let volumeBoost = "volume_boost"
     static let skipForwardSeconds = "skip_forward_seconds"

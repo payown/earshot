@@ -27,6 +27,10 @@ struct PodcastSettingsView: View {
     /// the view's lifetime rather than in an unowned `Task {}` that SwiftUI may
     /// tear down before it reaches the system prompt (#421).
     @State private var showingNameEditor = false
+    @State private var confirmingUnfollow = false
+    @State private var unfollowName = ""
+    @State private var didUnfollow = false
+    @State private var unfollowFailed = false
     @State private var nameFeedback: String?
     @AccessibilityFocusState private var nameButtonFocused: Bool
     @State private var authRequestToken = 0
@@ -147,20 +151,42 @@ struct PodcastSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if podcast.isFollowed {
-                    Section("Podcast name") {
-                        Button("Rename podcast") { showingNameEditor = true }
-                            .accessibilityValue(podcast.displayName)
-                            .accessibilityFocused($nameButtonFocused)
-                        Text("Publisher name: \(podcast.title)")
+                if !didUnfollow {
+                    if podcast.isFollowed {
+                        Section("Podcast name") {
+                            Button("Rename podcast") { showingNameEditor = true }
+                                .accessibilityValue(podcast.displayName)
+                                .accessibilityFocused($nameButtonFocused)
+                            Text("Publisher name: \(podcast.title)")
+                        }
+                    }
+                    playbackSection
+                    queueSection
+                    inboxSection
+                    episodeFiltersSection
+                    foldersSection
+                    notificationsSection
+                    if podcast.isFollowed {
+                        Section {
+                            Button("Unfollow", role: .destructive) {
+                                unfollowName = podcast.displayName
+                                confirmingUnfollow = true
+                            }
+                            .accessibilityHint("Asks before removing this podcast and its episodes from your library")
+                        }
                     }
                 }
-                playbackSection
-                queueSection
-                inboxSection
-                episodeFiltersSection
-                foldersSection
-                notificationsSection
+            }
+            .alert("Unfollow \(unfollowName)?", isPresented: $confirmingUnfollow) {
+                Button("Unfollow", role: .destructive, action: unfollow)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes \(unfollowName) and its episodes from your library. This can't be undone.")
+            }
+            .alert("Couldn't unfollow podcast", isPresented: $unfollowFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Your changes couldn't be saved. Please try again.")
             }
             .navigationTitle("Podcast Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -188,6 +214,26 @@ struct PodcastSettingsView: View {
                 PodcastFolderPickerView(podcast: podcast)
             }
             .onAppear { requestInitialFocus() }
+        }
+    }
+
+    private func unfollow() {
+        guard !podcast.isDeleted else {
+            didUnfollow = true
+            dismiss()
+            return
+        }
+        guard SubscriptionRepository(context: modelContext).unsubscribe(podcast) else {
+            unfollowFailed = true
+            return
+        }
+        // Stop reading the deleted model while the sheet dismisses. The
+        // repository's existing notification also closes an owning episode list.
+        didUnfollow = true
+        dismiss()
+        let message = "Unfollowed \(unfollowName)"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            Announcer.announce(message)
         }
     }
 

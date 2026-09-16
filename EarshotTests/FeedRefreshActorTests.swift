@@ -1387,7 +1387,7 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(report.failures, [FeedRefreshFailure(
             feedURL: "https://example.com/failing.xml",
             podcastTitle: "The Failing Show",
-            reason: "Could not download or read this feed."
+            reason: FeedCheckFailure.reason(for: URLError(.timedOut))
         )])
     }
 

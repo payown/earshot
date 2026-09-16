@@ -6,6 +6,109 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testFeedFailureOpensPodcastAndRetryRecoversWithoutNewEpisodes() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "feedRefresh"]
+        app.launch()
+        let retry = app.buttons["Retry feed check for Feed retry test"]
+        func reveal(_ element: XCUIElement) {
+            for _ in 0..<12 where !element.isHittable { app.swipeUp() }
+            XCTAssertTrue(element.isHittable, app.debugDescription)
+        }
+        XCTAssertTrue(app.navigationBars["Feed Refresh"].waitForExistence(timeout: 15))
+        reveal(retry)
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Feed retry test. Refresh failed.")).firstMatch
+        XCTAssertTrue(row.isHittable, app.debugDescription)
+        row.tap()
+        XCTAssertTrue(app.navigationBars["Feed retry test"].waitForExistence(timeout: 5), app.debugDescription)
+        app.navigationBars.buttons["Feed Refresh"].tap()
+        reveal(retry)
+        retry.tap()
+        let status = app.staticTexts["feedRetryStatus"]
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "503"), evaluatedWith: status)
+        waitForExpectations(timeout: 15)
+        reveal(retry)
+        XCTAssertTrue(retry.isEnabled)
+        retry.tap()
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "Feed check succeeded. No new episodes found."), evaluatedWith: status)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(retry.exists, app.debugDescription)
+        XCTAssertFalse(row.exists)
+    }
+
+    func testSleepTimerInteractionAcrossSheets() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        app.launch()
+        let more = app.buttons["More options"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        func reveal(_ element: XCUIElement) {
+            let list = app.collectionViews.firstMatch
+            for _ in 0..<12 {
+                let top = app.navigationBars["More options"].frame.maxY + 8
+                let bottom = app.buttons["Done"].frame.minY - 8
+                if element.exists, element.isHittable, element.frame.minY >= top, element.frame.maxY <= bottom { return }
+                let upwards = !element.exists || element.frame.maxY > bottom
+                list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upwards ? 0.75 : 0.35))
+                    .press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upwards ? 0.35 : 0.75)))
+            }
+        }
+        let reset = app.switches["Reset sleep timer on interaction"]
+        reveal(reset)
+        XCTAssertTrue(reset.isHittable)
+        XCTAssertEqual(reset.value as? String, "0")
+        reset.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(reset.value as? String, "1")
+        let picker = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Sleep timer")).firstMatch
+        reveal(picker)
+        picker.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).tap()
+        app.buttons["5 minutes"].tap()
+        let extend = app.buttons["Extend by 5 minutes"]
+        reveal(extend)
+        XCTAssertTrue(extend.isHittable)
+        extend.tap()
+        let remaining = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Sleep timer remaining")).firstMatch
+        XCTAssertTrue((remaining.value as? String ?? "").contains("10 minutes"))
+        app.buttons["Done"].tap()
+        more.tap()
+        reveal(remaining)
+        XCTAssertTrue((remaining.value as? String ?? "").contains("5 minutes"))
+        XCTAssertEqual(reset.value as? String, "1")
+        let cancel = app.buttons["Cancel sleep timer"]
+        reveal(cancel)
+        cancel.tap()
+        XCTAssertFalse(app.buttons["Cancel sleep timer"].exists)
+    }
+
+    func testCustomSpeedAndMiniPlayerLabel() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        app.launch()
+        let speed = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Playback speed")).firstMatch
+        XCTAssertTrue(speed.waitForExistence(timeout: 10))
+        XCTAssertNotEqual(speed.elementType, .button, "Playback speed must remain an adjustable element for VoiceOver rate feedback")
+        speed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let input = app.textFields["Custom playback speed"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !input.isHittable { app.swipeUp() }
+        input.tap()
+        let existing = input.value as? String ?? ""
+        input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count) + "0.98")
+        let apply = app.buttons["Apply custom speed"]
+        for _ in 0..<4 where !apply.isHittable { app.swipeUp() }
+        apply.tap()
+        app.buttons["Done"].tap()
+        XCTAssertTrue(speed.waitForExistence(timeout: 5))
+        XCTAssertTrue((speed.value as? String ?? "").contains("0.98"))
+        app.buttons["Close player"].tap()
+        let miniPlayer = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Mini player, ")).firstMatch
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(miniPlayer.label.count, "Mini player, ".count)
+        miniPlayer.tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5))
+    }
+
     func testFolderRunPreparesHistoryConfirmsLargeCountAndCanBeCancelled() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library", "-folderRunTest"]
@@ -71,6 +174,48 @@ final class EarshotUITests: XCTestCase {
         let inbox = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Inbox helps you review")).firstMatch
         XCTAssertTrue(inbox.exists)
         XCTAssertTrue(inbox.isHittable)
+    }
+
+    func testPodcastSettingsUnfollowConfirmsCancelsAndReturnsToLibrary() {
+        verifyPodcastSettingsUnfollow(largeText: false)
+    }
+
+    func testPodcastSettingsUnfollowAtLargestText() {
+        verifyPodcastSettingsUnfollow(largeText: true)
+    }
+
+    private func verifyPodcastSettingsUnfollow(largeText: Bool) {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        app.launch()
+        let settings = app.buttons["Podcast settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        let unfollow = app.buttons["Unfollow"].firstMatch
+        let form = app.collectionViews.firstMatch
+        for _ in 0..<16 {
+            if unfollow.exists, unfollow.isHittable,
+               unfollow.frame.maxY < app.frame.maxY - 35,
+               unfollow.frame.minY > app.navigationBars["Podcast Settings"].frame.maxY { break }
+            form.swipeUp()
+        }
+        XCTAssertTrue(unfollow.isHittable)
+        XCTAssertGreaterThanOrEqual(unfollow.frame.height, 44)
+        unfollow.tap()
+        let cancel = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.tap()
+        XCTAssertTrue(app.navigationBars["Podcast Settings"].exists)
+        XCTAssertTrue(unfollow.isHittable)
+        unfollow.tap()
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        app.alerts.buttons["Unfollow"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Podcast Settings"].exists)
+        XCTAssertFalse(app.buttons["Podcast settings"].exists)
     }
 
     func testPodcastNameEditorSavesAndRestoresPublisherName() {

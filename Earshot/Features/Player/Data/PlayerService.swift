@@ -318,6 +318,12 @@ final class PlayerService {
     /// position update can't restart an endless skip loop.
     @ObservationIgnored private var lastAutoSkipFromChapterIndex: Int?
 
+    func setSleepTimerResetsOnInteraction(_ enabled: Bool) {
+        sleepTimer.resetsOnInteraction = enabled
+        settings?.setBool(enabled, for: SettingsKey.sleepTimerResetsOnInteraction)
+        if enabled { sleepTimer.recordInteraction() }
+    }
+
     // MARK: Lifecycle
 
     /// Wires the service to a persistence context. Call once at app startup with
@@ -334,6 +340,7 @@ final class PlayerService {
         observeStallRecovery()
         observeVolumeBoostSetting()
         observeSkipSilenceSetting()
+        sleepTimer.resetsOnInteraction = settings?.bool(SettingsKey.sleepTimerResetsOnInteraction, default: false) ?? false
         sleepTimer.onExpired = { [weak self] in self?.handleSleepTimerExpired() }
     }
 
@@ -775,13 +782,9 @@ final class PlayerService {
         publishCurrentPlaybackHandoff()
         flushListeningSession()
 
-        // Cancel any running sleep timer when the user manually starts a new
-        // episode. PRD 5.5: "timer clears when the user plays something else."
-        // Both countdown and end-of-episode modes are cancelled. The cancellation
-        // is announced via VoiceOver only if the timer was actually running so we
-        // don't fire a spurious announcement on every episode start.
-        if sleepTimer.isActive && !automaticallyAdvancing {
-            sleepTimer.cancel()
+        // Manual episode changes restart an interaction-reset countdown;
+        // traditional countdowns and end-of-episode timers still cancel.
+        if !automaticallyAdvancing, sleepTimer.manualEpisodeStarted() {
             Announcer.announce("Sleep timer cancelled")
         }
 

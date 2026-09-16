@@ -640,13 +640,19 @@ struct EpisodeListView: View {
     }
 
     private func refresh() async {
-        do {
-            let outcome = try await SubscriptionRepository(
+        let failure = FeedRefreshFailure(
+            feedURL: podcast.feedURL, podcastTitle: podcast.displayName, reason: ""
+        )
+        let result = await BackgroundFeedRefresher.retryFeed(failure: failure) {
+            try await SubscriptionRepository(
                 context: context,
                 downloader: downloads,
                 queue: QueueRepository(context: context),
                 isEntitled: entitlements.isEntitled
             ).refresh(podcast, reconcileEpisodeModels: false)
+        }
+        switch result {
+        case .success(let outcome):
             resetEpisodePage(moveFocusToResults: false)
             RefreshCompletionHaptics.playIfNeeded(
                 trigger: .manualPullToRefresh,
@@ -660,9 +666,10 @@ struct EpisodeListView: View {
             } else {
                 Announcer.announce("\(podcast.displayName) refreshed")
             }
-        } catch {
-            AppLog.subscriptions.error("Refresh failed: \(error.localizedDescription, privacy: .public)")
+        case .failure, .cancelled:
             Announcer.announce("Couldn't refresh \(podcast.displayName)")
+        case nil:
+            Announcer.announce("Library refresh already in progress")
         }
     }
 

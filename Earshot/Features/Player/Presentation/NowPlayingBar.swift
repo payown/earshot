@@ -85,6 +85,10 @@ struct NowPlayingBar: View {
         // the button trait explicitly (combine can drop it) and only attach a
         // value when the sleep timer is on (an empty value reads as a pause).
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(["Mini player", title, player.currentArtist]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens the full player")
         .modifier(OptionalAccessibilityValue(value: sleepTimerActive ? "Sleep timer on" : nil))

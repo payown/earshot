@@ -81,64 +81,108 @@ struct LiveFeedRefreshInlineStatus: View {
 }
 
 struct FeedRefreshSettingsView: View {
+    private let feed: any FeedFetching
+
+    init(feed: any FeedFetching = FeedService()) { self.feed = feed }
+
     @Environment(AppRuntime.self) private var runtime
+    @Environment(DownloadManager.self) private var downloads
+    @Environment(EntitlementStore.self) private var entitlements
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
     @Environment(\.modelContext) private var context
 
     @State private var failedPodcasts: [String: Podcast] = [:]
     @State private var pendingUnfollow: Podcast?
+    @State private var selectedPodcast: Podcast?
+    @State private var retryingFeedID: String?
+    @State private var retryStatus: String?
+    @State private var refreshInProgress = false
+    @AccessibilityFocusState private var focusRetryStatus: Bool
+
     @State private var sharingPodcast: Podcast?
     @State private var quickActionEditor: FeedRefreshPodcastQuickActionEditor?
     @State private var folderPickRequest: FolderPickRequest?
 
     var body: some View {
         let snapshot = runtime.feedRefreshStatus.snapshot
-        Form {
-            Section("Latest refresh") {
-                Text(summary(snapshot))
-                    .accessibilityLabel(summary(snapshot))
-
-                LabeledContent("Status", value: FeedRefreshStatusPresentation.status(snapshot.state))
-                LabeledContent("Started", value: dateText(snapshot.startedAt))
-                LabeledContent("Finished", value: dateText(snapshot.endedAt))
-                LabeledContent("Last completed", value: dateText(snapshot.lastCompletedAt))
-                if let lastSkippedAt = snapshot.lastSkippedAt,
-                   let trigger = snapshot.lastSkippedTrigger {
-                    LabeledContent(
-                        "Last check skipped",
-                        value: "\(dateText(lastSkippedAt)), \(FeedRefreshStatusPresentation.trigger(trigger)), refresh was already recent"
-                    )
-                }
-                LabeledContent("Refresh type", value: FeedRefreshStatusPresentation.trigger(snapshot.trigger))
-                LabeledContent("Podcasts checked", value: "\(snapshot.checked) of \(snapshot.total)")
-                LabeledContent("New episodes", value: "\(snapshot.newEpisodes)")
-                LabeledContent("Unchanged feeds", value: "\(snapshot.unchangedFeeds)")
-                LabeledContent("Failed feeds", value: "\(snapshot.failedFeeds)")
-            }
-
-            if !snapshot.failureDetails.isEmpty {
-                Section("Feeds needing attention") {
-                    ForEach(snapshot.failureDetails) { failure in
-                        failedFeedRow(failure)
+        ScrollViewReader { proxy in
+            Form {
+                Section {
+                    Text("Feed checks look for new episodes. A failed check does not mean your downloaded episodes failed or that a new episode is available. Existing downloads remain available.")
+                    if let retryStatus {
+                        Text(retryStatus)
+                            .accessibilityIdentifier("feedRetryStatus")
+                            .accessibilityFocused($focusRetryStatus)
+                            .id("feedRetryStatus")
                     }
                 }
-            }
+                Section("Latest refresh") {
+                    Text(summary(snapshot))
+                        .accessibilityLabel(summary(snapshot))
 
-            Section("Background refresh") {
-                Text(FeedRefreshStatusPresentation.scheduled(snapshot.scheduledAt) { dateText($0) })
-                    .accessibilityLabel(
-                        FeedRefreshStatusPresentation.scheduled(snapshot.scheduledAt) { dateText($0) }
-                    )
-                Text("iOS decides when Earshot runs in the background. A requested time is not a promised refresh time. Opening Earshot or using Refresh Library can start an eligible check sooner.")
-                    .font(.footnote)
-                    .foregroundStyle(AppColor.secondaryText)
+                    LabeledContent("Status", value: FeedRefreshStatusPresentation.status(snapshot.state))
+                    LabeledContent("Started", value: dateText(snapshot.startedAt))
+                    LabeledContent("Finished", value: dateText(snapshot.endedAt))
+                    LabeledContent("Last completed", value: dateText(snapshot.lastCompletedAt))
+                    if let lastRetryAt = snapshot.lastRetryAt {
+                        LabeledContent("Last feed retry", value: dateText(lastRetryAt))
+                        Text("Results include individual feed retries since this library check.")
+                            .font(.footnote)
+                    }
+                    if let lastSkippedAt = snapshot.lastSkippedAt,
+                       let trigger = snapshot.lastSkippedTrigger {
+                        LabeledContent(
+                            "Last check skipped",
+                            value: "\(dateText(lastSkippedAt)), \(FeedRefreshStatusPresentation.trigger(trigger)), refresh was already recent"
+                        )
+                    }
+                    LabeledContent("Refresh type", value: FeedRefreshStatusPresentation.trigger(snapshot.trigger))
+                    LabeledContent("Podcasts checked", value: "\(snapshot.checked) of \(snapshot.total)")
+                    LabeledContent("New episodes", value: "\(snapshot.newEpisodes)")
+                    LabeledContent("Unchanged feeds", value: "\(snapshot.unchangedFeeds)")
+                    LabeledContent("Failed feeds", value: "\(snapshot.failedFeeds)")
+                }
+
+                if !snapshot.failureDetails.isEmpty {
+                    Section("Feeds needing attention") {
+                        ForEach(snapshot.failureDetails) { failure in
+                            failedFeedRow(failure)
+                            Button("Retry feed check for \(failure.podcastTitle)") {
+                                Task { await retry(failure) }
+                            }
+                            .disabled(refreshInProgress || retryingFeedID != nil)
+                            .accessibilityHint("Checks this podcast for new episodes")
+                        }
+                    }
+                }
+
+                Section("Background refresh") {
+                    Text(FeedRefreshStatusPresentation.scheduled(snapshot.scheduledAt) { dateText($0) })
+                        .accessibilityLabel(
+                            FeedRefreshStatusPresentation.scheduled(snapshot.scheduledAt) { dateText($0) }
+                        )
+                    Text("iOS decides when Earshot runs in the background. A requested time is not a promised refresh time. Opening Earshot or using Refresh Library can start an eligible check sooner.")
+                        .font(.footnote)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+            }
+            .onChange(of: retryingFeedID) { _, feedID in
+                guard feedID == nil, retryStatus != nil else { return }
+                proxy.scrollTo("feedRetryStatus", anchor: .top)
+                focusRetryStatus = true
             }
         }
         .navigationTitle("Feed Refresh")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
-        .task { loadFailedPodcasts() }
+        .navigationDestination(item: $selectedPodcast) { EpisodeListView(podcast: $0) }
+        .task {
+            loadFailedPodcasts()
+            refreshInProgress = BackgroundFeedRefresher.isRefreshInProgress
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotFeedRefreshActivityDidChange)) { _ in
+            refreshInProgress = BackgroundFeedRefresher.isRefreshInProgress
+        }
         .onChange(of: snapshot.failureDetails) { _, _ in loadFailedPodcasts() }
         .confirmationDialog(
             "Unfollow \(pendingUnfollow?.title ?? "this podcast")?",
@@ -179,7 +223,7 @@ struct FeedRefreshSettingsView: View {
             let actions = podcastActions(for: podcast)
             let presentations = PodcastAction.presentations(actions, for: podcast)
             let performAction = { (action: PodcastAction) in perform(action, for: podcast) }
-            NavigationLink(value: podcast) {
+            Button { selectedPodcast = podcast } label: {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text(podcast.displayName)
                         .font(.headline)
@@ -204,6 +248,42 @@ struct FeedRefreshSettingsView: View {
         }
     }
 
+    private func retry(_ failure: FeedRefreshFailure) async {
+        guard retryingFeedID == nil else { return }
+        focusRetryStatus = false
+        retryingFeedID = failure.id
+        let checking = "Checking \(failure.podcastTitle) for new episodes."
+        retryStatus = checking
+        Announcer.announce(checking)
+        defer { retryingFeedID = nil }
+        let result = await BackgroundFeedRefresher.retryFeed(
+            failure: failure,
+            monitor: runtime.feedRefreshStatus
+        ) {
+            guard let podcast = try PodcastIdentityService(context: context)
+                .existingFollowed(feedURL: failure.feedURL) else {
+                throw FeedError.notFollowed
+            }
+            return try await SubscriptionRepository(
+                context: context, feed: feed, downloader: downloads,
+                queue: QueueRepository(context: context), isEntitled: entitlements.isEntitled
+            ).refresh(podcast, reconcileEpisodeModels: false)
+        }
+        switch result {
+        case .success(let outcome):
+            retryStatus = outcome.added == 0
+                ? "\(failure.podcastTitle): Feed check succeeded. No new episodes found."
+                : "\(failure.podcastTitle): Feed check succeeded. \(outcome.added) new episodes found."
+        case .failure(let reason):
+            retryStatus = "\(failure.podcastTitle): \(reason) You can retry this feed check."
+        case .cancelled:
+            retryStatus = "Feed check interrupted. You can try again."
+        case nil:
+            retryStatus = "A feed check is already in progress. Try again when it finishes."
+        }
+        // Ending the retry reveals and focuses the persistent result above.
+    }
+
     private func podcastActions(for podcast: Podcast) -> [PodcastAction] {
         visiblePodcastRowActions(
             quickActions.podcastActions,
@@ -216,7 +296,7 @@ struct FeedRefreshSettingsView: View {
             podcast: podcast,
             order: [action],
             context: context,
-            onOpenDetail: {},
+            onOpenDetail: { selectedPodcast = podcast },
             onShare: { sharingPodcast = podcast },
             onUnsubscribe: { pendingUnfollow = podcast },
             onChangeDownloadCount: { quickActionEditor = .downloadCount },

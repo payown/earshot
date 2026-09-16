@@ -643,22 +643,26 @@ struct NowPlayingScreen: View {
             // the value re-read after a flick. A clean adjustable element (the
             // same idiom as the scrubber) announces "Playback speed, adjustable"
             // and re-reads the new speed on every flick. The visual capsule still
-            // opens the sheet on tap for sighted users; VoiceOver users open the
-            // full picker via the "Open speed options" custom action.
+            // opens the sheet on tap for sighted users. VoiceOver users can
+            // double-tap or use the retained "Open speed options" custom action.
             .accessibilityRepresentation {
                 Color.clear
                     .accessibilityElement()
                     .accessibilityLabel("Playback speed")
                     .accessibilityValue(speedAccessibilityValue)
-                    // No hint: VoiceOver already appends "swipe up or down to
-                    // adjust" for an adjustable element (the scrubber omits it for
-                    // the same reason).
+                    .accessibilityHint("Double-tap to choose a custom playback speed")
+                    .accessibilityAction {
+                        showingSpeedPicker = true
+                    }
                     .accessibilityAdjustableAction { direction in
                         adjustBadgeSpeed(direction)
                     }
                     .accessibilityAction(named: "Open speed options") {
                         showingSpeedPicker = true
                     }
+                    // The default action adds a button trait implicitly. Keep
+                    // this an adjustable control so rate changes are re-read.
+                    .accessibilityRemoveTraits(.isButton)
                     .accessibilityFocused($speedBadgeFocused)
             }
             Spacer()

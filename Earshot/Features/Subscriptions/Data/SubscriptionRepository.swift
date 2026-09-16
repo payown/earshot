@@ -526,8 +526,8 @@ extension SubscriptionRepository {
         guard let outcome = try await actor.refreshOne(
             feedURL: feedURL, feed: feed, autoQueueEnabled: autoQueueEnabled
         ) else {
-            // The podcast vanished between fetch and refresh; nothing to report.
-            return RefreshOutcome(added: 0, wasBackfill: false, newestNewEpisodeGUID: nil, newEpisodeIDs: [])
+            // A vanished subscription must not be reported as a successful retry.
+            throw FeedError.notFollowed
         }
         // Pull the background context's writes into the main context so a caller
         // holding `podcast` (e.g. EpisodeListView, the tests) observes the new
