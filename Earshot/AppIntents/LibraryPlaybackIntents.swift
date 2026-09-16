@@ -16,7 +16,7 @@ struct ResumeListeningIntent: AudioPlaybackIntent {
 
 struct PlayEpisodeIntent: AudioPlaybackIntent {
     static let title: LocalizedStringResource = "Play Episode in Earshot"
-    static let description = IntentDescription("Opens Earshot and plays the selected episode, preserving saved progress and queue order. Enable Siri and Search to choose an episode.")
+    static let description = IntentDescription("Opens Earshot and plays the selected episode, preserving saved progress and queue order. Enable library search in Earshot settings to choose an episode.")
     static var openAppWhenRun: Bool { true }
     @available(iOS 26.0, *) static var supportedModes: IntentModes { .foreground }
     @Parameter(title: "Episode") var episode: EpisodeEntity
