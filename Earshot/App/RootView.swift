@@ -276,6 +276,7 @@ struct RootView: View {
     /// Navigation path for the Library tab, so a notification can push a podcast
     /// detail screen onto it (#72).
     @State private var libraryPath: [Podcast] = []
+    @State private var searchNotesEpisode: Episode?
     /// Item-driven folder destination used by Now Playing's "Playing from"
     /// route. Kept beside (not inside) the podcast-typed path so existing
     /// notification and screenshot podcast routing stays unchanged.
@@ -389,6 +390,11 @@ struct RootView: View {
         // Route a notification tap / action into the Library tab + podcast detail
         // (#72). Reacting on the published intent keeps the delegate decoupled
         // from the view tree.
+        .modifier(LibrarySearchPresentation(
+            episode: $searchNotesEpisode,
+            isReady: rootServicesActivated && !showOnboarding,
+            route: routeSearch
+        ))
         .onChange(of: notificationRouter.pendingIntent) { _, intent in
             if let intent { route(intent) }
         }
@@ -722,6 +728,28 @@ struct RootView: View {
             if case .pending(_, .freeTierLimit) = result, !entitlements.isEntitled {
                 showOPMLPaywall = true
             }
+        }
+    }
+
+    private func routeSearch(_ request: SearchContent) {
+        guard !showOnboarding, rootServicesActivated else { return }
+        defer { LibraryIntentBridge.shared.clear() }
+        guard LibrarySearchIndex.isEnabled else { return }
+        let feed = request.feedURL
+        var shows = FetchDescriptor<Podcast>(predicate: #Predicate { $0.feedURL == feed })
+        shows.fetchLimit = 1
+        guard let podcast = try? modelContext.fetch(shows).first else { return }
+        if let guid = request.guid {
+            var episodes = FetchDescriptor<Episode>(predicate: #Predicate {
+                $0.guid == guid && $0.podcast?.feedURL == feed
+            })
+            episodes.fetchLimit = 1
+            guard let episode = try? modelContext.fetch(episodes).first else { return }
+            searchNotesEpisode = episode
+        } else {
+            selectedTab = .library
+            libraryFolderDestination = nil
+            libraryPath = [podcast]
         }
     }
 

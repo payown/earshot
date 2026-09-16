@@ -5,6 +5,7 @@ import CloudKit
 import UIKit
 import UserNotifications
 import AppIntents
+import CoreSpotlight
 
 /// The root data lifecycle. The data-bound view tree exists only in ``ready``;
 /// recovery and asynchronous preparation states carry no temporary
@@ -236,6 +237,7 @@ final class AppRuntime {
             cloudKitEventMonitor = monitor
         }
         if let load { install(load) }
+        if mode == .normal { LibraryIntentBridge.shared.install(runtime: self) }
     }
 
     private static func productionLaunch(
@@ -686,6 +688,15 @@ final class AppRuntime {
             )
             resetInFlight = false
             return false
+        }
+        if mode == .normal {
+            do {
+                try await LibrarySearchIndex.shared.disableAndClear()
+                LibraryIntentBridge.shared.clear()
+            } catch {
+                resetInFlight = false
+                return false
+            }
         }
         await cloudProjectionCoordinator?.stop()
         cloudProjectionCoordinator = nil
@@ -1258,6 +1269,16 @@ struct EarshotApp: App {
                             .environment(runtime.notificationRouter)
                             .environment(runtime.entitlements)
                             .task {
+                                guard !isRunningTests, !isScreenshotRun else { return }
+                                await LibrarySearchIndex.shared.run(container: container)
+                            }
+                            .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave).receive(on: RunLoop.main)) { _ in
+                                LibrarySearchIndex.shared.requestRefresh()
+                            }
+                            .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange).receive(on: RunLoop.main)) { _ in
+                                LibrarySearchIndex.shared.requestRefresh()
+                            }
+                            .task {
                                 // Cold-launch feed refresh (throttled). The
                                 // scene-phase hook does not fire for initial active.
                                 guard !isRunningTests, !isScreenshotRun else { return }
@@ -1299,6 +1320,10 @@ struct EarshotApp: App {
                 )
             }
             .onOpenURL { runtime.enqueueIncomingFile($0) }
+            .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                guard let id = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
+                Task { try? await LibraryIntentBridge.shared.open(id: id) }
+            }
         }
         // Background: schedule the next OS wake. Active: request a throttled
         // refresh after the interaction grace above, so returning to the app
@@ -1306,6 +1331,7 @@ struct EarshotApp: App {
         // first speech (#470). Skipped under tests.
         .onChange(of: scenePhase) { _, phase in
             runtime.updateLaunchScenePhase(phase)
+            if phase == .active { LibrarySearchIndex.shared.requestRefresh() }
             if phase != .active {
                 foregroundMaintenanceRequestID = nil
             }
