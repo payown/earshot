@@ -148,3 +148,32 @@ Remaining release checks include on-device consent-off behavior, saved-position
 and queue preservation across show changes, removed-content handling, and the
 oldest supported iOS runtime. HTTP probe lifetime remains a separate limitation.
 Suggestions can be observed during ordinary use without adding instrumentation.
+
+
+### Additional device acceptance
+
+Michael confirmed that disabling library search made Siri decline latest-episode
+playback. After re-enabling and waiting for searchable content, Double Tap worked
+again. A different-show request initially reported unsupported show search;
+subsequent explicit Double Tap and ABC News Update requests both succeeded.
+Switching back to Double Tap preserved its saved position. These results verify
+re-enabled playback, show switching, and saved progress; queue order was not
+separately confirmed by the user. No suggestion display or device donation receipt
+has been claimed as verified.
+
+### Release verification — 2026-09-16
+
+The final code passed all 51 selected tests on iOS 26.5: 12 library playback,
+19 handoff, 9 library search, 6 listening donation, and 5 skip-intent tests.
+This includes real playback with saved progress and preserved queue membership,
+latest-show selection, stale index removal, donation cleanup/retry, saved deletion
+during handoff, and cancellation. Independent read-only review found no actionable
+release-blocking defect in availability guards, queue handling, or cleanup.
+
+No new diagnostics or runtime code were added for these checks. The existing
+265.975 phone build remains current. iOS 18 execution remains unverified:
+Xcode's platform downloader reported both iOS 18.5 arm64 and iOS 18.0 universal
+unavailable. An iOS 18 device or compatible simulator installation is still
+needed before claiming the oldest supported runtime has passed release QA.
+Simulator cleanup tests use fake system writers; they do not establish immediate
+Spotlight removal or Apple's receipt of donations on Michael's phone.
