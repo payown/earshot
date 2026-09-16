@@ -122,6 +122,12 @@ struct SettingsScreen: View {
             }
             Section("Help and privacy") {
                 NavigationLink {
+                    SystemSearchSettingsView()
+                } label: {
+                    Label("Siri and Search", systemImage: "magnifyingglass")
+                }
+
+                NavigationLink {
                     PrivacySettingsView()
                 } label: {
                     Label("Privacy", systemImage: "hand.raised")
