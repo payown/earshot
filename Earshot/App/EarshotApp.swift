@@ -237,7 +237,10 @@ final class AppRuntime {
             cloudKitEventMonitor = monitor
         }
         if let load { install(load) }
-        if mode == .normal { LibraryIntentBridge.shared.install(runtime: self) }
+        if mode == .normal {
+            LibraryIntentBridge.shared.install(runtime: self)
+            LibraryPlaybackBridge.shared.install(runtime: self)
+        }
     }
 
     private static func productionLaunch(
@@ -1015,6 +1018,8 @@ final class AppRuntime {
             )
         }
     }
+
+    var isResettingLocalData: Bool { resetInFlight }
 
     var rootServiceActivationStatus: RootServiceActivationStatus {
         switch rootServiceActivationState {

@@ -144,6 +144,18 @@ struct SkipBackwardIntent: AppIntent {
 struct EarshotAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
+            intent: ResumeListeningIntent(),
+            phrases: ["Resume listening in \(.applicationName)", "Continue listening in \(.applicationName)"],
+            shortTitle: "Resume Listening",
+            systemImageName: "play.fill"
+        )
+        AppShortcut(
+            intent: PlayEpisodeIntent(),
+            phrases: ["Play an episode in \(.applicationName)", "Play \(\.$episode) in \(.applicationName)"],
+            shortTitle: "Play Episode",
+            systemImageName: "play.circle"
+        )
+        AppShortcut(
             intent: SkipForwardIntent(),
             phrases: [
                 "Skip forward in \(.applicationName)",
