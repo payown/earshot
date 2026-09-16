@@ -906,14 +906,23 @@ final class PlayerService {
         if isPlaying { pause(providesPauseHaptic: false) }
         beginHandoffOperation()
         let generation = playbackHandoffGeneration
-        playbackHandoffTask = Task { @MainActor [weak self, weak episode] in
+        // Intents have no visible row retaining the selected episode. Carry its
+        // identity across the lookup, then fetch it again so saved deletions are
+        // also respected before accessing any model properties.
+        let episodeID = episode.persistentModelID
+        playbackHandoffTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let fetched = await fetchPlaybackHandoff(identity: identity)
             guard !Task.isCancelled,
-                  playbackHandoffGeneration == generation,
-                  let episode,
-                  !episode.isDeleted else { return }
+                  playbackHandoffGeneration == generation else { return }
             playbackHandoffTask = nil
+            guard let context else { return }
+            var descriptor = FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.persistentModelID == episodeID }
+            )
+            descriptor.fetchLimit = 1
+            guard let episode = try? context.fetch(descriptor).first,
+                  !episode.isDeleted else { return }
             // A Follow can be superseded while the direct CloudKit request is
             // in flight. Catalog-only playback is device-local, so a response
             // fetched before that transition must not cross the new boundary.

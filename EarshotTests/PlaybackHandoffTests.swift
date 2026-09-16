@@ -1,3 +1,4 @@
+import AVFoundation
 import CloudKit
 import SwiftData
 import XCTest
@@ -67,6 +68,73 @@ final class PlaybackHandoffTests: XCTestCase {
                 guid: "episode-1"
             )
         )
+    }
+
+    func testHandoffRetainsEpisodeFetchedOnlyForPlayback() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let audio = FileManager.default.temporaryDirectory.appending(path: "Handoff-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: audio) }
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8000 * 120))
+        buffer.frameLength = buffer.frameCapacity
+        buffer.floatChannelData?[0].initialize(repeating: 0, count: Int(buffer.frameLength))
+        try AVAudioFile(forWriting: audio, settings: format.settings).write(from: buffer)
+        // The library screen does not retain this episode on a Shortcuts launch.
+        try autoreleasepool {
+            let seed = ModelContext(container)
+            let episode = makeEpisode(seed)
+            episode.audioURL = audio.absoluteString
+            try seed.save()
+        }
+        let client = FakePlaybackHandoffClient()
+        await client.setFetchDelay(100_000_000)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: container.mainContext)
+        defer { player.stopAndUnload(); player.releasePersistence() }
+        try autoreleasepool {
+            let episode = try XCTUnwrap(container.mainContext.fetch(FetchDescriptor<Episode>()).first)
+            player.playWithHandoff(episode)
+        }
+        for _ in 0..<100 where player.nowPlayingEpisode == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(player.nowPlayingEpisode?.guid, "episode-1")
+    }
+
+    func testSavedDeletionDuringHandoffDoesNotStartPlayback() async throws {
+        let context = TestStore.freshContext()
+        let client = FakePlaybackHandoffClient()
+        await client.setFetchDelay(100_000_000)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload(); player.releasePersistence() }
+        let episode = makeEpisode(context)
+        player.playWithHandoff(episode)
+        context.delete(episode)
+        try context.save()
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertNil(player.nowPlayingEpisode)
+        XCTAssertFalse(player.hasActivePlaybackRequest)
+    }
+
+    func testPauseAndPersistenceReleaseCancelPendingEpisodeStart() async throws {
+        for releasePersistence in [false, true] {
+            let context = TestStore.freshContext()
+            let client = FakePlaybackHandoffClient()
+            await client.setFetchDelay(100_000_000)
+            let player = PlayerService(playbackHandoff: client)
+            player.configure(context: context)
+            let episode = makeEpisode(context)
+            player.playWithHandoff(episode)
+            await Task.yield()
+            if releasePersistence { player.releasePersistence() }
+            else { player.pause() }
+            try await Task.sleep(for: .milliseconds(250))
+            XCTAssertNil(player.nowPlayingEpisode)
+            XCTAssertFalse(player.hasActivePlaybackRequest)
+            player.stopAndUnload()
+            player.releasePersistence()
+        }
     }
 
     func testRecordIdentityIsCanonicalAndDeterministic() throws {

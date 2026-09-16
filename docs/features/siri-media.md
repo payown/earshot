@@ -107,3 +107,27 @@ follow-state safeguard, all 16 playback and schema-query tests passed again.
 Exported app metadata contains one AudioSearch query returning both union cases,
 and the Play Latest Podcast action and registered latest-episode phrase.
 Independent review found no remaining actionable issues after the final safeguard.
+
+## Silent Shortcuts playback investigation
+
+On build 265.974, the action picker exposed “Play Latest Podcast Episode in
+Earshot” even though Michael did not find its App Shortcut tile. Running the
+single action with Double Tap selected opened Earshot and completed without an
+error, but did not load an episode. Siri's spoken failure remains unverified.
+
+A regression reproduced a matching silent failure: an episode fetched solely
+for playback had no visible row retaining it, and the weak reference disappeared
+during the cross-device position lookup. Playback now carries the persistent
+identifier across that lookup and fetches the surviving episode before starting.
+Cancellation and generation checks run before accessing the context. Independent
+review prompted a saved-deletion regression and cleared the revised fix.
+
+This correction does not change the separate HTTP-to-HTTPS probe path, whose
+weak captures remain an adjacent limitation for episodes using HTTP media.
+Physical-device acceptance still requires rerunning the saved Double Tap shortcut,
+then the spoken latest-episode request, and confirming the Earshot player changes.
+
+Validation: the fetched-episode regression failed before the fix and passed after
+it. The final revision passed all 31 tests in LibraryPlaybackIntentTests and
+PlaybackHandoffTests, including saved deletion, pause, and persistence release
+while a start is pending. The device build is numbered 265.975.
