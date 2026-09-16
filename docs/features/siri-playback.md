@@ -45,4 +45,7 @@ AppRuntimeTests). Playback tests use a local audio file to verify saved position
 queue preservation, and repeated resume. They also cover startup readiness,
 onboarding, cancellation, opt-out, and a reset held during refresh cancellation.
 Independent review findings were fixed and re-reviewed with no remaining blockers.
-Physical-device acceptance above remains outstanding.
+On build 265.972, Michael verified Resume through Siri both from paused playback
+and while already playing. The generic Play Episode phrase was rejected before
+the app opened. The iOS 27 media integration in [siri-media.md](siri-media.md)
+addresses that missing schema/query layer; its device acceptance remains pending.

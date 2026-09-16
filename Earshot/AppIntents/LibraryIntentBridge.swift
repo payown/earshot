@@ -18,7 +18,8 @@ final class LibraryIntentBridge {
         let container = try await readyContainer()
         let store = await SearchContentStore.make(container: container)
         let snapshot = try await store.snapshot()
-        guard LibrarySearchIndex.isEnabled else { return [] }
+        guard LibrarySearchIndex.isEnabled, let runtime, !runtime.isResettingLocalData,
+              runtime.readyContainer === container else { return [] }
         return snapshot
     }
 
@@ -30,10 +31,11 @@ final class LibraryIntentBridge {
     }
 
     private func readyContainer() async throws -> ModelContainer {
-        guard let runtime else { throw LibraryIntentError.notReady }
+        guard let runtime, !runtime.isResettingLocalData else { throw LibraryIntentError.notReady }
         runtime.startLaunchIfNeeded()
         for _ in 0..<100 {
             try Task.checkCancellation()
+            guard !runtime.isResettingLocalData else { throw LibraryIntentError.notReady }
             if let container = runtime.readyContainer { return container }
             if case .recovery = runtime.phase { throw LibraryIntentError.notReady }
             try await Task.sleep(for: .milliseconds(100))

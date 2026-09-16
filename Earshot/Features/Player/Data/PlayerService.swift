@@ -347,6 +347,7 @@ final class PlayerService {
     /// Drops the old model context after the synchronous reset notification has
     /// unloaded playback and before the store files are moved.
     func releasePersistence() {
+        pendingListeningDonationID = nil
         startupRestorationCompleted = false
         cancelHandoffOperation()
         context = nil
@@ -435,6 +436,8 @@ final class PlayerService {
         if player.volume != 1.0 { player.volume = 1.0 }
     }
 
+    @ObservationIgnored private(set) var pendingListeningDonationID: String?
+
     // MARK: Public playback API
 
     /// Loads and starts playing an episode. Resumes from its saved position;
@@ -473,6 +476,9 @@ final class PlayerService {
     func playFromEpisodeList(_ episode: Episode, origin: PlaybackOrigin? = nil) {
         folderRuns.playbackWillStart(episode)
         beginUserMediaAttempt()
+        if ListeningDonations.isEnabled, let show = episode.podcast, !episode.guid.isEmpty {
+            pendingListeningDonationID = SearchContent.identifier(feedURL: show.feedURL, guid: episode.guid)
+        }
         if let context {
             QueueRepository(context: context).add(episode)
         }
@@ -562,6 +568,7 @@ final class PlayerService {
     }
 
     func cancelPendingCleartextPlayback() {
+        pendingListeningDonationID = nil
         clearPendingCleartextPlayback()
     }
 
@@ -638,6 +645,7 @@ final class PlayerService {
     }
 
     private func beginUserMediaAttempt() {
+        pendingListeningDonationID = nil
         mediaRecoveryGeneration &+= 1
         mediaRecoveryAttemptedEpisodeID = nil
         mediaRecoveryInProgressEpisodeID = nil
@@ -1084,6 +1092,7 @@ final class PlayerService {
     }
 
     func pause() {
+        pendingListeningDonationID = nil
         // An explicit stop supersedes any automatic or manual pending start.
         beginMediaResolution()
         pause(providesPauseHaptic: true)
@@ -1130,6 +1139,7 @@ final class PlayerService {
     /// touch a deleted SwiftData instance. Safe to call when nothing is loaded:
     /// every step below no-ops on nil/idle state.
     func stopAndUnload() {
+        pendingListeningDonationID = nil
         // Persist + flush FIRST, while the episode instance is still valid —
         // the same durability anchors pause() uses. (In the unsubscribe flow
         // the flushed session is removed moments later by
@@ -3380,6 +3390,13 @@ final class PlayerService {
     }
 
     private func handleTimeControlStatusChanged() {
+        if player.timeControlStatus == .playing, intendsToPlay,
+           let id = pendingListeningDonationID, let episode = currentEpisode,
+           let show = episode.podcast,
+           id == SearchContent.identifier(feedURL: show.feedURL, guid: episode.guid) {
+            pendingListeningDonationID = nil
+            ListeningDonations.shared.recordPlayback(id: id)
+        }
         if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
             let reason = player.reasonForWaitingToPlay?.rawValue ?? "unknown"
             AppLog.player.info("Player waiting to play (reason: \(reason, privacy: .public))")

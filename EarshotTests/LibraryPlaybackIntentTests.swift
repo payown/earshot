@@ -144,7 +144,9 @@ final class LibraryPlaybackIntentTests: XCTestCase {
 
     func testResumeWaitsUntilRootServicesFinish() async throws {
         let container = try ModelContainerFactory.makeInMemory()
-        let episode = Episode(guid: "waiting", title: "Waiting", audioURL: "https://example.invalid/audio")
+        let audio = try makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        let episode = Episode(guid: "waiting", title: "Waiting", audioURL: audio.absoluteString)
         container.mainContext.insert(episode)
         let runtime = AppRuntime(load: .ready(container), mode: .testHost)
         var calls = 0
@@ -197,6 +199,44 @@ final class LibraryPlaybackIntentTests: XCTestCase {
         releaseRefresh?.resume()
         _ = await refresh.value
         _ = await reset.value
+    }
+
+    func testExplicitPauseAndUnloadCancelPendingListeningDonation() async throws {
+        let contentEnabled = LibrarySearchIndex.isEnabled
+        let listeningEnabled = UserDefaults.standard.bool(forKey: ListeningDonations.enabledKey)
+        defer {
+            UserDefaults.standard.set(contentEnabled, forKey: LibrarySearchIndex.enabledKey)
+            UserDefaults.standard.set(listeningEnabled, forKey: ListeningDonations.enabledKey)
+        }
+        UserDefaults.standard.set(true, forKey: LibrarySearchIndex.enabledKey)
+        UserDefaults.standard.set(true, forKey: ListeningDonations.enabledKey)
+        let audio = try makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        let container = try ModelContainerFactory.makeInMemory()
+        let show = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "selected", title: "Selected", audioURL: audio.absoluteString)
+        container.mainContext.insert(show)
+        container.mainContext.insert(episode)
+        episode.podcast = show
+        try container.mainContext.save()
+        let runtime = await readyRuntime(container)
+        defer { runtime.player.stopAndUnload(); runtime.player.releasePersistence() }
+        runtime.player.playFromEpisodeList(episode)
+        XCTAssertNotNil(runtime.player.pendingListeningDonationID)
+        runtime.player.pause()
+        XCTAssertNil(runtime.player.pendingListeningDonationID)
+        runtime.player.resume()
+        XCTAssertNil(runtime.player.pendingListeningDonationID)
+        runtime.player.playFromEpisodeList(episode)
+        XCTAssertNotNil(runtime.player.pendingListeningDonationID)
+        runtime.player.stopAndUnload()
+        XCTAssertNil(runtime.player.pendingListeningDonationID)
+        runtime.player.playFromEpisodeList(episode)
+        XCTAssertNotNil(runtime.player.pendingListeningDonationID)
+        runtime.player.cancelPendingCleartextPlayback()
+        XCTAssertNil(runtime.player.pendingListeningDonationID)
+        runtime.player.playWithHandoff(episode)
+        XCTAssertNil(runtime.player.pendingListeningDonationID, "Siri's entry point must not create a manual donation")
     }
 
     private func makeAudio() throws -> URL {
