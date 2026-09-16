@@ -86,8 +86,8 @@ covered by regressions, and re-reviewed with no remaining blocking findings.
 
 Michael verified named-episode playback in Earshot on build 265.973. The apparent
 ABC News latest-episode success actually used Apple Podcasts, and the Double Tap
-request was rejected for Earshot. Latest-podcast routing therefore remains an
-on-device acceptance item, not a confirmed success.
+request was rejected for Earshot. That build did not establish successful latest-podcast routing; build 265.975
+was subsequently verified below.
 
 The correction returns podcast shows as well as episodes from the AudioSearch
 query, recognizes explicit latest/newest episode phrasing, and performs a targeted
@@ -124,10 +124,27 @@ review prompted a saved-deletion regression and cleared the revised fix.
 
 This correction does not change the separate HTTP-to-HTTPS probe path, whose
 weak captures remain an adjacent limitation for episodes using HTTP media.
-Physical-device acceptance still requires rerunning the saved Double Tap shortcut,
-then the spoken latest-episode request, and confirming the Earshot player changes.
+On build 265.975, Michael confirmed the saved Double Tap shortcut loads and plays
+the episode. He also confirmed the spoken latest-episode request plays in Earshot,
+including after pausing and locking the phone.
 
 Validation: the fetched-episode regression failed before the fix and passed after
 it. The final revision passed all 31 tests in LibraryPlaybackIntentTests and
 PlaybackHandoffTests, including saved deletion, pause, and persistence release
 while a start is pending. The device build is numbered 265.975.
+
+
+## Acceptance update — 2026-09-16
+
+Michael enabled listening suggestions and requested no persistent donation
+diagnostics. No new diagnostic code or listening-history collection was added.
+Review of the existing six passing ListeningDonationsTests confirms coverage of
+consent gating, indexed-only eligibility, removal of stale content, relaunch,
+in-flight cleanup, and retry after cleanup failure. These use synthetic content
+and a fake writer: they verify Earshot's donation logic, not Apple's acceptance
+of a donation from Michael's phone or the appearance of a system suggestion.
+
+Remaining release checks include on-device consent-off behavior, saved-position
+and queue preservation across show changes, removed-content handling, and the
+oldest supported iOS runtime. HTTP probe lifetime remains a separate limitation.
+Suggestions can be observed during ordinary use without adding instrumentation.
