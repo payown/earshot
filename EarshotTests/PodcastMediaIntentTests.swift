@@ -4,10 +4,15 @@ import MediaIntents
 import XCTest
 @testable import Earshot
 
-@available(iOS 27.0, *)
 @MainActor
 final class PodcastMediaIntentTests: XCTestCase {
     func testMediaQueriesHonorContentOptOut() async throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("Podcast media schemas require iOS 27") }
+        try await verifyMediaQueriesHonorContentOptOut()
+    }
+
+    @available(iOS 27.0, *)
+    private func verifyMediaQueriesHonorContentOptOut() async throws {
         let original = LibrarySearchIndex.isEnabled
         defer { UserDefaults.standard.set(original, forKey: LibrarySearchIndex.enabledKey) }
         UserDefaults.standard.set(false, forKey: LibrarySearchIndex.enabledKey)
@@ -20,7 +25,13 @@ final class PodcastMediaIntentTests: XCTestCase {
         XCTAssertTrue(url.isEmpty)
     }
 
-    func testSchemaPreservesOpaqueIdentityAndMetadata() {
+    func testSchemaPreservesOpaqueIdentityAndMetadata() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("Podcast media schemas require iOS 27") }
+        verifySchemaPreservesOpaqueIdentityAndMetadata()
+    }
+
+    @available(iOS 27.0, *)
+    private func verifySchemaPreservesOpaqueIdentityAndMetadata() {
         let record = SearchContent(id: "episode-opaque", feedURL: "https://private.example/token", guid: "secret",
             title: "Episode", showName: "Show", summary: "Summary", date: Date(timeIntervalSince1970: 10), duration: 120)
         let entity = SiriPodcastEpisode(record)
@@ -31,7 +42,13 @@ final class PodcastMediaIntentTests: XCTestCase {
         XCTAssertEqual(entity.releaseDate, record.date)
     }
 
-    func testAudioSearchCanReturnPodcastOrEpisodeUnionCases() {
+    func testAudioSearchCanReturnPodcastOrEpisodeUnionCases() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("Podcast media schemas require iOS 27") }
+        verifyAudioSearchCanReturnPodcastOrEpisodeUnionCases()
+    }
+
+    @available(iOS 27.0, *)
+    private func verifyAudioSearchCanReturnPodcastOrEpisodeUnionCases() {
         let show = SearchContent(id: "show", feedURL: "https://example.com/feed", guid: nil,
             title: "Double Tap", showName: "", summary: "", date: nil, duration: nil)
         let episode = SearchContent(id: "episode", feedURL: show.feedURL, guid: "one",
@@ -44,7 +61,13 @@ final class PodcastMediaIntentTests: XCTestCase {
         XCTAssertEqual(result.id, episode.id)
     }
 
-    func testUnsupportedQueueAndShuffleAreRejectedBeforePlayback() async {
+    func testUnsupportedQueueAndShuffleAreRejectedBeforePlayback() async throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("Podcast media schemas require iOS 27") }
+        await verifyUnsupportedQueueAndShuffleAreRejectedBeforePlayback()
+    }
+
+    @available(iOS 27.0, *)
+    private func verifyUnsupportedQueueAndShuffleAreRejectedBeforePlayback() async {
         for queue in [nil, PodcastQueueLocation.next, .tail] {
             var intent = PlayPodcastAudioIntent()
             intent.playbackAttributes = queue == nil ? [.shuffle] : []
