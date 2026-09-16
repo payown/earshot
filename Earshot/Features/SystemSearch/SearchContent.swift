@@ -38,6 +38,31 @@ actor SearchContentStore {
         await Task.detached(priority: .utility) { SearchContentStore(modelContainer: container) }.value
     }
 
+    /// Resolve only an opted-in followed show's newest local episode. This
+    /// query is independent of the global 500-recent-episode Spotlight budget.
+    func latestEpisode(forShowID id: String) throws -> SearchContent? {
+        try Task.checkCancellation()
+        var shows = PodcastQuery.followedDescriptor(sortBy: [SortDescriptor(\Podcast.createdAt, order: .reverse)])
+        shows.fetchLimit = 1_000
+        guard let show = try modelContext.fetch(shows).first(where: {
+            SearchContent.identifier(feedURL: $0.feedURL) == id
+        }) else { return nil }
+        let feed = show.feedURL
+        var episodes = FetchDescriptor<Episode>(predicate: #Predicate {
+            $0.podcast?.feedURL == feed && !$0.guid.isEmpty
+        }, sortBy: [SortDescriptor(\Episode.pubDate, order: .reverse), SortDescriptor(\Episode.guid)])
+        episodes.fetchLimit = 1
+        guard let episode = try modelContext.fetch(episodes).first else { return nil }
+        let names = try PodcastNamePolicy.snapshot(context: modelContext)
+        return SearchContent(
+            id: SearchContent.identifier(feedURL: feed, guid: episode.guid), feedURL: feed,
+            guid: episode.guid, title: SearchContent.text(episode.title),
+            showName: SearchContent.text(names[FeedURLIdentity.canonical(feed)] ?? show.title),
+            summary: SearchContent.text(episode.episodeDescription), date: episode.pubDate,
+            duration: episode.durationSeconds
+        )
+    }
+
     func snapshot() throws -> [SearchContent] {
         try Task.checkCancellation()
         var records: [String: SearchContent] = [:]

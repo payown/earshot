@@ -22,9 +22,9 @@ struct SiriPodcastShow {
 @available(iOS 27.0, *)
 struct SiriPodcastShowQuery: EntityStringQuery {
     func entities(matching string: String) async throws -> [SiriPodcastShow] {
-        try await LibraryIntentBridge.shared.content()
-            .filter { $0.guid == nil && $0.title.localizedStandardContains(string) }
-            .prefix(20).map(SiriPodcastShow.init)
+        let records = try await LibraryIntentBridge.shared.content()
+        return PodcastMediaSearch.shows(records, matching: PodcastMediaSearch.latestShowName(in: string) ?? string)
+            .map(SiriPodcastShow.init)
     }
     func suggestedEntities() async throws -> [SiriPodcastShow] {
         try await LibraryIntentBridge.shared.content().filter { $0.guid == nil }.prefix(20).map(SiriPodcastShow.init)
@@ -60,7 +60,7 @@ struct SiriPodcastEpisode {
 }
 
 @available(iOS 27.0, *)
-struct SiriPodcastEpisodeQuery: EntityStringQuery, IntentValueQuery {
+struct SiriPodcastEpisodeQuery: EntityStringQuery {
     func entities(for identifiers: [String]) async throws -> [SiriPodcastEpisode] {
         try await LibraryIntentBridge.shared.content()
             .filter { $0.guid != nil && identifiers.contains($0.id) }.map(SiriPodcastEpisode.init)
@@ -71,17 +71,31 @@ struct SiriPodcastEpisodeQuery: EntityStringQuery, IntentValueQuery {
     func suggestedEntities() async throws -> [SiriPodcastEpisode] {
         try await results(matching: nil)
     }
-    func values(for input: AudioSearch) async throws -> [SiriPodcastEpisode] {
-        switch input.criteria {
-        case .searchQuery(let query): try await results(matching: query)
-        case .unspecified: try await results(matching: nil)
-        case .url: [] // Feed and audio URLs are not exposed as public entity links.
-        @unknown default: []
-        }
-    }
     private func results(matching query: String?) async throws -> [SiriPodcastEpisode] {
         let records = try await LibraryIntentBridge.shared.content()
         return PodcastMediaSearch.matches(records, query: query).map(SiriPodcastEpisode.init)
+    }
+}
+
+/// One media query returns both cases of the playback intent's union parameter.
+@available(iOS 27.0, *)
+struct PodcastAudioSearchQuery: IntentValueQuery {
+    func values(for input: AudioSearch) async throws -> [PodcastAudioItem] {
+        let query: String?
+        switch input.criteria {
+        case .searchQuery(let text): query = text
+        case .unspecified: query = nil
+        case .url: return []
+        @unknown default: return []
+        }
+        let records = try await LibraryIntentBridge.shared.content()
+        return Self.results(records, query: query)
+    }
+
+    static func results(_ records: [SearchContent], query: String?) -> [PodcastAudioItem] {
+        PodcastMediaSearch.audioMatches(records, query: query).map {
+            $0.guid == nil ? .show(SiriPodcastShow($0)) : .episode(SiriPodcastEpisode($0))
+        }
     }
 }
 
@@ -100,17 +114,10 @@ struct PlayPodcastAudioIntent: AudioStartingIntent {
         guard playbackAttributes.isEmpty, queueLocation == nil, warmupAudioQueueResult == nil else {
             throw PodcastMediaError.unsupportedOptions
         }
-        let id: String
         switch audioEntity {
-        case .episode(let episode): id = episode.id
-        case .show(let show):
-            let records = try await LibraryIntentBridge.shared.content()
-            guard let record = PodcastMediaSearch.matches(records.filter {
-                SearchContent.identifier(feedURL: $0.feedURL) == show.id
-            }, query: nil).first else { throw LibraryIntentError.unavailable }
-            id = record.id
+        case .episode(let episode): try await LibraryPlaybackBridge.shared.play(id: episode.id)
+        case .show(let show): try await LibraryPlaybackBridge.shared.playLatest(showID: show.id)
         }
-        try await LibraryPlaybackBridge.shared.play(id: id)
         return .result()
     }
 }

@@ -239,6 +239,63 @@ final class LibraryPlaybackIntentTests: XCTestCase {
         XCTAssertNil(runtime.player.pendingListeningDonationID, "Siri's entry point must not create a manual donation")
     }
 
+    func testLatestPodcastUsesSelectedShowsStoreBeyondGlobalSearchCap() async throws {
+        let enabled = LibrarySearchIndex.isEnabled
+        defer { UserDefaults.standard.set(enabled, forKey: LibrarySearchIndex.enabledKey) }
+        UserDefaults.standard.set(true, forKey: LibrarySearchIndex.enabledKey)
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let show = Podcast(feedURL: "https://example.com/doubletap", title: "Double Tap")
+        let duplicate = Podcast(feedURL: "https://example.com/other", title: "Double Tap")
+        context.insert(show); context.insert(duplicate)
+        let old = Episode(guid: "old", title: "Earlier", audioURL: "https://example.com/audio", pubDate: Date(timeIntervalSince1970: 10))
+        let latest = Episode(guid: "latest", title: "Newest for this show", audioURL: "https://example.com/audio", pubDate: Date(timeIntervalSince1970: 20))
+        context.insert(old); context.insert(latest)
+        old.podcast = show; latest.podcast = show
+        latest.positionSeconds = 42
+        context.insert(QueueItem(episode: old, position: 0))
+        for number in 0..<501 {
+            let episode = Episode(guid: "other-\(number)", title: "Other feed", audioURL: "https://example.com/audio", pubDate: Date(timeIntervalSince1970: Double(100 + number)))
+            context.insert(episode)
+            episode.podcast = duplicate
+        }
+        // A played episode can still be the latest. Keep it outside both the
+        // recent global cap and the unfinished-progress inclusion rule.
+        latest.playedAt = Date()
+        try context.save()
+        let snapshot = try await SearchContentStore.make(container: container).snapshot()
+        let latestID = SearchContent.identifier(feedURL: show.feedURL, guid: latest.guid)
+        XCTAssertFalse(snapshot.contains { $0.id == latestID })
+        let runtime = await readyRuntime(container)
+        var selected: Episode?
+        let bridge = LibraryPlaybackBridge(start: { _, episode in selected = episode })
+        bridge.install(runtime: runtime)
+        let showID = SearchContent.identifier(feedURL: show.feedURL)
+        try await bridge.playLatest(showID: showID)
+        XCTAssertEqual(selected?.persistentModelID, latest.persistentModelID)
+        XCTAssertEqual(latest.positionSeconds, 42)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertNil(latest.queueItem)
+        show.subscriptionStateRaw = "catalogOnly"
+        try context.save()
+        selected = nil
+        do { try await bridge.playLatest(showID: showID); XCTFail("Unfollowed show must not resolve") }
+        catch { XCTAssertTrue(error is LibraryIntentError) }
+        XCTAssertNil(selected)
+    }
+
+    func testLatestPodcastRejectsContentOptOutBeforeStartup() async throws {
+        let enabled = LibrarySearchIndex.isEnabled
+        defer { UserDefaults.standard.set(enabled, forKey: LibrarySearchIndex.enabledKey) }
+        UserDefaults.standard.set(false, forKey: LibrarySearchIndex.enabledKey)
+        let runtime = AppRuntime(mode: .testHost)
+        let bridge = LibraryPlaybackBridge(start: { _, _ in XCTFail("Should not start") })
+        bridge.install(runtime: runtime)
+        do { try await bridge.playLatest(showID: "missing"); XCTFail("Expected opt-out") }
+        catch { XCTAssertEqual(error as? LibraryPlaybackError, .searchDisabled) }
+        XCTAssertEqual(runtime.launchAttemptCount, 0)
+    }
+
     private func makeAudio() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appending(path: "EarshotIntent-\(UUID().uuidString).wav")
         let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1))

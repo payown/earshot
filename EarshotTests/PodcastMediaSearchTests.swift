@@ -28,4 +28,30 @@ final class PodcastMediaSearchTests: XCTestCase {
         let tied = [episode("b", title: "Same"), episode("a", title: "Same")]
         XCTAssertEqual(PodcastMediaSearch.matches(tied, query: nil).map(\.id), ["a", "b"])
     }
+    private func show(_ id: String, title: String) -> SearchContent {
+        SearchContent(id: id, feedURL: "https://example.com/\(id)", guid: nil,
+            title: title, showName: "", summary: "", date: nil, duration: nil)
+    }
+
+    func testLatestRequestReturnsShowEvenWithoutGloballyIndexedEpisodes() {
+        let doubleTap = show("double-tap", title: "Double Tap")
+        let unrelated = episode("news", title: "The Latest Episode of Double Tap", show: "Other Show")
+        for phrase in ["play the latest episode of Double Tap in Earshot",
+                       "the latest episode of Double Tap", "latest episode from Double Tap",
+                       "newest episode of Double Tap", "Double Tap latest episode"] {
+            XCTAssertEqual(PodcastMediaSearch.audioMatches([doubleTap], query: phrase), [doubleTap])
+        }
+        XCTAssertEqual(PodcastMediaSearch.audioMatches([doubleTap, unrelated], query: "Double Tap"), [doubleTap])
+        XCTAssertTrue(PodcastMediaSearch.audioMatches([doubleTap], query: "latest episode of Missing Show").isEmpty)
+    }
+
+    func testExactNamesWinAndAmbiguousShowsRemainSeparate() {
+        let first = show("one", title: "Double Tap")
+        let duplicate = show("two", title: "Double Tap")
+        let extended = show("three", title: "Double Tap Weekly")
+        XCTAssertEqual(PodcastMediaSearch.shows([extended, duplicate, first], matching: "Double Tap").map(\.id), ["one", "two"])
+        let titled = episode("literal", title: "The latest episode of Double Tap")
+        XCTAssertEqual(PodcastMediaSearch.audioMatches([first, titled], query: titled.title), [titled])
+    }
+
 }

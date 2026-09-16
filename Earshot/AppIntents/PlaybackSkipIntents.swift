@@ -156,6 +156,12 @@ struct EarshotAppShortcuts: AppShortcutsProvider {
             systemImageName: "play.circle"
         )
         AppShortcut(
+            intent: PlayLatestPodcastIntent(),
+            phrases: ["Play the latest episode of \(\.$podcast) in \(.applicationName)", "Play the latest episode in \(.applicationName)"],
+            shortTitle: "Play Latest Episode",
+            systemImageName: "play.circle"
+        )
+        AppShortcut(
             intent: SkipForwardIntent(),
             phrases: [
                 "Skip forward in \(.applicationName)",

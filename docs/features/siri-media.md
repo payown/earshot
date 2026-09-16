@@ -9,8 +9,11 @@ shortcuts remain available on earlier supported systems.
 
 Siri can query Earshot's opted-in searchable selection through AudioSearch and
 receive podcast episode entities conforming to Apple's podcastEpisode schema.
-The playAudio action accepts a union of episode and podcast-show entities. A
-show selection starts its newest episode within the searchable selection. All
+The media query and playAudio action both accept podcast episodes and shows.
+A show selection starts its newest locally stored episode, even when that episode
+is outside the global Spotlight episode selection. Explicit latest-episode
+requests resolve the show first. A separate Play Latest Episode shortcut provides
+the same operation in Shortcuts and a registered phrase for Siri. All
 starts use the existing playback bridge, readiness checks, saved progress, and
 handoff. They do not change the queue. Shuffle, repeat, queue insertion, and
 warmup results return an explicit unsupported-options error.
@@ -78,3 +81,29 @@ The known StoreKit suites remain excluded; purchase behavior was not changed.
 Independent review found loss of donation history on rebuild, delayed consent
 cleanup, and stale playback-donation tokens after cancellation. All were fixed,
 covered by regressions, and re-reviewed with no remaining blocking findings.
+
+## Latest-podcast correction
+
+Michael verified named-episode playback in Earshot on build 265.973. The apparent
+ABC News latest-episode success actually used Apple Podcasts, and the Double Tap
+request was rejected for Earshot. Latest-podcast routing therefore remains an
+on-device acceptance item, not a confirmed success.
+
+The correction returns podcast shows as well as episodes from the AudioSearch
+query, recognizes explicit latest/newest episode phrasing, and performs a targeted
+lookup for the selected followed show. It rechecks follow state before playback,
+preserves position and queue order, and does not refresh the feed. Duplicate show
+names remain distinct entities for Siri to disambiguate. Tests include a selected
+show whose latest episode is older than 501 episodes from another feed.
+
+Acceptance phrase: “Play the latest episode of Double Tap in Earshot.” Confirm
+Earshot—not Apple Podcasts—is playing it, that its episode matches the newest
+locally stored entry, and that the previous Earshot episode keeps its position.
+If voice routing fails, run Earshot’s Play Latest Episode action in Shortcuts with
+Double Tap selected to distinguish routing from the action itself.
+
+The latest-podcast correction passed all 75 selected iOS 27 tests. After the final
+follow-state safeguard, all 16 playback and schema-query tests passed again.
+Exported app metadata contains one AudioSearch query returning both union cases,
+and the Play Latest Podcast action and registered latest-episode phrase.
+Independent review found no remaining actionable issues after the final safeguard.

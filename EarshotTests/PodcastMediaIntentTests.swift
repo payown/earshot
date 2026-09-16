@@ -11,7 +11,7 @@ final class PodcastMediaIntentTests: XCTestCase {
         let original = LibrarySearchIndex.isEnabled
         defer { UserDefaults.standard.set(original, forKey: LibrarySearchIndex.enabledKey) }
         UserDefaults.standard.set(false, forKey: LibrarySearchIndex.enabledKey)
-        let query = SiriPodcastEpisodeQuery()
+        let query = PodcastAudioSearchQuery()
         let unspecified = try await query.values(for: AudioSearch(criteria: .unspecified))
         let named = try await query.values(for: AudioSearch(criteria: .searchQuery("Dangers")))
         let url = try await query.values(for: AudioSearch(criteria: .url([URL(string: "https://example.com")!])))
@@ -29,6 +29,19 @@ final class PodcastMediaIntentTests: XCTestCase {
         XCTAssertEqual(entity.showName, "Show")
         XCTAssertEqual(entity.duration, 120)
         XCTAssertEqual(entity.releaseDate, record.date)
+    }
+
+    func testAudioSearchCanReturnPodcastOrEpisodeUnionCases() {
+        let show = SearchContent(id: "show", feedURL: "https://example.com/feed", guid: nil,
+            title: "Double Tap", showName: "", summary: "", date: nil, duration: nil)
+        let episode = SearchContent(id: "episode", feedURL: show.feedURL, guid: "one",
+            title: "The dangers of AI", showName: show.title, summary: "", date: nil, duration: nil)
+        let shows = PodcastAudioSearchQuery.results([show, episode], query: "latest episode of Double Tap")
+        guard case .show(let result) = shows.first else { return XCTFail("Expected podcast result") }
+        XCTAssertEqual(result.id, show.id)
+        let episodes = PodcastAudioSearchQuery.results([show, episode], query: "The dangers of AI")
+        guard case .episode(let result) = episodes.first else { return XCTFail("Expected episode result") }
+        XCTAssertEqual(result.id, episode.id)
     }
 
     func testUnsupportedQueueAndShuffleAreRejectedBeforePlayback() async {
