@@ -76,6 +76,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- She keeps spare buttons from clothes she no longer owns in a tin (Chapter 89).
+
 - She uses a rubber band for grip on a stubborn thermos lid (Chapter 88).
 
 - She sometimes follows a show for one interview Renata recommends and keeps
@@ -3249,5 +3251,47 @@ She asked Siri for the latest episode of her news show in Earshot. The familiar 
 The lid gave. Cold coffee, yesterday's, which explained a few things.
 
 She emptied it, rinsed it, and left the phone where it was. The news carried on. One less thing to pick up before she could finish putting things away.
+
+---
+
+### Chapter 89 - Build 267
+
+**What to try:**
+
+In Library, move through your podcasts with VoiceOver. Each row now includes its unplayed count. Open a show and compare the total. Try a show with one unplayed episode and one you're caught up on. Mark an episode played, return to Library, then mark it unplayed and check again.
+
+In Inbox, unfollow a podcast you're ready to remove. Its episodes should disappear. Flick backward and forward afterward, and check that navigation stays responsive and focus remains useful. Try a show with a large episode list too.
+
+With Queue grouped by folder, use a folder heading's Oldest to newest action. Episodes in that folder should sort without moving the section to the front or rearranging other folders. Start listening and check the order.
+
+Inside a folder, individually added episodes now appear under Added Episodes. Check the help for Save as Lineup and Remove after: Unlimited. Unlimited disables age-based removal; finished episodes still leave Queue.
+
+Known issue: some BBC shows still use insecure audio redirects. Playback can ask for approval, and downloads can fail. This build does not fix that issue. Please include the show, episode, and what happened in your feedback.
+
+**Kashe's story:**
+
+*Kashe has a place for things she might need. Several places, actually.*
+
+The button tin made its familiar rattle when she moved it to reach the thread. She saved buttons from clothes she no longer owned. None had ever matched the one she needed, but throwing them away seemed premature.
+
+Renata called while Kashe was looking for a dark one.
+
+“How's the great clear-out?”
+
+“I've moved the tin.”
+
+“That counts.”
+
+Earshot had a few counts of its own now. Kashe moved through Library and heard twelve unplayed episodes on one show, zero on another. She had finished that one without noticing. Usually she noticed only what was left.
+
+She opened a show with one episode waiting and put it in Queue. There was time for it while she finished the repair.
+
+The button wasn't quite the right colour. It was the right size, and it was already in her hand.
+
+“Found one,” she told Renata.
+
+“For once?”
+
+“I'm choosing to call it preparation.”
 
 ---

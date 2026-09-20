@@ -1,6 +1,6 @@
 # TestFlight preparation — September 20, 2026
 
-TestFlight upload remains on hold. Device acceptance is required after installing the combined Release build.
+Michael confirmed the requested phone checks passed and then authorized merging PR #979 and distributing build 267 to both TestFlight groups.
 
 ## Library unplayed counts
 
@@ -42,6 +42,6 @@ StartTesting bug: `e759e5c0-1de5-4496-a617-aff822794a14` (high priority, remains
 - Final Release build succeeded under Xcode 27.0 (27A266a); strict signature verification passed.
 - Installed version 1.2.3 (266), including code revision `a4345325`, on Michael’s iPhone. No TestFlight upload.
 - Installed executable SHA-256: `12eebc1f845b994de7f3fdefd59882707c934838e907cdf2bfd9c8c45c1f4e88`.
-- Physical VoiceOver, BBC playback/download reproduction, and combined phone acceptance remain pending Michael’s results.
+- Michael confirmed Library counts and updates, responsive navigation and Inbox unfollowing, folder sorting, and the three wording changes passed on his phone. BBC transport remains an unresolved issue.
 
-The BBC issue is still high/open; Library counts are ready for phone acceptance. This is not a declaration that all release checks have passed.
+PR #979 passed CI and was merged. The BBC issue remains high/open and is disclosed in the build 267 testing notes.
