@@ -78,8 +78,15 @@ enum EpisodeRowSpeech {
 }
 
 enum PodcastRowSpeech {
-    static func label(title: String, author: String?, isReadOnly: Bool) -> String {
+    static func unplayedDescription(_ count: Int) -> String {
+        "\(count) unplayed \(count == 1 ? "episode" : "episodes")"
+    }
+
+    static func label(
+        title: String, author: String?, isReadOnly: Bool, unplayedCount: Int? = nil
+    ) -> String {
         var parts = [title]
+        if let unplayedCount { parts.append(unplayedDescription(unplayedCount)) }
         if let author, !author.isEmpty { parts.append(author) }
         if isReadOnly { parts.append("Read-only, upgrade to Earshot Plus to make changes") }
         return parts.joined(separator: ", ")
