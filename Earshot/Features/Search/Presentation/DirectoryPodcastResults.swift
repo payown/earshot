@@ -109,8 +109,10 @@ struct DirectoryPodcastResults: View {
         if let existing = podcasts.first(where: {
             FeedURLIdentity.matches($0.feedURL, result.feedURL)
         }) {
-            if SubscriptionRepository(context: context).unsubscribe(existing) {
-                Announcer.announce(FollowToggle.announcement(nowFollowing: false, title: result.title))
+            Task {
+                if await SubscriptionRepository(context: context).unsubscribeInBackground(existing) {
+                    Announcer.announce(FollowToggle.announcement(nowFollowing: false, title: result.title))
+                }
             }
         } else {
             subscribe(result)

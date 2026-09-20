@@ -506,11 +506,13 @@ struct DownloadsScreen: View {
     /// success only on `true`. The show's downloaded episodes drop out of the
     /// @Query-backed list automatically.
     private func unfollow(_ podcast: Podcast) {
-        let title = podcast.displayName
-        let removed = SubscriptionRepository(context: context).unsubscribe(podcast)
-        pendingUnfollow = nil
-        guard removed else { return }
-        Announcer.announce("Unfollowed \(title)")
+        Task {
+            let title = podcast.displayName
+            let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(podcast)
+            pendingUnfollow = nil
+            guard removed else { return }
+            Announcer.announce("Unfollowed \(title)")
+        }
     }
 
     /// Announces the search's match count on submit (#457). Guarded so an empty

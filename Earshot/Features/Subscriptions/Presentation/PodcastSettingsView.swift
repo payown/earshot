@@ -218,22 +218,26 @@ struct PodcastSettingsView: View {
     }
 
     private func unfollow() {
-        guard !podcast.isDeleted else {
+        Task {
+            guard !podcast.isDeleted else {
+                didUnfollow = true
+                dismiss()
+                return
+            }
+            didUnfollow = true
+            guard await SubscriptionRepository(context: modelContext).unsubscribeInBackground(podcast) else {
+                didUnfollow = false
+                unfollowFailed = true
+                return
+            }
+            // Stop reading the deleted model while the sheet dismisses. The
+            // repository's existing notification also closes an owning episode list.
             didUnfollow = true
             dismiss()
-            return
-        }
-        guard SubscriptionRepository(context: modelContext).unsubscribe(podcast) else {
-            unfollowFailed = true
-            return
-        }
-        // Stop reading the deleted model while the sheet dismisses. The
-        // repository's existing notification also closes an owning episode list.
-        didUnfollow = true
-        dismiss()
-        let message = "Unfollowed \(unfollowName)"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            Announcer.announce(message)
+            let message = "Unfollowed \(unfollowName)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                Announcer.announce(message)
+            }
         }
     }
 

@@ -647,12 +647,15 @@ struct SubscriptionsView: View {
     }
 
     private func unsubscribe(_ podcast: Podcast) {
-        let title = podcast.displayName
-        // Centralized unsubscribe (removeFromAllFolders + delete + save). The repo
-        // logs failures; announce only on a successful delete (#499/#500).
-        if SubscriptionRepository(context: context).unsubscribe(podcast) {
-            podcasts.removeAll { $0.persistentModelID == podcast.persistentModelID }
-            Announcer.announce("Unfollowed \(title)")
+        Task {
+            let title = podcast.displayName
+            let id = podcast.persistentModelID
+            // Centralized unsubscribe (removeFromAllFolders + delete + save). The repo
+            // logs failures; announce only on a successful delete (#499/#500).
+            if await SubscriptionRepository(context: context).unsubscribeInBackground(podcast) {
+                podcasts.removeAll { $0.persistentModelID == id }
+                Announcer.announce("Unfollowed \(title)")
+            }
         }
     }
 

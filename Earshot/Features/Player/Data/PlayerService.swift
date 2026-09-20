@@ -723,6 +723,7 @@ final class PlayerService {
         announcesQueueNavigation: Bool = false,
         automaticallyAdvancing: Bool = false
     ) {
+        guard !SubscriptionRepository.isUnfollowing(episode.podcast?.persistentModelID) else { return }
         guard !automaticallyAdvancing || !automaticPlaybackStoppedByTimer else { return }
         folderRuns.playbackWillStart(episode)
         if !automaticallyAdvancing { automaticPlaybackStoppedByTimer = false }
@@ -942,6 +943,7 @@ final class PlayerService {
     /// Loads an episode paused, restoring its saved position. Used on launch to
     /// repopulate the Now Playing bar without starting audio.
     func load(_ episode: Episode, autoplay: Bool = false) {
+        guard !SubscriptionRepository.isUnfollowing(episode.podcast?.persistentModelID) else { return }
         cancelHandoffOperation()
         if autoplay {
             play(episode)
@@ -2840,6 +2842,10 @@ final class PlayerService {
         let queued = QueueRepository(context: context).queue()
         let nextID = nextAdvanceID(after: current, in: queued, allowsWrapping: true)
         guard let next = queued.first(where: { $0.persistentModelID == nextID }) else {
+            clearPreload()
+            return
+        }
+        guard !SubscriptionRepository.isUnfollowing(next.podcast?.persistentModelID) else {
             clearPreload()
             return
         }
