@@ -257,6 +257,8 @@ struct PodcastSettingsView: View {
         } header: {
             Text("Queue")
                 .accessibilityAddTraits(.isHeader)
+        } footer: {
+            Text("Remove from queue after limits how long episodes stay in the Queue. Unlimited turns off this time limit. Finished episodes still leave the Queue, even when Delete downloads when done is off in Downloads settings.")
         }
     }
 

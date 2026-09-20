@@ -196,9 +196,9 @@ struct QueueScreen: View {
                 switch request {
                 case let .save(queueCount, _):
                     if queueCount > QueueLineupStore.maximumEpisodeCount {
-                        Text("The first \(QueueLineupStore.maximumEpisodeCount) episodes will be saved in their current order. \(queueCount - QueueLineupStore.maximumEpisodeCount) later episodes will be omitted.")
+                        Text("A lineup saves specific episodes and their order so you can add them to the front of your Queue later using Apply saved lineup. The first \(QueueLineupStore.maximumEpisodeCount) episodes will be saved; \(queueCount - QueueLineupStore.maximumEpisodeCount) later episodes will be omitted. Played or unavailable episodes are skipped when applying it. New episodes are not added to the saved lineup automatically.")
                     } else {
-                        Text("Saves the current Queue order so you can restore it later.")
+                        Text("A lineup saves specific episodes and their order so you can add them to the front of your Queue later using Apply saved lineup. Played or unavailable episodes are skipped when applying it. New episodes are not added to the saved lineup automatically.")
                     }
                 case .apply:
                     Text("Saved episodes move to the front in order. Other queued episodes stay after them. Unavailable or played episodes are skipped.")

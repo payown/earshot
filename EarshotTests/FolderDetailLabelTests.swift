@@ -91,9 +91,9 @@ final class FolderDetailLabelTests: XCTestCase {
     // MARK: Episodes section (#759) — header, empty state, remove announcement
 
     func testEpisodesSectionHeaderIsPlainSpokenLabel() {
-        // A real, plain "Episodes" header string — carried into an `.isHeader`
+        // A real, plain "Added Episodes" header string — carried into an `.isHeader`
         // section header on the screen so VoiceOver can reach it by heading.
-        XCTAssertEqual(FolderDetailLabel.episodesSectionHeader, "Episodes")
+        XCTAssertEqual(FolderDetailLabel.episodesSectionHeader, "Added Episodes")
     }
 
     func testEpisodesEmptyStateSpeaksTitleAndHowToAdd() {
