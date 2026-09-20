@@ -531,7 +531,7 @@ struct FolderDetailScreen: View {
     // MARK: Episodes (#759)
 
     /// The hand-picked episodes filed directly in this folder. Always carries a
-    /// real `.isHeader` "Episodes" header and a spoken empty state, so the
+    /// real `.isHeader` "Added Episodes" header and a spoken empty state, so the
     /// section is navigable and self-describing even with nothing in it.
     ///
     /// Hidden entirely while podcast multi-select is active — the same way the

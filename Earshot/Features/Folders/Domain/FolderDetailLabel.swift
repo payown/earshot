@@ -55,7 +55,7 @@ enum FolderDetailLabel {
     /// directly in this folder (``EpisodeFolderMembership``). Rendered as a real
     /// `.isHeader` section header so a VoiceOver user can navigate to it by
     /// heading, the same way the Subfolders and Podcasts sections read.
-    static let episodesSectionHeader = "Episodes"
+    static let episodesSectionHeader = "Added Episodes"
 
     /// The title of the Episodes section's empty state, spoken when the folder
     /// holds no episodes of its own. A real label — never a blank section — so a
