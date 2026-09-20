@@ -1231,6 +1231,46 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertTrue(try PendingCloudUnfollowIntent.feedURLs(in: fresh).contains("https://example.test/target"))
     }
 
+    func testBackgroundUnfollowInvalidatesInboxAfterDurableRemoval() async throws {
+        let ctx = TestStore.freshContext()
+        let removedPodcast = Podcast(feedURL: "https://example.test/remove", title: "Remove")
+        let keptPodcast = Podcast(feedURL: "https://example.test/keep", title: "Keep")
+        ctx.insert(removedPodcast)
+        ctx.insert(keptPodcast)
+        for index in 0..<3 {
+            let episode = Episode(guid: "remove-\(index)", title: "Remove", audioURL: "https://example.test/audio.mp3")
+            episode.podcast = removedPodcast
+            ctx.insert(episode)
+        }
+        let keptEpisode = Episode(guid: "keep", title: "Keep", audioURL: "https://example.test/keep.mp3")
+        keptEpisode.podcast = keptPodcast
+        ctx.insert(keptEpisode)
+        try ctx.save()
+        let container = ctx.container
+        let keptID = keptEpisode.persistentModelID
+        let before = try await InboxSnapshotLoader.all(modelContainer: container, optInOnly: false)
+        XCTAssertEqual(before.ids.count, 4)
+        let reloaded = expectation(description: "Inbox reload notification sees committed removal")
+        reloaded.assertForOverFulfill = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotInboxDidChange, object: nil, queue: nil
+        ) { _ in
+            Task {
+                do {
+                    let after = try await InboxSnapshotLoader.all(modelContainer: container, optInOnly: false)
+                    XCTAssertEqual(after.ids, [keptID])
+                } catch {
+                    XCTFail("Inbox reload failed: \(error)")
+                }
+                reloaded.fulfill()
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        let removed = await SubscriptionRepository(context: ctx).unsubscribeInBackground(removedPodcast)
+        XCTAssertTrue(removed)
+        await fulfillment(of: [reloaded], timeout: 3)
+    }
+
     func testBackgroundUnfollowFailureRollsBackPodcastAndIntent() async throws {
         let ctx = TestStore.freshContext()
         let podcast = Podcast(feedURL: "https://example.test/failure", title: "Keep")
@@ -1239,7 +1279,14 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let id = podcast.persistentModelID
         let actor = await SubscriptionDeletionActor.makeBackground(container: ctx.container)
         await actor.forceNextSaveFailureForTesting()
+        let noReload = expectation(description: "Failed unfollow must not publish an Inbox removal")
+        noReload.isInverted = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotInboxDidChange, object: nil, queue: nil
+        ) { _ in noReload.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
         let removed = await actor.unsubscribe(id)
+        await fulfillment(of: [noReload], timeout: 0.1)
         XCTAssertFalse(removed)
         let fresh = ModelContext(ctx.container)
         XCTAssertEqual(try fresh.fetch(FetchDescriptor<Podcast>()).map(\.persistentModelID), [id])

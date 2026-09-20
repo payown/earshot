@@ -683,8 +683,8 @@ struct InboxScreen: View {
     /// Unfollows `podcast` via the centralized repository path shared with
     /// Library and search (#499/#500) — never an inline delete. The repo logs
     /// failures and returns whether the delete saved, so we announce success only
-    /// on `true`. The unfollowed show's episodes drop out of the @Query-backed
-    /// inbox automatically; if that empties the inbox the focused row is gone, so
+    /// on `true`. A post-save Inbox notification reloads the episode snapshot;
+    /// if that empties the inbox the focused row is gone, so
     /// move VoiceOver focus to the empty state (mirrors `clearInbox`).
     private func unfollow(_ podcast: Podcast) {
         Task {

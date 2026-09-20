@@ -580,6 +580,9 @@ struct SubscriptionDeletionRepository {
                 NotificationCenter.default.post(name: .earshotListeningHistoryDidChange, object: nil)
             }
             NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
+            // Inbox now uses event-driven snapshots, not a live episode query.
+            // Publish only after the cascade save so its reload sees removal.
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
             AppLog.subscriptions.info("Unsubscribed from \(title, privacy: .public)")
             return true
         } catch {
