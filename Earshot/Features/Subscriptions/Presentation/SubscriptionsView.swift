@@ -28,6 +28,8 @@ struct SubscriptionsView: View {
     // blocks VoiceOver even though this screen never needs those episodes.
     @State private var podcasts: [Podcast] = []
     @State private var hasLoadedPodcasts = false
+    @State private var unplayedCounts: [PersistentIdentifier: Int] = [:]
+    @State private var countRevision = 0
     @State private var isRefreshing = false
     @State private var sharedRefreshInProgress = false
     @State private var sharingPodcast: Podcast?
@@ -286,6 +288,40 @@ struct SubscriptionsView: View {
             for: .earshotFeedRefreshActivityDidChange
         )) { _ in
             sharedRefreshInProgress = BackgroundFeedRefresher.isRefreshInProgress
+            if !sharedRefreshInProgress { loadPodcasts() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotInboxDidChange)
+            .receive(on: DispatchQueue.main)) { _ in
+            countRevision += 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotEpisodeUserStateDidChange)
+            .receive(on: DispatchQueue.main)) { notification in
+            // Position checkpoints fire during playback; only an explicit played
+            // change affects this total. Never recount on each playback tick.
+            if let snapshots = notification.object as? [EpisodeUserStateSnapshot],
+               snapshots.contains(where: \.playedChangedExplicitly) {
+                countRevision += 1
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotSubscriptionsDidChange)
+            .receive(on: DispatchQueue.main)) { _ in
+            loadPodcasts()
+        }
+        .task(id: countRevision) {
+            let ids = podcasts.map(\.persistentModelID)
+            do {
+                // Coalesce a refresh or batch edit without doing work per row.
+                try await Task.sleep(for: .milliseconds(200))
+                let counts = try await LibraryUnplayedCounts.load(
+                    container: context.container, podcastIDs: ids
+                )
+                try Task.checkCancellation()
+                if counts != unplayedCounts { unplayedCounts = counts }
+            } catch is CancellationError {
+                // A newer snapshot or leaving Library superseded this request.
+            } catch {
+                AppLog.data.error("Library counts failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
         // Library intentionally avoids a live `@Query<Podcast>` because that
         // faults the inverse episode graph and froze large VoiceOver libraries.
@@ -467,6 +503,11 @@ struct SubscriptionsView: View {
             PodcastArtwork(urlString: podcast.artworkURL)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(podcast.displayName).font(.headline)
+                if let count = unplayedCounts[podcast.persistentModelID] {
+                    Text(PodcastRowSpeech.unplayedDescription(count))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
                 if let author = podcast.author, !author.isEmpty {
                     Text(author)
                         .font(.subheadline)
@@ -670,7 +711,8 @@ struct SubscriptionsView: View {
         PodcastRowSpeech.label(
             title: podcast.displayName,
             author: podcast.author,
-            isReadOnly: isReadOnly
+            isReadOnly: isReadOnly,
+            unplayedCount: unplayedCounts[podcast.persistentModelID]
         )
     }
 
@@ -744,6 +786,7 @@ struct SubscriptionsView: View {
         let descriptor = LibraryPodcastSnapshot.descriptor()
         podcasts = (try? context.fetch(descriptor)) ?? []
         hasLoadedPodcasts = true
+        countRevision += 1
     }
 
     private func requestLaunchHeadingFocus() {
@@ -815,4 +858,36 @@ func makeManualLibraryRefreshRepository(
         queue: QueueRepository(context: context),
         isEntitled: isEntitled
     )
+}
+
+/// Count in SQLite on a worker, without materializing any episodes or reading
+/// Podcast.episodes. Only immutable identifiers and integers cross executors.
+enum LibraryUnplayedCounts {
+    nonisolated static func load(
+        container: ModelContainer, podcastIDs: [PersistentIdentifier]
+    ) async throws -> [PersistentIdentifier: Int] {
+        try Task.checkCancellation()
+        let worker = Task.detached(priority: .utility) {
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            var counts: [PersistentIdentifier: Int] = [:]
+            for id in podcastIDs {
+                try Task.checkCancellation()
+                // Matches the existing Unplayed total on the podcast screen.
+                let descriptor = FetchDescriptor<Episode>(predicate: #Predicate {
+                    $0.podcast?.persistentModelID == id && $0.playedAt == nil
+                })
+                counts[id] = try context.fetchCount(descriptor)
+            }
+            try Task.checkCancellation()
+            return counts
+        }
+        return try await withTaskCancellationHandler {
+            let counts = try await worker.value
+            try Task.checkCancellation()
+            return counts
+        } onCancel: {
+            worker.cancel()
+        }
+    }
 }
