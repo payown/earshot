@@ -687,22 +687,24 @@ struct InboxScreen: View {
     /// inbox automatically; if that empties the inbox the focused row is gone, so
     /// move VoiceOver focus to the empty state (mirrors `clearInbox`).
     private func unfollow(_ podcast: Podcast) {
-        let title = podcast.displayName
-        let removed = SubscriptionRepository(context: context).unsubscribe(podcast)
-        pendingUnfollow = nil
-        guard removed else { return }
-        Announcer.announce("Unfollowed \(title)")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // Checked against the list AS DISPLAYED (#457): with a search
-            // active, unfollowing can empty the VISIBLE list (every match was
-            // the unfollowed show) while the inbox itself still has episodes.
-            // The no-match state then shows, and it's bound to `focusEmpty`, so
-            // this filtered check is what actually parks VoiceOver on it. With
-            // no search the filter passes the inbox through unchanged.
-            if EpisodeSearchFilter.filter(
-                currentInboxEpisodes(), query: searchText
-            ).isEmpty {
-                focusEmpty = true
+        Task {
+            let title = podcast.displayName
+            let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(podcast)
+            pendingUnfollow = nil
+            guard removed else { return }
+            Announcer.announce("Unfollowed \(title)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                // Checked against the list AS DISPLAYED (#457): with a search
+                // active, unfollowing can empty the VISIBLE list (every match was
+                // the unfollowed show) while the inbox itself still has episodes.
+                // The no-match state then shows, and it's bound to `focusEmpty`, so
+                // this filtered check is what actually parks VoiceOver on it. With
+                // no search the filter passes the inbox through unchanged.
+                if EpisodeSearchFilter.filter(
+                    currentInboxEpisodes(), query: searchText
+                ).isEmpty {
+                    focusEmpty = true
+                }
             }
         }
     }

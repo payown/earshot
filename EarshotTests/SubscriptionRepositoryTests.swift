@@ -1202,6 +1202,78 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertEqual(addedCount, 1, "Notification delivered once by the foreground path; never lost")
     }
 
+    func testBackgroundUnfollowUsesBackgroundExecutorAndRemovesOnlyTarget() async throws {
+        let ctx = TestStore.freshContext()
+        let target = Podcast(feedURL: "https://example.test/target", title: "Target")
+        let kept = Podcast(feedURL: "https://example.test/kept", title: "Kept")
+        ctx.insert(target)
+        ctx.insert(kept)
+        for index in 0..<1_000 {
+            let episode = Episode(guid: "target-\(index)", title: "Episode", audioURL: "https://example.test/audio")
+            episode.podcast = target
+            ctx.insert(episode)
+        }
+        let keptEpisode = Episode(guid: "kept", title: "Kept", audioURL: "https://example.test/kept.mp3")
+        keptEpisode.podcast = kept
+        ctx.insert(keptEpisode)
+        try ctx.save()
+        let targetID = target.persistentModelID
+        let keptID = kept.persistentModelID
+        let actor = await SubscriptionDeletionActor.makeBackground(container: ctx.container)
+        let onMain = await actor.isExecutingOnMainThreadForTesting()
+        XCTAssertFalse(onMain)
+        let removed = await actor.unsubscribe(targetID)
+        XCTAssertTrue(removed)
+        let fresh = ModelContext(ctx.container)
+        XCTAssertEqual(try fresh.fetch(FetchDescriptor<Podcast>()).map(\.persistentModelID), [keptID])
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<Episode>()), 1)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).map(\.persistentModelID), [keptID], "UI context fetch must exclude the deleted row")
+        XCTAssertTrue(try PendingCloudUnfollowIntent.feedURLs(in: fresh).contains("https://example.test/target"))
+    }
+
+    func testBackgroundUnfollowFailureRollsBackPodcastAndIntent() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.test/failure", title: "Keep")
+        ctx.insert(podcast)
+        try ctx.save()
+        let id = podcast.persistentModelID
+        let actor = await SubscriptionDeletionActor.makeBackground(container: ctx.container)
+        await actor.forceNextSaveFailureForTesting()
+        let removed = await actor.unsubscribe(id)
+        XCTAssertFalse(removed)
+        let fresh = ModelContext(ctx.container)
+        XCTAssertEqual(try fresh.fetch(FetchDescriptor<Podcast>()).map(\.persistentModelID), [id])
+        XCTAssertFalse(try PendingCloudUnfollowIntent.feedURLs(in: fresh).contains("https://example.test/failure"))
+    }
+
+    func testUIUnfollowYieldsAndPreventsPlaybackWhileDeletionIsPending() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.test/ui", title: "UI")
+        ctx.insert(podcast)
+        let episode = Episode(guid: "ui", title: "UI", audioURL: "https://example.test/audio.mp3")
+        episode.podcast = podcast
+        ctx.insert(episode)
+        try ctx.save()
+        let id = podcast.persistentModelID
+        let repo = SubscriptionRepository(context: ctx)
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.load(episode)
+        XCTAssertEqual(player.currentTitle, "UI")
+        let operation = Task { await repo.unsubscribeInBackground(podcast) }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(SubscriptionRepository.isUnfollowing(id), "MainActor can respond while unfollow is pending")
+        XCTAssertNil(player.currentTitle, "Loaded target is released before deletion")
+        player.load(episode)
+        XCTAssertNil(player.currentTitle, "Target cannot be loaded again during deletion")
+        let duplicate = await repo.unsubscribeInBackground(podcast)
+        XCTAssertFalse(duplicate, "A second tap must not launch another deletion")
+        let removed = await operation.value
+        XCTAssertTrue(removed)
+        XCTAssertFalse(SubscriptionRepository.isUnfollowing(id))
+        XCTAssertEqual(try ModelContext(ctx.container).fetchCount(FetchDescriptor<Podcast>()), 0)
+    }
+
     // MARK: Unsubscribe (#499/#500)
 
     /// Unsubscribing deletes the podcast and cascades its episodes, so the store is

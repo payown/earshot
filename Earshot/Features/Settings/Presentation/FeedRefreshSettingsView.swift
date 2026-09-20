@@ -312,13 +312,15 @@ struct FeedRefreshSettingsView: View {
     }
 
     private func unfollow(_ podcast: Podcast) {
-        let title = podcast.displayName
-        let feedURL = podcast.feedURL
-        guard SubscriptionRepository(context: context).unsubscribe(podcast) else { return }
-        failedPodcasts.removeValue(forKey: FeedURLIdentity.canonical(feedURL))
-        runtime.feedRefreshStatus.removeFailure(feedURL: feedURL)
-        pendingUnfollow = nil
-        Announcer.announce("Unfollowed \(title)")
+        Task {
+            let title = podcast.displayName
+            let feedURL = podcast.feedURL
+            guard await SubscriptionRepository(context: context).unsubscribeInBackground(podcast) else { return }
+            failedPodcasts.removeValue(forKey: FeedURLIdentity.canonical(feedURL))
+            runtime.feedRefreshStatus.removeFailure(feedURL: feedURL)
+            pendingUnfollow = nil
+            Announcer.announce("Unfollowed \(title)")
+        }
     }
 
     private func loadFailedPodcasts() {

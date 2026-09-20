@@ -516,12 +516,14 @@ struct EpisodeListView: View {
     /// announce and pop only on `true`; this screen's subject no longer exists,
     /// so it dismisses back to the list it was pushed from.
     private func unfollow(_ podcast: Podcast) {
-        let title = podcast.displayName
-        let removed = SubscriptionRepository(context: context).unsubscribe(podcast)
-        pendingUnfollow = nil
-        guard removed else { return }
-        Announcer.announce("Unfollowed \(title)")
-        dismiss()
+        Task {
+            let title = podcast.displayName
+            let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(podcast)
+            pendingUnfollow = nil
+            guard removed else { return }
+            Announcer.announce("Unfollowed \(title)")
+            dismiss()
+        }
     }
 
     /// Shared entry point for both the toolbar button and the rotor action

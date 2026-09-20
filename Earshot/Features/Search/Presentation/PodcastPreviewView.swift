@@ -424,13 +424,15 @@ struct PodcastPreviewView: View {
     /// Follow when not subscribed, unfollow when subscribed. The `@Query` updates
     /// reactively, so the button label and value flip on completion without the
     /// user re-entering the view. Subscribe is async (it fetches and seeds the
-    /// inbox); unsubscribe is a synchronous local delete.
+    /// inbox); unsubscribe performs its database cleanup in the background.
     private func toggleFollow() {
         if let existing = podcasts.first(where: {
             FeedURLIdentity.matches($0.feedURL, result.feedURL)
         }) {
-            if SubscriptionRepository(context: context).unsubscribe(existing) {
-                Announcer.announce(FollowToggle.announcement(nowFollowing: false, title: result.title))
+            Task {
+                if await SubscriptionRepository(context: context).unsubscribeInBackground(existing) {
+                    Announcer.announce(FollowToggle.announcement(nowFollowing: false, title: result.title))
+                }
             }
         } else {
             Task {

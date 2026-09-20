@@ -396,6 +396,105 @@ final class SubscriptionRepository {
     func unsubscribe(_ podcast: Podcast) -> Bool {
         SubscriptionDeletionRepository(context: context).unsubscribe(podcast)
     }
+
+    /// UI deletion must yield while the database scans and cascade save run.
+    /// IDs alone cross the executor boundary; the UI's models stay on MainActor.
+    private static var unfollowingIDs: Set<PersistentIdentifier> = []
+
+    static func isUnfollowing(_ podcastID: PersistentIdentifier?) -> Bool {
+        podcastID.map { unfollowingIDs.contains($0) } ?? false
+    }
+
+    func unsubscribeInBackground(_ podcast: Podcast) async -> Bool {
+        guard !podcast.isDeleted, podcast.modelContext != nil,
+              !Self.isUnfollowing(podcast.persistentModelID) else { return false }
+        do {
+            // Preserve pending UI edits before another context removes rows.
+            if context.hasChanges { try context.save() }
+        } catch {
+            AppLog.subscriptions.error("Could not save before unfollow: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        // A save can replace a temporary identifier, so capture it afterward.
+        let id = podcast.persistentModelID
+        Self.unfollowingIDs.insert(id)
+        defer { Self.unfollowingIDs.remove(id) }
+        await BackgroundFeedRefresher.cancelAndWait()
+        NotificationCenter.default.post(
+            name: .earshotWillDeleteEpisodes,
+            object: nil,
+            userInfo: [PlayerService.willDeletePodcastIDKey: id]
+        )
+        // Match remote unfollow: let a dismissed episode screen finish its
+        // transition before SwiftData invalidates models VoiceOver may still read.
+        do {
+            try await Task.sleep(for: .milliseconds(750))
+        } catch {
+            return false
+        }
+        let worker = await SubscriptionDeletionActor.makeBackground(container: context.container)
+        let removed = await worker.unsubscribe(id)
+        if removed {
+            // Reconcile cached rows without materializing inverse episode graphs.
+            _ = try? PodcastIdentityService(context: context).allScalarPodcasts()
+            onMerge?()
+        }
+        return removed
+    }
+}
+
+/// A dedicated serial executor keeps cascade deletion and SQLite saves away
+/// from the main run loop, even when initiated by a SwiftUI action.
+actor SubscriptionDeletionActor: ModelActor {
+    nonisolated private let executionQueue: DispatchSerialQueue
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        executionQueue.asUnownedSerialExecutor()
+    }
+    nonisolated let modelExecutor: any ModelExecutor
+    nonisolated let modelContainer: ModelContainer
+
+    private init(container: ModelContainer) {
+        executionQueue = DispatchSerialQueue(label: "media.payown.earshot.unfollow", qos: .utility)
+        modelContainer = container
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        modelExecutor = DefaultSerialModelExecutor(modelContext: context)
+    }
+
+    nonisolated static func makeBackground(container: ModelContainer) async -> SubscriptionDeletionActor {
+        // ModelContext must also be constructed off the main thread.
+        await Task.detached(priority: .userInitiated) {
+            SubscriptionDeletionActor(container: container)
+        }.value
+    }
+
+    func unsubscribe(_ id: PersistentIdentifier) -> Bool {
+        let interval = PerformanceSignposts.signposter.beginInterval("UnfollowDatabaseCleanup")
+        defer { PerformanceSignposts.signposter.endInterval("UnfollowDatabaseCleanup", interval) }
+        var descriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.persistentModelID == id })
+        descriptor.fetchLimit = 1
+        do {
+            guard let podcast = try modelContext.fetch(descriptor).first else { return false }
+#if DEBUG
+            if forceSaveFailureForTesting {
+                forceSaveFailureForTesting = false
+                return SubscriptionDeletionRepository(context: modelContext, saveOperation: { _ in
+                    throw CocoaError(.fileWriteUnknown)
+                }).unsubscribe(podcast)
+            }
+#endif
+            return SubscriptionDeletionRepository(context: modelContext).unsubscribe(podcast)
+        } catch {
+            AppLog.subscriptions.error("Could not fetch podcast for unfollow: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
+#if DEBUG
+    private var forceSaveFailureForTesting = false
+    func forceNextSaveFailureForTesting() { forceSaveFailureForTesting = true }
+    func isExecutingOnMainThreadForTesting() -> Bool { Thread.isMainThread }
+#endif
 }
 
 /// Context-local destructive subscription operation. Keeping this small type
