@@ -780,6 +780,30 @@ final class QueueRepository {
 
     // MARK: Folder group actions (#762)
 
+    /// Sorts only the selected folder's existing queue slots. Unlike a play
+    /// action, sorting must not promote the folder or move other groups.
+    func sortFolderGroup(
+        _ key: QueueGroup.Kind,
+        resolution: QueueFolderResolution,
+        newestFirst: Bool
+    ) {
+        let items = orderedItems()
+        let belongs = memberOf(key, resolution: resolution)
+        let groupItems = items.filter(belongs)
+        guard groupItems.count > 1 else { return }
+
+        let sortedIDs = dateOrder(newestFirst: newestFirst)(groupItems)
+        let groupIDs = Set(sortedIDs)
+        var sorted = sortedIDs.makeIterator()
+        let currentIDs = items.map(\.persistentModelID)
+        let newOrder = currentIDs.map { id in
+            groupIDs.contains(id) ? (sorted.next() ?? id) : id
+        }
+        if newOrder != currentIDs {
+            applyOrder(newOrder, items: items)
+        }
+    }
+
     /// Folder-grouped analogue of ``playGroup(_:)``: brings the queued episodes
     /// that resolve to the folder group identified by `key` to the front in
     /// queue order. Returns the front episode, or nil for an empty group. The

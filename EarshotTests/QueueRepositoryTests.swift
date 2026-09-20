@@ -704,6 +704,62 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(front?.title, "Ep b1", "returns the episode now at the group front")
     }
 
+    func testFolderSortPreservesOtherSlotsAndFolderOrderInBothDirections() {
+        let ctx = TestStore.freshContext()
+        let folders = FolderRepository(context: ctx)
+        let news = folders.createFolder(name: "News")
+        let tech = folders.createFolder(name: "Tech")
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        let pc = makePodcast(ctx, "C")
+        folders.add(pa, to: news)
+        folders.add(pb, to: tech)
+        folders.add(pc, to: tech)
+        let before = makeEpisode(ctx, "before", podcast: pa)
+        let between = makeEpisode(ctx, "between", podcast: pa)
+        let after = makeEpisode(ctx, "after", podcast: pa)
+        let newer = makeEpisode(ctx, "newer", podcast: pb)
+        let older = makeEpisode(ctx, "older", podcast: pc)
+        newer.pubDate = Date(timeIntervalSince1970: 200)
+        older.pubDate = Date(timeIntervalSince1970: 100)
+        let repo = QueueRepository(context: ctx)
+        [before, newer, between, older, after].forEach(repo.add)
+        let grouping = repo.groupedQueueByFolder()
+        let key = QueueGroup.Kind.folder(tech.persistentModelID)
+
+        repo.sortFolderGroup(key, resolution: grouping.resolution, newestFirst: false)
+
+        XCTAssertEqual(titles(repo), ["Ep before", "Ep older", "Ep between", "Ep newer", "Ep after"])
+        XCTAssertEqual(repo.groupedQueueByFolder().groups.map(\.kind), grouping.groups.map(\.kind))
+        repo.sortFolderGroup(key, resolution: grouping.resolution, newestFirst: true)
+        XCTAssertEqual(titles(repo), ["Ep before", "Ep newer", "Ep between", "Ep older", "Ep after"])
+    }
+
+    func testFolderSortHonorsDirectEpisodeMembershipAndKeepsUndatedLast() {
+        let ctx = TestStore.freshContext()
+        let folders = FolderRepository(context: ctx)
+        let home = folders.createFolder(name: "Home")
+        let selected = folders.createFolder(name: "Selected")
+        let podcast = makePodcast(ctx, "A")
+        folders.add(podcast, to: home)
+        let untouched = makeEpisode(ctx, "untouched", podcast: podcast)
+        let undated = makeEpisode(ctx, "undated", podcast: podcast)
+        let dated = makeEpisode(ctx, "dated", podcast: podcast)
+        dated.pubDate = Date(timeIntervalSince1970: 100)
+        folders.addEpisodes([undated, dated], to: selected)
+        let repo = QueueRepository(context: ctx)
+        [untouched, undated, dated].forEach(repo.add)
+        let resolution = repo.groupedQueueByFolder().resolution
+        let key = QueueGroup.Kind.folder(selected.persistentModelID)
+
+        repo.sortFolderGroup(key, resolution: resolution, newestFirst: false)
+        XCTAssertEqual(titles(repo), ["Ep untouched", "Ep dated", "Ep undated"])
+        repo.sortFolderGroup(key, resolution: resolution, newestFirst: true)
+        XCTAssertEqual(titles(repo), ["Ep untouched", "Ep dated", "Ep undated"])
+        repo.sortFolderGroup(.folder(home.persistentModelID), resolution: resolution, newestFirst: false)
+        XCTAssertEqual(titles(repo), ["Ep untouched", "Ep dated", "Ep undated"], "Single-item sorting must not move the folder")
+    }
+
     // MARK: group actions (#445)
 
     /// Builds a two-podcast queue interleaved as [a1, b1, a2, b2, a3] with A
