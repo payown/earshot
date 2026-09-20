@@ -423,7 +423,7 @@ struct QueueScreen: View {
             return
         }
         guard let folderGrouping else { return }
-        repo.playNewestFirst(group.kind, resolution: folderGrouping.resolution)
+        repo.sortFolderGroup(group.kind, resolution: folderGrouping.resolution, newestFirst: true)
     }
 
     private func sortOldest(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) {
@@ -432,7 +432,7 @@ struct QueueScreen: View {
             return
         }
         guard let folderGrouping else { return }
-        repo.playOldestFirst(group.kind, resolution: folderGrouping.resolution)
+        repo.sortFolderGroup(group.kind, resolution: folderGrouping.resolution, newestFirst: false)
     }
 
     private func shuffleGroup(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) {
