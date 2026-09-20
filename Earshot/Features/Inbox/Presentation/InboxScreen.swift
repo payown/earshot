@@ -79,6 +79,8 @@ struct InboxScreen: View {
     // Mirrors the Library unfollow flow (`SubscriptionsView.pendingUnsubscribe`)
     // so the UX is identical.
     @State private var pendingUnfollow: Podcast?
+    @State private var pendingUnfollowEpisodeID: PersistentIdentifier?
+    @State private var unfollowedEpisodeIDs: Set<PersistentIdentifier> = []
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
     // @Query-backed inbox is filtered in memory, never re-fetched.
     @State private var searchText = ""
@@ -116,14 +118,16 @@ struct InboxScreen: View {
             if let selectedFolder {
                 FolderScopedInboxCandidates(
                     folder: selectedFolder,
-                    isActive: isActive
+                    isActive: isActive,
+                    excludedEpisodeIDs: unfollowedEpisodeIDs
                 ) { candidates in
                     inboxContent(candidates: candidates)
                 }
             } else {
                 AllInboxCandidates(
                     optInOnly: settings.inboxOptInOnly,
-                    isActive: isActive
+                    isActive: isActive,
+                    excludedEpisodeIDs: unfollowedEpisodeIDs
                 ) { candidates in
                     inboxContent(candidates: candidates)
                 }
@@ -530,6 +534,7 @@ struct InboxScreen: View {
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     if let podcast = episode.podcast {
                         Button(role: .destructive) {
+                            pendingUnfollowEpisodeID = episode.persistentModelID
                             pendingUnfollow = podcast
                         } label: {
                             Label("Unfollow this podcast", systemImage: "xmark.bin")
@@ -687,25 +692,48 @@ struct InboxScreen: View {
     /// if that empties the inbox the focused row is gone, so
     /// move VoiceOver focus to the empty state (mirrors `clearInbox`).
     private func unfollow(_ podcast: Podcast) {
+        let title = podcast.displayName
+        let snapshot = currentCandidateSnapshot
+        let candidateIDs = Set(snapshot.map(\.persistentModelID))
+        let visibleIDs = EpisodeSearchFilter.filter(currentInboxEpisodes(), query: searchText)
+            .map(\.persistentModelID)
+        let anchor = focusedEpisode ?? pendingUnfollowEpisodeID
         Task {
-            let title = podcast.displayName
-            let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(podcast)
-            pendingUnfollow = nil
-            guard removed else { return }
-            Announcer.announce("Unfollowed \(title)")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                // Checked against the list AS DISPLAYED (#457): with a search
-                // active, unfollowing can empty the VISIBLE list (every match was
-                // the unfollowed show) while the inbox itself still has episodes.
-                // The no-match state then shows, and it's bound to `focusEmpty`, so
-                // this filtered check is what actually parks VoiceOver on it. With
-                // no search the filter passes the inbox through unchanged.
-                if EpisodeSearchFilter.filter(
-                    currentInboxEpisodes(), query: searchText
-                ).isEmpty {
-                    focusEmpty = true
+            var removedIDs: Set<PersistentIdentifier> = []
+            let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(
+                podcast,
+                inboxCandidateIDs: candidateIDs
+            ) { ids in
+                removedIDs = ids
+                // Filter before reading any persisted property, so neither a
+                // redraw nor an older in-flight reload can expose doomed rows.
+                unfollowedEpisodeIDs.formUnion(ids)
+                currentCandidateSnapshot.removeAll { ids.contains($0.persistentModelID) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    // A failure may have restored these rows, or the user may
+                    // already have flicked onto a surviving episode.
+                    guard !ids.isEmpty, ids.isSubset(of: unfollowedEpisodeIDs) else { return }
+                    if let current = focusedEpisode,
+                       current != anchor, !unfollowedEpisodeIDs.contains(current) { return }
+                    let neighbor = InboxLogic.focusAfterRemoving(
+                        from: visibleIDs, removing: unfollowedEpisodeIDs, anchor: anchor
+                    )
+                    if let neighbor {
+                        focusedEpisode = neighbor
+                    } else {
+                        focusEmpty = true
+                    }
                 }
             }
+            pendingUnfollow = nil
+            pendingUnfollowEpisodeID = nil
+            guard removed else {
+                unfollowedEpisodeIDs.subtract(removedIDs)
+                currentCandidateSnapshot = snapshot
+                if let anchor { focusedEpisode = anchor }
+                return
+            }
+            Announcer.announce("Unfollowed \(title)")
         }
     }
 
@@ -738,7 +766,10 @@ struct InboxScreen: View {
             onShowNotes: { showNotesEpisode = episode },
             onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode },
-            onUnfollow: { pendingUnfollow = episode.podcast },
+            onUnfollow: {
+                pendingUnfollowEpisodeID = episode.persistentModelID
+                pendingUnfollow = episode.podcast
+            },
             onMarkPlayed: { nowPlayed in
                 guard nowPlayed else { return }
                 focusAfterInboxRowLeaves(episode)
@@ -764,7 +795,10 @@ struct InboxScreen: View {
     /// recovery uses this instead of the global Inbox so clearing/playing the
     /// last visible folder episode lands on the visible empty state (#763).
     private func currentInboxEpisodes() -> [Episode] {
-        InboxRepository.currentEpisodes(currentCandidateSnapshot, in: context)
+        InboxRepository.currentEpisodes(
+            currentCandidateSnapshot.filter { !unfollowedEpisodeIDs.contains($0.persistentModelID) },
+            in: context
+        )
     }
 
     /// Re-anchors VoiceOver after a played or queued action removes an Inbox row.
@@ -842,6 +876,7 @@ private struct AllInboxCandidates<Content: View>: View {
 
     let optInOnly: Bool
     let isActive: Bool
+    let excludedEpisodeIDs: Set<PersistentIdentifier>
     let content: ([Episode]) -> Content
     @State private var candidates: [Episode]?
     @State private var reloadScheduled = false
@@ -851,17 +886,22 @@ private struct AllInboxCandidates<Content: View>: View {
     init(
         optInOnly: Bool,
         isActive: Bool,
+        excludedEpisodeIDs: Set<PersistentIdentifier> = [],
         @ViewBuilder content: @escaping ([Episode]) -> Content
     ) {
         self.optInOnly = optInOnly
         self.isActive = isActive
+        self.excludedEpisodeIDs = excludedEpisodeIDs
         self.content = content
     }
 
     var body: some View {
         Group {
             if let candidates {
-                content(InboxRepository.currentEpisodes(candidates, in: context))
+                content(InboxRepository.currentEpisodes(
+                    candidates.filter { !excludedEpisodeIDs.contains($0.persistentModelID) },
+                    in: context
+                ))
             } else {
                 ProgressView("Loading inbox")
                     .accessibilityLabel("Loading inbox")
@@ -954,6 +994,7 @@ struct FolderScopedInboxCandidates<Content: View>: View {
     @Environment(SettingsStore.self) private var settings
     let folder: PodcastFolder
     let isActive: Bool
+    let excludedEpisodeIDs: Set<PersistentIdentifier>
     let content: ([Episode]) -> Content
 
     @State private var candidates: [Episode] = []
@@ -965,10 +1006,12 @@ struct FolderScopedInboxCandidates<Content: View>: View {
     init(
         folder: PodcastFolder,
         isActive: Bool = true,
+        excludedEpisodeIDs: Set<PersistentIdentifier> = [],
         @ViewBuilder content: @escaping ([Episode]) -> Content
     ) {
         self.folder = folder
         self.isActive = isActive
+        self.excludedEpisodeIDs = excludedEpisodeIDs
         self.content = content
     }
 
@@ -982,7 +1025,10 @@ struct FolderScopedInboxCandidates<Content: View>: View {
     var body: some View {
         Group {
             if loaded {
-                content(InboxRepository.currentEpisodes(candidates, in: context))
+                content(InboxRepository.currentEpisodes(
+                    candidates.filter { !excludedEpisodeIDs.contains($0.persistentModelID) },
+                    in: context
+                ))
             } else {
                 ProgressView("Loading folder inbox")
                     .accessibilityLabel("Loading folder inbox")

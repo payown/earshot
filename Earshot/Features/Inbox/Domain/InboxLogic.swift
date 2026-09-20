@@ -9,6 +9,19 @@ enum InboxLogic {
 
     static let displayBatchSize = 100
 
+    /// Choose from the displayed order, skipping every row removed together.
+    static func focusAfterRemoving<ID: Hashable>(
+        from ids: [ID], removing: Set<ID>, anchor: ID?
+    ) -> ID? {
+        if let anchor, ids.contains(anchor), !removing.contains(anchor) { return anchor }
+        guard let index = anchor.flatMap({ ids.firstIndex(of: $0) })
+            ?? ids.firstIndex(where: { removing.contains($0) }) else {
+            return ids.first { !removing.contains($0) }
+        }
+        return ids.dropFirst(index + 1).first { !removing.contains($0) }
+            ?? ids.prefix(index).reversed().first { !removing.contains($0) }
+    }
+
     /// Expands a large Inbox without ever exceeding the available result count.
     static func nextDisplayLimit(current: Int, total: Int) -> Int {
         min(max(0, total), max(0, current) + displayBatchSize)

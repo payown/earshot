@@ -405,7 +405,11 @@ final class SubscriptionRepository {
         podcastID.map { unfollowingIDs.contains($0) } ?? false
     }
 
-    func unsubscribeInBackground(_ podcast: Podcast) async -> Bool {
+    func unsubscribeInBackground(
+        _ podcast: Podcast,
+        inboxCandidateIDs: Set<PersistentIdentifier> = [],
+        prepareInboxRemoval: ((Set<PersistentIdentifier>) -> Void)? = nil
+    ) async -> Bool {
         guard !podcast.isDeleted, podcast.modelContext != nil,
               !Self.isUnfollowing(podcast.persistentModelID) else { return false }
         do {
@@ -420,6 +424,18 @@ final class SubscriptionRepository {
         Self.unfollowingIDs.insert(id)
         defer { Self.unfollowingIDs.remove(id) }
         await BackgroundFeedRefresher.cancelAndWait()
+        let worker = await SubscriptionDeletionActor.makeBackground(container: context.container)
+        if let prepareInboxRemoval {
+            do {
+                let removedIDs = try await worker.inboxRemovalIDs(
+                    podcastID: id, candidateIDs: inboxCandidateIDs
+                )
+                prepareInboxRemoval(removedIDs)
+            } catch {
+                AppLog.subscriptions.error("Could not prepare Inbox unfollow: \(error.localizedDescription, privacy: .public)")
+                return false
+            }
+        }
         NotificationCenter.default.post(
             name: .earshotWillDeleteEpisodes,
             object: nil,
@@ -432,7 +448,6 @@ final class SubscriptionRepository {
         } catch {
             return false
         }
-        let worker = await SubscriptionDeletionActor.makeBackground(container: context.container)
         let removed = await worker.unsubscribe(id)
         if removed {
             // Reconcile cached rows without materializing inverse episode graphs.
@@ -466,6 +481,20 @@ actor SubscriptionDeletionActor: ModelActor {
         await Task.detached(priority: .userInitiated) {
             SubscriptionDeletionActor(container: container)
         }.value
+    }
+
+    /// Resolve ownership off-main without touching UI-held episode relationships.
+    func inboxRemovalIDs(
+        podcastID: PersistentIdentifier,
+        candidateIDs: Set<PersistentIdentifier>
+    ) throws -> Set<PersistentIdentifier> {
+        guard !candidateIDs.isEmpty else { return [] }
+        var descriptor = FetchDescriptor<Episode>(predicate: #Predicate {
+            $0.podcast?.persistentModelID == podcastID && !$0.inboxDismissed && $0.playedAt == nil
+        })
+        descriptor.propertiesToFetch = [\Episode.guid]
+        return Set(try modelContext.fetch(descriptor).map(\.persistentModelID))
+            .intersection(candidateIDs)
     }
 
     func unsubscribe(_ id: PersistentIdentifier) -> Bool {

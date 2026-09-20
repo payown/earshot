@@ -1266,8 +1266,18 @@ final class SubscriptionRepositoryTests: XCTestCase {
             }
         }
         defer { NotificationCenter.default.removeObserver(token) }
-        let removed = await SubscriptionRepository(context: ctx).unsubscribeInBackground(removedPodcast)
+        var preparedIDs: Set<PersistentIdentifier> = []
+        let removed = await SubscriptionRepository(context: ctx).unsubscribeInBackground(
+            removedPodcast, inboxCandidateIDs: Set(before.ids)
+        ) { ids in
+            XCTAssertTrue(Thread.isMainThread)
+            preparedIDs = ids
+            XCTAssertEqual(ids, Set(before.ids).subtracting([keptID]))
+            XCTAssertEqual(try? ModelContext(container).fetchCount(FetchDescriptor<Episode>()), 4,
+                           "UI removes rows while models are still valid, before the cascade")
+        }
         XCTAssertTrue(removed)
+        XCTAssertEqual(preparedIDs.count, 3)
         await fulfillment(of: [reloaded], timeout: 3)
     }
 

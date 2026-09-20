@@ -7,6 +7,35 @@ final class DownloadsInboxLogicTests: XCTestCase {
     private func hoursAgo(_ h: Double) -> Date { now.addingTimeInterval(-h * 3600) }
     private func daysAgo(_ d: Double) -> Date { now.addingTimeInterval(-d * 86400) }
 
+    func testUnfollowFocusSkipsEveryEpisodeOfRemovedPodcast() {
+        XCTAssertEqual(InboxLogic.focusAfterRemoving(
+            from: ["before", "removed1", "removed2", "next"],
+            removing: ["removed1", "removed2"], anchor: "removed1"
+        ), "next")
+        XCTAssertEqual(InboxLogic.focusAfterRemoving(
+            from: ["before", "removed1", "removed2"],
+            removing: ["removed1", "removed2"], anchor: "removed2"
+        ), "before")
+    }
+
+    func testUnfollowFocusFindsTheNextRowWhenTheEntireFirstPageDisappears() {
+        XCTAssertEqual(InboxLogic.focusAfterRemoving(
+            from: Array(1...101), removing: Set(1...100), anchor: 50
+        ), 101)
+    }
+
+    func testUnfollowFocusUsesEmptyStateAndPreservesSurvivingFocus() {
+        XCTAssertNil(InboxLogic.focusAfterRemoving(
+            from: ["removed"], removing: ["removed"], anchor: "removed"
+        ))
+        XCTAssertEqual(InboxLogic.focusAfterRemoving(
+            from: ["removed", "kept", "next"], removing: ["removed"], anchor: "kept"
+        ), "kept")
+        XCTAssertEqual(InboxLogic.focusAfterRemoving(
+            from: ["removed", "next"], removing: ["removed"], anchor: nil
+        ), "next")
+    }
+
     // MARK: InboxLogic — exclusion
 
     func testExcludedWhenOptedOutAndNotIncluded() {
