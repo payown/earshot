@@ -2301,6 +2301,34 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(clocked.modifiedAt, Date(timeIntervalSince1970: 400))
     }
 
+    func testRemoteQueueRefreshPreservesRetainedPlayedEpisode() async throws {
+        let app = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "retained", title: "Retained", audioURL: "https://example.com/audio")
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(episode)
+        episode.podcast = podcast
+        app.mainContext.insert(QueueItem(episode: episode, position: 0))
+        episode.isPlayed = true
+        let playedAt = try XCTUnwrap(episode.playedAt)
+        try PendingCloudQueueMutation.markBootstrapCompleted(in: app.mainContext)
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        projection.mainContext.insert(queueRow(device: "remote", guid: "retained", queued: true,
+                                               position: 0, membershipUpdatedAt: 100, modifiedAt: 100))
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "receiver"
+        )
+        try await coordinator.reconcile()
+        let fresh = ModelContext(app)
+        let retained = try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertTrue(retained.isPlayed)
+        XCTAssertEqual(retained.playedAt, playedAt)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<QueueItem>()), 1)
+    }
+
     func testRemoteQueueMaterializesEpisodeMissingFromLocalCatalog() async throws {
         let app = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")

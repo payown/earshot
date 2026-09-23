@@ -60,6 +60,25 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(newest.waitForExistence(timeout: 5), "Returning must restore this podcast's oldest-first choice")
     }
 
+    func testKeepFinishedQueuePreference() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Settings"].tap()
+        let playback = app.buttons["Playback"]
+        XCTAssertTrue(playback.waitForExistence(timeout: 5))
+        playback.tap()
+        let toggle = app.switches["Keep finished episodes in Queue"].firstMatch
+        for _ in 0..<6 where !toggle.isHittable { app.swipeUp() }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(toggle.value as? String, "1")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(toggle.value as? String, "0")
+    }
+
     func testHomeScreenBadgeOptInAndOptOut() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]

@@ -390,10 +390,12 @@ final class PlayerService {
         }
     }
 
-    func finishFolderEpisode(_ episode: Episode) -> Bool {
+    func finishFolderEpisode(_ episode: Episode, naturalCompletion: Bool = false) -> Bool {
         guard let context else { return false }
         pause(providesPauseHaptic: false, folderRunInternal: true)
-        guard QueueRepository(context: context).markPlayedAndRemove(episode) else { return false }
+        let repo = QueueRepository(context: context)
+        let saved = naturalCompletion ? repo.finishPlayback(episode) : repo.markPlayedAndRemove(episode)
+        guard saved else { return false }
         episode.positionSeconds = 0
         return saveContext()
     }
@@ -402,7 +404,8 @@ final class PlayerService {
 
     func resumeOrdinaryQueueAfterFolderRun() {
         guard let context else { return }
-        let queued = QueueRepository(context: context).queue().filter { !$0.isPlayed }
+        let keepFinished = settings?.bool(SettingsKey.keepFinishedEpisodesInQueue, default: false) ?? false
+        let queued = QueueRepository(context: context).queue().filter { !$0.isPlayed && (!keepFinished || $0.playedAt == nil) }
         guard settings?.bool(SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode) != false,
               let id = displayedQueuePairs(queued).first?.id,
               let next = queued.first(where: { $0.persistentModelID == id }) else {
@@ -1880,15 +1883,16 @@ final class PlayerService {
         let wrap = allowsWrapping && (settings?.bool(
             SettingsKey.wrapQueue, default: SettingsDefault.wrapQueue
         ) ?? SettingsDefault.wrapQueue)
+        let keepFinished = settings?.bool(SettingsKey.keepFinishedEpisodesInQueue, default: false) ?? false
         let eligibleIDs = Set(queued.filter {
-            !$0.isPlayed || $0.persistentModelID == finished.persistentModelID
+            (!$0.isPlayed && (!keepFinished || $0.playedAt == nil)) || $0.persistentModelID == finished.persistentModelID
         }.map(\.persistentModelID))
         let continueEpisode = settings?.bool(
             SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
         ) ?? SettingsDefault.continueAfterEpisode
         guard continueEpisode else { return nil }
 
-        let rawIDs = queued.map(\.persistentModelID)
+        let rawIDs = queued.filter { eligibleIDs.contains($0.persistentModelID) }.map(\.persistentModelID)
         let rawCandidate = PlaybackLogic.nextUpID(queue: rawIDs, after: finished.persistentModelID)
         if let rawCandidate, playNextOverrides.contains(rawCandidate) {
             return rawCandidate
@@ -1900,7 +1904,7 @@ final class PlayerService {
         let allPairs = displayedQueuePairs(queued.contains(where: { $0.persistentModelID == finished.persistentModelID })
             ? queued : queued + [finished])
         let queuedIDs = Set(queued.map(\.persistentModelID))
-        let orderedPairs = allPairs.filter { queuedIDs.contains($0.id) && (!wrap || eligibleIDs.contains($0.id)) }
+        let orderedPairs = allPairs.filter { queuedIDs.contains($0.id) && eligibleIDs.contains($0.id) }
         let currentGroup = allPairs.first { $0.id == finished.persistentModelID }?.groupKey ?? .unfiled
 
         let candidate = PlaybackLogic.nextUpID(
@@ -3052,7 +3056,7 @@ final class PlayerService {
 
         guard !automaticPlaybackStoppedByTimer else { return }
         let stopsFolderRun = sleepTimer.endOfEpisode || stopAfterCurrentEpisode
-        if folderRuns.completeCurrent(finished, continuePlayback: !stopsFolderRun) {
+        if folderRuns.completeCurrent(finished, continuePlayback: !stopsFolderRun, naturalCompletion: true) {
             if sleepTimer.endOfEpisode {
                 sleepTimer.episodeEnded()
                 Announcer.announce("Sleep timer ended. Playback stopped.")
@@ -3071,7 +3075,7 @@ final class PlayerService {
         // auto-advancing to the next queue item.
         if sleepTimer.endOfEpisode {
             sleepTimer.episodeEnded()
-            repo.markPlayedAndRemove(finished)
+            repo.finishPlayback(finished)
             finished.positionSeconds = 0
             saveContext()
             isPlaying = false
@@ -3082,12 +3086,12 @@ final class PlayerService {
         }
 
         // Stop-after-this-episode (#371): the natural end of the current episode
-        // marks it played and removes it from the queue, then STOPS instead of
+        // marks it played, honors Queue retention, then STOPS instead of
         // auto-advancing. The one-off flag clears so the next episode (started
         // manually) advances normally again.
         if EpisodeExportLogic.shouldStopAfterCurrent(stopAfterCurrentEpisode: stopAfterCurrentEpisode) {
             stopAfterCurrentEpisode = false
-            repo.markPlayedAndRemove(finished)
+            repo.finishPlayback(finished)
             finished.positionSeconds = 0
             saveContext()
             isPlaying = false
@@ -3101,9 +3105,9 @@ final class PlayerService {
         let nextID = nextAdvanceID(after: finished, in: queued, allowsWrapping: true)
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
 
-        // The finished episode: mark played and remove it from the queue. Reset
+        // Mark played and honor Queue retention. Reset
         // its position since it played to the end.
-        guard repo.markPlayedAndRemove(finished) else {
+        guard repo.finishPlayback(finished) else {
             pause(providesPauseHaptic: false)
             Announcer.announce("Could not save episode completion. Playback stopped.")
             return

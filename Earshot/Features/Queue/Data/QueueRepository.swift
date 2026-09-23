@@ -603,7 +603,7 @@ final class QueueRepository {
     @discardableResult
     func cancelFromQueue(_ episode: Episode) -> Bool {
         remove(episode) {
-            $0.status = .newEpisode
+            if !$0.isPlayed { $0.status = .newEpisode }
             $0.inboxDismissed = true
             // Reuse the existing opt-in download cleanup rule. A deliberate
             // queue removal means the listener is done with this episode just
@@ -618,6 +618,18 @@ final class QueueRepository {
     /// elsewhere, so a spurious completion can't destroy a saved place.
     @discardableResult
     func markPlayedAndRemove(_ episode: Episode) -> Bool {
+        markPlayed(episode, keepingQueueMembership: false)
+    }
+
+    /// Natural completion honors retention without changing Queue membership or order.
+    @discardableResult
+    func finishPlayback(_ episode: Episode) -> Bool {
+        markPlayed(episode, keepingQueueMembership: AppSettingsStore(context: context).bool(
+            SettingsKey.keepFinishedEpisodesInQueue, default: false
+        ))
+    }
+
+    private func markPlayed(_ episode: Episode, keepingQueueMembership: Bool) -> Bool {
         // Also dismiss from the inbox: an episode played to completion should
         // leave the inbox durably, matching the mark-played Quick Action and
         // swipe (#546). `inboxDismissed` stays set even if later marked unplayed.
@@ -633,7 +645,10 @@ final class QueueRepository {
             DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)
         }
         let saved: Bool
-        if queuedEpisode != nil {
+        if queuedEpisode != nil, keepingQueueMembership {
+            mutate(episodeToMark)
+            saved = save()
+        } else if queuedEpisode != nil {
             saved = remove(episodeToMark, mutate)
         } else {
             // Restored playback and jump-to-bookmark intentionally do not queue
@@ -647,10 +662,11 @@ final class QueueRepository {
         return true
     }
 
-    /// Empties the queue, reverting every episode to `newEpisode` while keeping
+    /// Empties the queue, preserving completed episodes and reverting unfinished
+    /// entries to `newEpisode` while keeping
     /// it dismissed from the inbox, matching ``cancelFromQueue(_:)``.
     ///
-    /// Reverts through `isPlayed = false` rather than a raw `status = .newEpisode`
+    /// Unfinished entries revert through `isPlayed = false` rather than a raw `status = .newEpisode`
     /// so `playedAt` is cleared alongside `status`, preserving the invariant that
     /// a `.newEpisode` episode is unplayed. This matters now that the inbox badge
     /// and list fetch unplayed episodes only (`InboxQuery.normalUnplayed`): a
@@ -670,7 +686,7 @@ final class QueueRepository {
                     isQueued: false,
                     in: context
                 ) || stagedFollowedRemoval
-                episode.isPlayed = false
+                if !episode.isPlayed { episode.isPlayed = false }
                 episode.inboxDismissed = true
                 if shouldDeleteDownloads {
                     DownloadCleanup.removeDownloadFileAndState(episode, in: context)

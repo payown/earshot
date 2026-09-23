@@ -10,6 +10,7 @@ import SwiftData
 @Observable
 final class SettingsStore {
     // Playback
+    var keepFinishedEpisodesInQueue = false { didSet { persist { $0.setBool(keepFinishedEpisodesInQueue, for: SettingsKey.keepFinishedEpisodesInQueue) } } }
     var globalSpeed: Double = SettingsDefault.globalSpeed { didSet { persist { $0.setDouble(globalSpeed, for: SettingsKey.globalSpeed) } } }
     var volumeBoost: VolumeBoostLevel = SettingsDefault.volumeBoost { didSet { persist { $0.setVolumeBoost(volumeBoost) } } }
     var skipSilenceEnabled: Bool = SettingsDefault.skipSilenceEnabled { didSet { persist { $0.setBool(skipSilenceEnabled, for: SettingsKey.skipSilenceEnabled) } } }
@@ -101,6 +102,7 @@ final class SettingsStore {
         assignIfChanged(\.skipSilenceEnabled, store.bool(SettingsKey.skipSilenceEnabled, default: SettingsDefault.skipSilenceEnabled))
         assignIfChanged(\.skipForwardSeconds, store.int(SettingsKey.skipForwardSeconds, default: SettingsDefault.skipForwardSeconds))
         assignIfChanged(\.skipBackSeconds, store.int(SettingsKey.skipBackSeconds, default: SettingsDefault.skipBackSeconds))
+        assignIfChanged(\.keepFinishedEpisodesInQueue, store.bool(SettingsKey.keepFinishedEpisodesInQueue, default: false))
         assignIfChanged(\.wrapQueue, store.bool(SettingsKey.wrapQueue, default: SettingsDefault.wrapQueue))
         assignIfChanged(\.continueAfterEpisode, store.bool(SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode))
         assignIfChanged(\.continueAfterGroupEnds, store.bool(SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds))

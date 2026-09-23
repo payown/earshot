@@ -110,6 +110,12 @@ struct PlaybackSettingsView: View {
                 Text("Closes the full player after an episode finishes and playback stops. The player stays open when the next queued episode starts.")
             }
 
+            Section {
+                Toggle("Keep finished episodes in Queue", isOn: $settings.keepFinishedEpisodesInQueue)
+            } footer: {
+                Text("Finished episodes stay in Queue until you remove them. Automatic playback skips them; choose Play to listen again. Download deletion follows your Downloads settings.")
+            }
+
             Section("Queue") {
                 Picker("Group queue", selection: $settings.queueGrouping) {
                     ForEach(QueueGrouping.allCases) { mode in
