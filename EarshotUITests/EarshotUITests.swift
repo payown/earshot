@@ -20,12 +20,14 @@ final class EarshotUITests: XCTestCase {
         for _ in 0..<6 where !toggle.isHittable { app.swipeUp() }
         XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(toggle.value as? String, "0")
-        toggle.tap()
+        // The native switch AX frame includes the two-line label; tap its trailing control.
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]
         if allow.waitForExistence(timeout: 5) { allow.tap() }
         expectation(for: NSPredicate(format: "value == %@", "1"), evaluatedWith: toggle)
         waitForExpectations(timeout: 10)
-        toggle.tap()
+        // The native switch AX frame includes the two-line label; tap its trailing control.
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         XCTAssertEqual(toggle.value as? String, "0")
     }
 
