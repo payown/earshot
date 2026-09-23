@@ -41,8 +41,8 @@ badge option from suppressing a later explicit notification opt-in.
 The second agent reviewed the production changes read-only. Findings corrected:
 heard episodes requeued without clearing playedAt, overlapping writers across
 root-view replacement, and badge-only authorization interaction with alert
-opt-in. Re-review found no remaining implementation blocker. Automated and phone
-results are recorded below as they finish.
+opt-in. Re-review found no remaining implementation blocker. The final review approved
+revision `f976221` for phone testing, with physical acceptance still pending.
 
 ## Automated evidence
 
@@ -60,7 +60,11 @@ results are recorded below as they finish.
   The test targets the trailing native switch because its accessibility frame
   includes the two-line label. No production permission changes were required.
 - Signed Release 1.2.3 (267), production revision `93bb935`, built successfully
-  and passed strict code-signature verification. No installation yet.
+  and passed strict code-signature verification. Installed on Michael’s iPhone over Wi-Fi after independent approval.
+- Final full eligible iOS 26.5 suite: 2,366 passed, 33 skipped, zero failures
+  (2,399 total; both documented StoreKit suites excluded). All recovery tests
+  passed. Post-test diagnostics collection was stopped after assertions finished
+  so the result bundle could finalize; no test execution was interrupted.
 
 ## Phone acceptance
 
