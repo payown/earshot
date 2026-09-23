@@ -6,6 +6,29 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testHomeScreenBadgeOptInAndOptOut() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Settings"].tap()
+        let appearance = app.buttons["Appearance"]
+        for _ in 0..<4 where !appearance.isHittable { app.swipeUp() }
+        XCTAssertTrue(appearance.waitForExistence(timeout: 5), app.debugDescription)
+        appearance.tap()
+        let toggle = app.switches["Badge downloaded unheard episodes"].firstMatch
+        for _ in 0..<6 where !toggle.isHittable { app.swipeUp() }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.tap()
+        let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]
+        if allow.waitForExistence(timeout: 5) { allow.tap() }
+        expectation(for: NSPredicate(format: "value == %@", "1"), evaluatedWith: toggle)
+        waitForExpectations(timeout: 10)
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "0")
+    }
+
     func testLibraryCaughtUpFilterAndDeferredTabReentry() {
         let app = XCUIApplication()
         // The existing folder-run fixture supplies a followed podcast with no

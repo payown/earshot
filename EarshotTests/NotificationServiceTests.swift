@@ -184,13 +184,15 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(options, [.alert, .sound, .badge])
     }
 
-    func testRequestAuthorizationDoesNotRePromptWhenAuthorized() async {
+    func testExplicitNotificationOptInRequestsFullOptionsAfterExistingGrant() async {
         let mock = MockNotificationCenter(status: .authorized, grantResult: true)
         let service = NotificationService(center: mock)
         let granted = await service.requestAuthorization()
         XCTAssertTrue(granted)
         let calls = await mock.requestCallCount
-        XCTAssertEqual(calls, 0, "Must not re-prompt once authorized (idempotent)")
+        XCTAssertEqual(calls, 1, "An earlier grant may have been badge-only")
+        let options = await mock.requestedOptions
+        XCTAssertEqual(options, [.alert, .sound, .badge])
     }
 
     func testRequestAuthorizationDoesNotRePromptWhenDenied() async {

@@ -133,6 +133,7 @@
 		4BB5C48AD7D506C4188B1777 /* PaywallViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F79EA143E09B3C02D977611 /* PaywallViewModel.swift */; };
 		4BE989AAFB6C719DC5DED150 /* ArtworkCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8FAAB1BF4458FE225DA93D /* ArtworkCacheTests.swift */; };
 		4C4CC15C311CCEF1E1AB090F /* CompactProjectionSeedMarkerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFDC9C77DF12A4BDA79656A3 /* CompactProjectionSeedMarkerStore.swift */; };
+		4C8AED1BE1A21709E5938EFB /* AppIconBadgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E653810656B8CAA77E93DD9 /* AppIconBadgeTests.swift */; };
 		4CA62DBEF67FD97D823908F0 /* NotificationCenterProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DE6692C5C3E4749C0B62772 /* NotificationCenterProtocol.swift */; };
 		4D1C99BF225401A7007C3CA7 /* AccessibilitySpeechSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D9845FCC2B2DB0844F43FC /* AccessibilitySpeechSettings.swift */; };
 		4DD010237BDF23BEBEEDCC82 /* StoreKitTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 322477FFF25BBCE7462C75D9 /* StoreKitTest.framework */; };
@@ -224,6 +225,7 @@
 		87D55A542BD1471B1F6DCA83 /* EpisodeRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A621AE99537538C3A0AD021C /* EpisodeRow.swift */; };
 		8B2F398305960209F435953A /* CompactProjectionSeedMarkerStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DEB5F4E0E6D919319CBD53 /* CompactProjectionSeedMarkerStoreTests.swift */; };
 		8BA40CFE3FE38A05614D45E8 /* CloudAccountContinuity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B257DFCDE3FF161B095C2E0 /* CloudAccountContinuity.swift */; };
+		8BF3F38459EFA45F1BF3C648 /* AppIconBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF91D5550CA3A786B0F6EAA /* AppIconBadge.swift */; };
 		8BF559C87CEDFDB9969EF3EB /* StoreMigrationV6toV8Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010397285AF42CF34A4098B5 /* StoreMigrationV6toV8Tests.swift */; };
 		8CD550A4FE85E9B86BC5E4CC /* PaywallLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6341126CAC45FBD1D5536F65 /* PaywallLogicTests.swift */; };
 		8D1495183FF1B6F4CE5FB696 /* MultiSelectStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE3131BB99C691E49C5FD0BF /* MultiSelectStateTests.swift */; };
@@ -290,6 +292,7 @@
 		AB89D4F368E38728AA8BE166 /* Announcer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9754C877DA03DC598F4567 /* Announcer.swift */; };
 		AB9AC44459DF48575EFB92B8 /* TranscriptViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F6CF6323EFF4CD2679160C /* TranscriptViewModel.swift */; };
 		AC5C19837EA4E278A22939AE /* LibrarySearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21A9582DC3AA664AD7CAAC07 /* LibrarySearchTests.swift */; };
+		AC83466EE0E1ACDA2FF6DCFA /* AppIconBadgeObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C923979CE88371A0CB1E0C61 /* AppIconBadgeObserver.swift */; };
 		ACABC15BDF7B8C9532023B3C /* OPMLImportProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F23041C02EEE7AEC54DEC93 /* OPMLImportProgress.swift */; };
 		ACB2A7DD45A83E901A842CD3 /* SleepTimerInteractionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A108EF50ED8F931B4B0A47E5 /* SleepTimerInteractionMonitor.swift */; };
 		AD1B676C8BBE17121B200AD5 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B799ECCF5D837F110D26F59 /* PaywallView.swift */; };
@@ -319,6 +322,7 @@
 		BA2FEB2E6D8058574743F17E /* TabBarBadgeApplier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3BE83021D9D2D3FBC6E08B /* TabBarBadgeApplier.swift */; };
 		BACED0BD92ADFC48635B4E08 /* PrivacySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30FAC1A82C939CF4C1F79EB9 /* PrivacySettingsView.swift */; };
 		BAF6741A633EEB000ED00EE8 /* NewEpisodeNotificationDecision.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4C9FFA1E2D81C45CDDADF0 /* NewEpisodeNotificationDecision.swift */; };
+		BB0C141B530C8074778F7689 /* AppIconBadgeSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = D09AC07F6F1134686B1451E2 /* AppIconBadgeSetting.swift */; };
 		BC27164506A9AE6CE6705A31 /* LibraryPodcastFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEA1A20F44BB53D2F82E575 /* LibraryPodcastFilterTests.swift */; };
 		BC4EA48D9BD20E2811437803 /* FeedRefreshActorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF7EB271B05EE735D3F8EEAA /* FeedRefreshActorTests.swift */; };
 		BC50B553865511B930168259 /* ApplePodcastCategoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C349376831709A9B4DB757 /* ApplePodcastCategoryTests.swift */; };
@@ -637,6 +641,7 @@
 		5DA06952463063521A170CEC /* EarshotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotApp.swift; sourceTree = "<group>"; };
 		5DB926C71748F35EC791EFD9 /* ApplePodcastCategoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplePodcastCategoryService.swift; sourceTree = "<group>"; };
 		5DCB8C22497B68AC497A8046 /* OnboardingOPMLImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingOPMLImportTests.swift; sourceTree = "<group>"; };
+		5E653810656B8CAA77E93DD9 /* AppIconBadgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconBadgeTests.swift; sourceTree = "<group>"; };
 		5EC5F7F7D6333626FE8650F1 /* StatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsTests.swift; sourceTree = "<group>"; };
 		5FA6D87DE65511C67184C9D6 /* CloudKitEventMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitEventMonitorTests.swift; sourceTree = "<group>"; };
 		604A1CE8A8148C3DBAB95ECB /* ChapterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterService.swift; sourceTree = "<group>"; };
@@ -722,6 +727,7 @@
 		8DC0518F8DC0C828FDCE3301 /* PlayerAudioSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerAudioSessionTests.swift; sourceTree = "<group>"; };
 		8E048C063055A8B065E6DCD4 /* PodcastCapPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastCapPolicyTests.swift; sourceTree = "<group>"; };
 		8EC414F03B2203A2D9FC8456 /* PlaybackLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackLogic.swift; sourceTree = "<group>"; };
+		8EF91D5550CA3A786B0F6EAA /* AppIconBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconBadge.swift; sourceTree = "<group>"; };
 		8F6B5988DC34B2D9EE199ADF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8F936109334BADDAC2226E00 /* LibraryIntentBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryIntentBridge.swift; sourceTree = "<group>"; };
 		9000CEBBC7FE20D75FC66E0B /* LibrarySearchPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySearchPresentation.swift; sourceTree = "<group>"; };
@@ -827,6 +833,7 @@
 		C7B3441D6FAADB5EF76D830C /* StallRecoveryLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StallRecoveryLogic.swift; sourceTree = "<group>"; };
 		C8561A6AE50C3C685C15CCAF /* StorePreparationScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorePreparationScreen.swift; sourceTree = "<group>"; };
 		C874241F9AB6024EBB87ECE9 /* EpisodeAudioExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeAudioExport.swift; sourceTree = "<group>"; };
+		C923979CE88371A0CB1E0C61 /* AppIconBadgeObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconBadgeObserver.swift; sourceTree = "<group>"; };
 		C96E2134A6C0EAFD89BEAA02 /* EpisodeRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeRepositoryTests.swift; sourceTree = "<group>"; };
 		C9F0790D68AE461D591E68D1 /* PodcastPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastPreviewView.swift; sourceTree = "<group>"; };
 		CC5516772971764A4DD64AB3 /* MarkAllPlayedAnnouncementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkAllPlayedAnnouncementTests.swift; sourceTree = "<group>"; };
@@ -840,6 +847,7 @@
 		CFD6029A247CD01E7E6D06F1 /* QuickActionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionStore.swift; sourceTree = "<group>"; };
 		CFF0732FD4602125E364F899 /* ProductCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductCatalogService.swift; sourceTree = "<group>"; };
 		D047C968CE1D5423AA6844E6 /* MailComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailComposeView.swift; sourceTree = "<group>"; };
+		D09AC07F6F1134686B1451E2 /* AppIconBadgeSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconBadgeSetting.swift; sourceTree = "<group>"; };
 		D1499A9003D5B822FFE1076C /* StatsLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsLogic.swift; sourceTree = "<group>"; };
 		D160839A12DBFE58F2A68B55 /* InboxScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxScreen.swift; sourceTree = "<group>"; };
 		D18D4ED079A378065B95B8B7 /* PodcastAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastAction.swift; sourceTree = "<group>"; };
@@ -1199,6 +1207,7 @@
 				72268AFC8538ECA1FE0479CB /* AirPlayTests.swift */,
 				9CB65F8E914205AB2A589B65 /* AnnouncerTests.swift */,
 				6957506EF32CD52A4F68D4E4 /* AppearanceSettingsTests.swift */,
+				5E653810656B8CAA77E93DD9 /* AppIconBadgeTests.swift */,
 				79E7921BD843199173A93C88 /* AppInfoTests.swift */,
 				00C349376831709A9B4DB757 /* ApplePodcastCategoryTests.swift */,
 				61ABB7D50C4666559A4F3CB0 /* AppRuntimeTests.swift */,
@@ -1497,6 +1506,7 @@
 				D9C724475B4780AD0B164DC0 /* AccessibilitySettingsView.swift */,
 				C081D900411E4DAA2AEDD779 /* AppearanceApplier.swift */,
 				1F55BF5AA01D0A88E6D4E0A8 /* AppearanceSettingsView.swift */,
+				D09AC07F6F1134686B1451E2 /* AppIconBadgeSetting.swift */,
 				610DE11AB2FE2EA159285A77 /* CloudSyncSettingsView.swift */,
 				429620C41BBD28993BA9C863 /* DataSettingsView.swift */,
 				88C59BDCD41E5E02F5CF44E3 /* DownloadsSettingsView.swift */,
@@ -1825,6 +1835,8 @@
 		CF45C6D232D8D48F9FEA7324 /* Notifications */ = {
 			isa = PBXGroup;
 			children = (
+				8EF91D5550CA3A786B0F6EAA /* AppIconBadge.swift */,
+				C923979CE88371A0CB1E0C61 /* AppIconBadgeObserver.swift */,
 				9C881C6AA6E3FFC84B921982 /* NewEpisodeNotification.swift */,
 				FE4C9FFA1E2D81C45CDDADF0 /* NewEpisodeNotificationDecision.swift */,
 				2DE6692C5C3E4749C0B62772 /* NotificationCenterProtocol.swift */,
@@ -2193,6 +2205,9 @@
 				738163D57F7D263ADD12ED83 /* AdjustableOptionPicker.swift in Sources */,
 				AB89D4F368E38728AA8BE166 /* Announcer.swift in Sources */,
 				3C6476CFA60A09AE37DB5A26 /* AppColor.swift in Sources */,
+				8BF3F38459EFA45F1BF3C648 /* AppIconBadge.swift in Sources */,
+				AC83466EE0E1ACDA2FF6DCFA /* AppIconBadgeObserver.swift in Sources */,
+				BB0C141B530C8074778F7689 /* AppIconBadgeSetting.swift in Sources */,
 				8544FC4DF6DE4B15FBA82025 /* AppInfo.swift in Sources */,
 				0F598FF01FFD7FF9B1B5BB69 /* AppSetting.swift in Sources */,
 				2E1D2D6E6830D24F356C575D /* AppSettingsStore.swift in Sources */,
@@ -2475,6 +2490,7 @@
 				2E1B6F598B565EF5C5D754DF /* AdvancedPlaybackTests.swift in Sources */,
 				FDB4DDC00C2A23ABC7B17A0A /* AirPlayTests.swift in Sources */,
 				A9C579F515F9C7A584EB57D4 /* AnnouncerTests.swift in Sources */,
+				4C8AED1BE1A21709E5938EFB /* AppIconBadgeTests.swift in Sources */,
 				A30738B63FB4B7FFF5BF3B04 /* AppInfoTests.swift in Sources */,
 				1D9D6B4290E5B95216FC4975 /* AppRuntimeTests.swift in Sources */,
 				EDD3D7C3BDC9A5D163CD92DA /* AppSettingsStoreTests.swift in Sources */,

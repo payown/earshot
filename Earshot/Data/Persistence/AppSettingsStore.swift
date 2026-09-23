@@ -103,6 +103,7 @@ enum SettingsKey {
     // Library list order (alphabetical / last published). SwiftUI-only preference,
     // stored as the ``LibrarySortOrder`` raw value.
     static let librarySortOrder = "library_sort_order"
+    static let badgeDownloadedUnheardEpisodes = "badge_downloaded_unheard_episodes"
     static let hideCaughtUpPodcasts = "hide_caught_up_podcasts"
     // Order for a podcast's episode list (alphabetical / latest first / latest
     // last). Global SwiftUI-only preference, stored as the ``EpisodeSortOrder``

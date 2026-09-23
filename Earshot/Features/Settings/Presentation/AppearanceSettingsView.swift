@@ -63,6 +63,8 @@ struct AppearanceSettingsView: View {
 
             // Display options that used to live in the catch-all "General"
             // section — moved here since both shape how content is presented.
+            AppIconBadgeSetting()
+
             Section("Display") {
                 Picker("Launch screen", selection: $settings.launchScreen) {
                     ForEach(LaunchScreen.allCases, id: \.self) { Text($0.displayName).tag($0) }

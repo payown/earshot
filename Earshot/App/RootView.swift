@@ -393,6 +393,7 @@ struct RootView: View {
         // Native UITabBarItem badge for the Queue episode count (#491): same
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
         .background(QueueTabBadge(selectedTab: selectedTab))
+        .background(AppIconBadgeObserver())
         // Route a notification tap / action into the Library tab + podcast detail
         // (#72). Reacting on the published intent keeps the delegate decoupled
         // from the view tree.

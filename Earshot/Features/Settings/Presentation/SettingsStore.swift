@@ -21,6 +21,7 @@ final class SettingsStore {
     var chapterNavButtonsVisible: Bool = SettingsDefault.chapterNavButtonsVisible { didSet { persist { $0.setBool(chapterNavButtonsVisible, for: SettingsKey.chapterNavButtonsVisible) } } }
 
     // General
+    var badgeDownloadedUnheardEpisodes = false { didSet { persist { $0.setBool(badgeDownloadedUnheardEpisodes, for: SettingsKey.badgeDownloadedUnheardEpisodes) } } }
     var launchScreen: LaunchScreen = SettingsDefault.launchScreen { didSet { persist { $0.setLaunchScreen(launchScreen) } } }
     var librarySortOrder: LibrarySortOrder = SettingsDefault.librarySortOrder { didSet { persist { $0.setLibrarySortOrder(librarySortOrder) } } }
     var hideCaughtUpPodcasts = SettingsDefault.hideCaughtUpPodcasts { didSet { persist { $0.setBool(hideCaughtUpPodcasts, for: SettingsKey.hideCaughtUpPodcasts) } } }
@@ -106,6 +107,7 @@ final class SettingsStore {
         assignIfChanged(\.chapterNavButtonsVisible, store.bool(SettingsKey.chapterNavButtonsVisible, default: SettingsDefault.chapterNavButtonsVisible))
         assignIfChanged(\.launchScreen, store.launchScreen())
         assignIfChanged(\.librarySortOrder, store.librarySortOrder())
+        assignIfChanged(\.badgeDownloadedUnheardEpisodes, store.bool(SettingsKey.badgeDownloadedUnheardEpisodes, default: false))
         assignIfChanged(\.hideCaughtUpPodcasts, store.bool(
             SettingsKey.hideCaughtUpPodcasts, default: SettingsDefault.hideCaughtUpPodcasts
         ))

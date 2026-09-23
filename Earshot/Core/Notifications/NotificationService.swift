@@ -93,18 +93,15 @@ struct NotificationService: Sendable {
     }
 
     /// Requests `.alert, .sound, .badge` authorization, but only if the user has
-    /// not yet decided. Returns whether notifications are authorized after the
-    /// call. Idempotent: a `.denied`/`.authorized`/`.provisional` status is left
-    /// untouched and never re-prompts (#72).
+    /// explicitly opted in. Also supplies the full options for an existing badge-only
+    /// grant. The system does not re-prompt after a decision; denied stays denied.
     @discardableResult
     func requestAuthorization() async -> Bool {
         let status = await center.authorizationStatus()
         switch status {
-        case .authorized, .provisional, .ephemeral:
-            return true
         case .denied:
             return false
-        case .notDetermined:
+        case .notDetermined, .authorized, .provisional, .ephemeral:
             do {
                 let granted = try await center.requestAuthorization(
                     options: [.alert, .sound, .badge]
