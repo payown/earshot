@@ -71,13 +71,15 @@ struct ChapterListView: View {
     }
 
     private var chapterList: some View {
-        List {
+        // Resolve the clock once for the list, not once per chapter row.
+        let activeIndex = activeChapterIndex
+        return List {
             Section {
                 ForEach(Array(chapters.enumerated()), id: \.element.id) { offset, chapter in
                     ChapterListRow(
                         chapter: chapter,
                         number: offset + 1,
-                        isCurrent: activeChapterIndex == chapter.index,
+                        isCurrent: activeIndex == chapter.index,
                         isSkipped: skipState[chapter.index] ?? player.isChapterSkipped(chapter),
                         onJump: { jump(to: chapter) },
                         onToggleSkip: { toggleSkip(chapter) }

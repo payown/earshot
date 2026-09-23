@@ -84,6 +84,15 @@ struct SubscriptionsView: View {
         }
     }
 
+    private var visiblePodcasts: [Podcast] {
+        sortedPodcasts.filter {
+            LibraryPodcastFilter.includes(
+                unplayedCount: unplayedCounts[$0.persistentModelID],
+                hideCaughtUp: settings.hideCaughtUpPodcasts
+            )
+        }
+    }
+
     private var refreshInProgress: Bool {
         isRefreshing || sharedRefreshInProgress
     }
@@ -92,6 +101,8 @@ struct SubscriptionsView: View {
         // Compute cap ranking once for this render. Doing this inside `row(for:)`
         // sorted the full library once per row (quadratic work).
         let readOnlyIDs = readOnlyPodcastIDs
+        let visible = visiblePodcasts
+        let visibleIDs = visible.map(\.persistentModelID)
         Group {
             if hasLoadedPodcasts && podcasts.isEmpty {
                 ContentUnavailableView {
@@ -103,9 +114,15 @@ struct SubscriptionsView: View {
                         AddPodcastView()
                     }
                 }
+            } else if hasLoadedPodcasts && settings.hideCaughtUpPodcasts && visible.isEmpty {
+                ContentUnavailableView(
+                    "All caught up",
+                    systemImage: "checkmark.circle",
+                    description: Text("To show all podcasts, turn off Hide caught-up podcasts in Library options.")
+                )
             } else {
                 List {
-                    ForEach(sortedPodcasts) { podcast in
+                    ForEach(visible) { podcast in
                         rowContainer(for: podcast, readOnlyIDs: readOnlyIDs)
                             // Same focus id on whichever row variant renders, so
                             // focus rides the row when select mode toggles and can
@@ -220,9 +237,14 @@ struct SubscriptionsView: View {
                                     Text(order.title).tag(order)
                                 }
                             }
+                            Toggle("Hide caught-up podcasts", isOn: Binding(
+                                get: { settings.hideCaughtUpPodcasts },
+                                set: { settings.hideCaughtUpPodcasts = $0 }
+                            ))
                             Button { enterSelection() } label: {
                                 Label("Select podcasts", systemImage: "checkmark.circle")
                             }
+                            .disabled(visible.isEmpty)
                         } label: {
                             Label("Library options", systemImage: "ellipsis.circle")
                         }
@@ -340,6 +362,17 @@ struct SubscriptionsView: View {
         // Confirm the reorder for VoiceOver: the menu dismisses and the list
         // silently re-sorts, so without this the change gives no feedback. Mirrors
         // StatsScreen's period Picker. Announcer no-ops when VoiceOver is off.
+        .onChange(of: visibleIDs) { previousIDs, currentIDs in
+            guard settings.hideCaughtUpPodcasts else { return }
+            let remaining = Set(currentIDs)
+            for id in selection.selectedIDs.subtracting(remaining) { selection.toggle(id) }
+            if currentIDs.isEmpty && selection.isSelecting { selection.exit() }
+            guard let focusedRowID, !remaining.contains(focusedRowID) else { return }
+            self.focusedRowID = LibraryPodcastFilter.replacementFocus(
+                removed: focusedRowID, previous: previousIDs, remaining: currentIDs
+            )
+            if currentIDs.isEmpty { focusLaunchHeading = true }
+        }
         .onChange(of: settings.librarySortOrder) { _, newValue in
             Announcer.announce("Sorted by \(newValue.title)")
         }
@@ -577,7 +610,7 @@ struct SubscriptionsView: View {
             selection.enter()
         }
         Announcer.announce("Selection mode on")
-        let firstID = sortedPodcasts.first?.persistentModelID
+        let firstID = visiblePodcasts.first?.persistentModelID
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             focusedRowID = firstID
         }
@@ -596,7 +629,7 @@ struct SubscriptionsView: View {
         if announce {
             Announcer.announce("Selection mode off")
         }
-        let firstID = sortedPodcasts.first?.persistentModelID
+        let firstID = visiblePodcasts.first?.persistentModelID
         DispatchQueue.main.asyncAfter(deadline: .now() + focusDelay) {
             focusedRowID = firstID
         }
@@ -620,7 +653,7 @@ struct SubscriptionsView: View {
 
     /// The selected podcasts, in the current display order.
     private func selectedPodcasts() -> [Podcast] {
-        sortedPodcasts.filter { selection.isSelected($0.persistentModelID) }
+        visiblePodcasts.filter { selection.isSelected($0.persistentModelID) }
     }
 
     /// The podcast Quick Actions for the row's VoiceOver rotor, in the user's

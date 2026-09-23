@@ -332,7 +332,9 @@ struct RootView: View {
             .tag(RootTab.inbox)
 
             NavigationStack {
-                QueueScreen()
+                DeferredTabContent(isSelected: (selectedTab ?? resolvedLaunchTab) == .queue) {
+                    QueueScreen()
+                }
             }
             .modifier(TabChrome())
             .tabItem { Label("Queue", systemImage: "list.bullet") }
@@ -349,7 +351,9 @@ struct RootView: View {
             .tag(RootTab.library)
 
             NavigationStack {
-                DownloadsScreen()
+                DeferredTabContent(isSelected: (selectedTab ?? resolvedLaunchTab) == .downloads) {
+                    DownloadsScreen()
+                }
             }
             .modifier(TabChrome())
             .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
@@ -863,6 +867,26 @@ private struct TabPlayerAccessory: ViewModifier {
                 }
         } else {
             content
+        }
+    }
+}
+
+/// TabView may construct a tab before selecting it. Delay data-bound screens
+/// until first entry, then retain their identity and navigation state thereafter.
+/// The tab item and NavigationStack themselves are always present.
+struct DeferredTabContent<Content: View>: View {
+    let isSelected: Bool
+    @ViewBuilder let content: () -> Content
+    @State private var hasBeenSelected = false
+
+    var body: some View {
+        Group {
+            if isSelected || hasBeenSelected {
+                content()
+            }
+        }
+        .onChange(of: isSelected, initial: true) { _, selected in
+            if selected { hasBeenSelected = true }
         }
     }
 }
