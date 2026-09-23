@@ -6,6 +6,39 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testLibraryCaughtUpFilterAndDeferredTabReentry() {
+        let app = XCUIApplication()
+        // The existing folder-run fixture supplies a followed podcast with no
+        // episodes, alongside the ordinary fixtures with unheard episodes.
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library", "-folderRunTest"]
+        app.launch()
+        let options = app.buttons["Library options"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 15))
+        let caughtUp = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Folder test show, 0 unplayed episodes"
+        )).firstMatch
+        XCTAssertTrue(caughtUp.waitForExistence(timeout: 10), app.debugDescription)
+        options.tap()
+        let toggle = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@", "Hide caught-up podcasts"
+        )).firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.debugDescription)
+        toggle.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: caughtUp)
+        waitForExpectations(timeout: 5)
+        app.tabBars.buttons["Queue"].tap()
+        XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Downloads"].tap()
+        XCTAssertTrue(app.navigationBars["Downloads"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Library"].tap()
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
+        XCTAssertFalse(caughtUp.exists)
+        options.tap()
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        toggle.tap()
+        XCTAssertTrue(caughtUp.waitForExistence(timeout: 5), app.debugDescription)
+    }
+
     func testFeedFailureOpensPodcastAndRetryRecoversWithoutNewEpisodes() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "feedRefresh"]

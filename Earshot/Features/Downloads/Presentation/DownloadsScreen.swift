@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import SwiftData
 
@@ -31,7 +32,9 @@ struct DownloadsScreen: View {
     // Keep the status check below as the final invariant guard. (#701)
     @Query(filter: DownloadListQuery.hasPath)
     private var downloadCandidates: [LocalEpisodeState]
-    @Query private var expiredRows: [RecentlyExpired]
+    @Query(sort: \RecentlyExpired.expiredAt, order: .reverse)
+    private var expiredRows: [RecentlyExpired]
+    @State private var episodeSnapshot = DownloadEpisodeSnapshot()
     @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
     private var folders: [PodcastFolder]
 
@@ -71,12 +74,15 @@ struct DownloadsScreen: View {
     @AccessibilityFocusState private var focusEmptyFilter: Bool
     @AccessibilityFocusState private var focusLaunchHeading: Bool
 
-    private var downloaded: [Episode] {
-        let keys = downloadCandidates
+    private var downloadKeys: [EpisodeLocalKey] {
+        downloadCandidates
             .filter { $0.downloadStatus == .downloaded }
             .map { EpisodeLocalKey(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID) }
-        let matches = (try? LocalStateStore.episodes(matching: keys, in: context)) ?? [:]
-        return keys.compactMap { matches[$0] }
+    }
+
+    private var downloaded: [Episode] {
+        episodeSnapshot.episodes
+            .filter { !$0.isDeleted && $0.modelContext == context }
             .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
     }
 
@@ -117,7 +123,7 @@ struct DownloadsScreen: View {
     }
 
     private var expiredEntries: [RecentlyExpired] {
-        ExpirationService(context: context).recentlyExpired()
+        expiredRows.filter { !$0.isDeleted && $0.episode != nil }
     }
 
     var body: some View {
@@ -223,7 +229,21 @@ struct DownloadsScreen: View {
         // never per keystroke, never while the field is empty — while the list
         // narrows live as the user types. The count spans both sections.
         .searchable(text: $searchText, prompt: "Search downloads")
-        .onAppear { requestLaunchHeadingFocus() }
+        .onAppear {
+            episodeSnapshot.reload(keys: downloadKeys, context: context)
+            requestLaunchHeadingFocus()
+        }
+        // Resolve local download identities only when the source changes, never
+        // while constructing row labels, searching, or moving VoiceOver focus.
+        .onChange(of: downloadKeys, initial: true) { _, keys in
+            episodeSnapshot.reload(keys: keys, context: context)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotSubscriptionsDidChange).receive(on: DispatchQueue.main)) { _ in
+            episodeSnapshot.reload(keys: downloadKeys, context: context, force: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply).receive(on: DispatchQueue.main)) { _ in
+            episodeSnapshot.reload(keys: downloadKeys, context: context, force: true)
+        }
         .onChange(of: runtime.launchFocusRequest) { _, _ in
             requestLaunchHeadingFocus()
         }
@@ -264,7 +284,7 @@ struct DownloadsScreen: View {
                 } label: {
                     Label("Clear all downloads", systemImage: "trash")
                 }
-                .disabled(downloaded.isEmpty)
+                .disabled(rawDownloaded.isEmpty)
                 .accessibilityLabel("Clear all downloads")
                 .accessibilityHint("Removes every downloaded episode from this device")
             }

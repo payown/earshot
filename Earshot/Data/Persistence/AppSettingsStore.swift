@@ -103,6 +103,7 @@ enum SettingsKey {
     // Library list order (alphabetical / last published). SwiftUI-only preference,
     // stored as the ``LibrarySortOrder`` raw value.
     static let librarySortOrder = "library_sort_order"
+    static let hideCaughtUpPodcasts = "hide_caught_up_podcasts"
     // Order for a podcast's episode list (alphabetical / latest first / latest
     // last). Global SwiftUI-only preference, stored as the ``EpisodeSortOrder``
     // raw value; defaults to ``EpisodeSortOrder/latestFirst`` which preserves the
@@ -259,7 +260,7 @@ enum AppSettingScope {
         SettingsKey.showEpisodeNumbers, SettingsKey.openPlayerOnPlay,
         SettingsKey.dismissPlayerWhenPlaybackEnds,
         SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds, SettingsKey.wrapQueue,
-        SettingsKey.defaultLaunchScreen, SettingsKey.librarySortOrder,
+        SettingsKey.defaultLaunchScreen, SettingsKey.librarySortOrder, SettingsKey.hideCaughtUpPodcasts,
         SettingsKey.episodeSortOrder, SettingsKey.statsStreaksEnabled,
         SettingsKey.inboxDefaultCount, SettingsKey.themeOverride,
         SettingsKey.accentColor, SettingsKey.layoutDensity,
@@ -326,6 +327,7 @@ enum SettingsDefault {
     static let onboardingComplete = false
     static let launchScreen: LaunchScreen = .inbox
     static let librarySortOrder: LibrarySortOrder = .alphabetical
+    static let hideCaughtUpPodcasts = false
     /// Episode-list order default: newest published first, preserving the
     /// pre-existing pubDate-descending order (#459).
     static let episodeSortOrder: EpisodeSortOrder = .latestFirst

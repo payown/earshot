@@ -23,6 +23,7 @@ final class SettingsStore {
     // General
     var launchScreen: LaunchScreen = SettingsDefault.launchScreen { didSet { persist { $0.setLaunchScreen(launchScreen) } } }
     var librarySortOrder: LibrarySortOrder = SettingsDefault.librarySortOrder { didSet { persist { $0.setLibrarySortOrder(librarySortOrder) } } }
+    var hideCaughtUpPodcasts = SettingsDefault.hideCaughtUpPodcasts { didSet { persist { $0.setBool(hideCaughtUpPodcasts, for: SettingsKey.hideCaughtUpPodcasts) } } }
     var episodeSortOrder: EpisodeSortOrder = SettingsDefault.episodeSortOrder { didSet { persist { $0.setEpisodeSortOrder(episodeSortOrder) } } }
     var queueGrouping: QueueGrouping = SettingsDefault.queueGrouping { didSet { persist { $0.setQueueGrouping(queueGrouping) } } }
     var showEpisodeNumbers: Bool = SettingsDefault.showEpisodeNumbers { didSet { persist { $0.setBool(showEpisodeNumbers, for: SettingsKey.showEpisodeNumbers) } } }
@@ -105,6 +106,9 @@ final class SettingsStore {
         assignIfChanged(\.chapterNavButtonsVisible, store.bool(SettingsKey.chapterNavButtonsVisible, default: SettingsDefault.chapterNavButtonsVisible))
         assignIfChanged(\.launchScreen, store.launchScreen())
         assignIfChanged(\.librarySortOrder, store.librarySortOrder())
+        assignIfChanged(\.hideCaughtUpPodcasts, store.bool(
+            SettingsKey.hideCaughtUpPodcasts, default: SettingsDefault.hideCaughtUpPodcasts
+        ))
         assignIfChanged(\.episodeSortOrder, store.episodeSortOrder())
         assignIfChanged(\.queueGrouping, store.queueGrouping())
         assignIfChanged(\.showEpisodeNumbers, store.bool(SettingsKey.showEpisodeNumbers, default: SettingsDefault.showEpisodeNumbers))
