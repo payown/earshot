@@ -60,3 +60,11 @@ In a folder's Add podcasts picker, toggle several podcasts in and out; close and
 reopen. In a podcast's Manage folders picker, toggle multiple nested folders and
 create a folder. Confirm selected states, labels, announcements and focus match
 existing behavior, changes persist, and rapid VoiceOver navigation stays responsive.
+
+## Phone handoff
+
+At Michael's request, local integration revision a754bff2 combined folder-picker
+production change 6c85f2f with the accepted search production change 4cd6394.
+Signed Release 1.2.3 (267) built successfully, passed strict signature verification,
+and was installed and launched on his iPhone. The two picker test flows above
+were supplied. Physical acceptance remains pending; no TestFlight distribution.
