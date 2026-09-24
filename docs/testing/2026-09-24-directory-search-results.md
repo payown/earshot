@@ -76,3 +76,11 @@ Evidence boundaries:
 Final local validation for the lookup fix: full eligible unit suite passed with
 2,372 passed, 33 skipped, zero failures (documented StoreKit suites excluded).
 Signed Release build and strict signature verification passed.
+
+Merge-gate follow-up: the next CI run passed 2,404 tests but failed one existing
+largest-text unfollow UI assertion. Library can appear under the dismissing
+Podcast Settings sheet before the sheet leaves the accessibility tree. The test
+now waits up to five seconds for both outgoing surfaces to disappear rather than
+asserting disappearance synchronously. Both normal- and largest-text unfollow
+UI tests passed locally (two tests, zero failures). No production change in this
+follow-up; CI reruns on the new commit.

@@ -326,8 +326,10 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(cancel.waitForExistence(timeout: 5))
         app.alerts.buttons["Unfollow"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars["Podcast Settings"].exists)
-        XCTAssertFalse(app.buttons["Podcast settings"].exists)
+        // Library may be exposed underneath the dismissing sheet before its
+        // transition completes. Wait for both outgoing surfaces to disappear.
+        XCTAssertTrue(app.navigationBars["Podcast Settings"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Podcast settings"].waitForNonExistence(timeout: 5))
     }
 
     func testPodcastNameEditorSavesAndRestoresPublisherName() {
