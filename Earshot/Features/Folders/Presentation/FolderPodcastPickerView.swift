@@ -13,6 +13,7 @@ struct FolderPodcastPickerView: View {
     @Query private var memberships: [FolderMembership]
 
     var body: some View {
+        let memberIDs = FolderMembershipSelection.podcastIDs(in: folder, memberships: memberships)
         NavigationStack {
             Group {
                 if podcasts.isEmpty {
@@ -23,7 +24,7 @@ struct FolderPodcastPickerView: View {
                     }
                 } else {
                     List(podcasts) { podcast in
-                        row(for: podcast)
+                        row(for: podcast, isIn: memberIDs.contains(podcast.persistentModelID))
                     }
                 }
             }
@@ -37,8 +38,7 @@ struct FolderPodcastPickerView: View {
         }
     }
 
-    private func row(for podcast: Podcast) -> some View {
-        let isIn = isMember(podcast)
+    private func row(for podcast: Podcast, isIn: Bool) -> some View {
         return Button {
             toggle(podcast)
         } label: {
@@ -81,5 +81,31 @@ struct FolderPodcastPickerView: View {
         } else {
             repo.add(podcast, to: folder)
         }
+    }
+}
+
+/// Render-local selection sets. Each picker scans the current membership query
+/// once per update instead of once per row. Action handlers still consult live
+/// membership before writing, so a captured visual state never drives a toggle.
+@MainActor
+enum FolderMembershipSelection {
+    static func podcastIDs(
+        in folder: PodcastFolder, memberships: [FolderMembership]
+    ) -> Set<PersistentIdentifier> {
+        let folderID = folder.persistentModelID
+        return Set(memberships.compactMap { membership in
+            guard membership.folder?.persistentModelID == folderID else { return nil }
+            return membership.podcast?.persistentModelID
+        })
+    }
+
+    static func folderIDs(
+        for podcast: Podcast, memberships: [FolderMembership]
+    ) -> Set<PersistentIdentifier> {
+        let podcastID = podcast.persistentModelID
+        return Set(memberships.compactMap { membership in
+            guard membership.podcast?.persistentModelID == podcastID else { return nil }
+            return membership.folder?.persistentModelID
+        })
     }
 }

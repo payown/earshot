@@ -6,6 +6,36 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testFolderMembershipPickerKeepsSelectionCurrent() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+        let settings = app.buttons["Podcast settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 15))
+        settings.tap()
+        let manage = app.buttons["Manage folders…"].firstMatch
+        for _ in 0..<12 where !manage.isHittable { app.swipeUp() }
+        XCTAssertTrue(manage.isHittable, app.debugDescription)
+        manage.tap()
+        let create = app.buttons["New folder…"].firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        create.tap()
+        let field = app.alerts.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Picker performance test")
+        app.alerts.buttons["Create"].tap()
+        let folder = app.buttons["Picker performance test"].firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 5))
+        XCTAssertTrue(folder.isSelected)
+        folder.tap()
+        expectation(for: NSPredicate(format: "selected == false"), evaluatedWith: folder)
+        waitForExpectations(timeout: 5)
+        folder.tap()
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: folder)
+        waitForExpectations(timeout: 5)
+    }
+
     func testEpisodeSortIsIndependentForEachPodcast() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]

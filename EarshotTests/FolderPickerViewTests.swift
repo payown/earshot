@@ -24,6 +24,74 @@ final class FolderPickerViewTests: XCTestCase {
         return episode
     }
 
+    func testMembershipSelectionsIgnoreOtherScopesDuplicatesAndMissingRelationships() {
+        let context = TestStore.freshContext()
+        let first = makePodcast(context, "First")
+        let second = makePodcast(context, "Second")
+        let root = PodcastFolder(name: "Root")
+        let child = PodcastFolder(name: "Child")
+        context.insert(root)
+        context.insert(child)
+        child.parent = root
+        let rows = [
+            FolderMembership(folder: root, podcast: first),
+            FolderMembership(folder: root, podcast: first),
+            FolderMembership(folder: child, podcast: first),
+            FolderMembership(folder: child, podcast: second),
+            FolderMembership(folder: root, podcast: nil),
+            FolderMembership(folder: nil, podcast: first),
+        ]
+        XCTAssertEqual(FolderMembershipSelection.podcastIDs(in: root, memberships: rows), [first.persistentModelID])
+        XCTAssertEqual(FolderMembershipSelection.folderIDs(for: first, memberships: rows), [root.persistentModelID, child.persistentModelID])
+        XCTAssertEqual(FolderMembershipSelection.folderIDs(for: second, memberships: rows), [child.persistentModelID])
+        XCTAssertTrue(FolderMembershipSelection.podcastIDs(in: root, memberships: []).isEmpty)
+        XCTAssertTrue(FolderMembershipSelection.folderIDs(for: first, memberships: []).isEmpty)
+    }
+
+    func testMembershipSelectionRebuildsAfterAddRemoveAndNewFolder() throws {
+        let context = TestStore.freshContext()
+        let podcast = makePodcast(context, "Show")
+        let repo = FolderRepository(context: context)
+        let folder = repo.createFolder(name: "First")
+        func rows() throws -> [FolderMembership] { try context.fetch(FetchDescriptor<FolderMembership>()) }
+        XCTAssertTrue(FolderMembershipSelection.folderIDs(for: podcast, memberships: try rows()).isEmpty)
+        repo.add(podcast, to: folder)
+        XCTAssertEqual(FolderMembershipSelection.folderIDs(for: podcast, memberships: try rows()), [folder.persistentModelID])
+        XCTAssertEqual(FolderMembershipSelection.podcastIDs(in: folder, memberships: try rows()), [podcast.persistentModelID])
+        repo.remove(podcast, from: folder)
+        XCTAssertTrue(FolderMembershipSelection.podcastIDs(in: folder, memberships: try rows()).isEmpty)
+        let created = repo.createSubfolder(named: "New child", under: folder)
+        repo.add(podcast, to: created)
+        XCTAssertEqual(FolderMembershipSelection.folderIDs(for: podcast, memberships: try rows()), [created.persistentModelID])
+        XCTAssertTrue(FolderMembershipSelection.podcastIDs(in: folder, memberships: try rows()).isEmpty,
+                      "Picker membership is direct, not inherited from child folders")
+    }
+
+    func testSelectionSetsMatchLegacyRowScansAtLibraryScale() {
+        let podcasts = (0..<500).map { Podcast(feedURL: "https://example.com/\($0).xml", title: "Show \($0)") }
+        let folders = (0..<20).map { PodcastFolder(name: "Folder \($0)") }
+        let rows = (0..<2000).map { index in
+            FolderMembership(folder: folders[index % 20], podcast: podcasts[index % 500])
+        }
+        let folderID = folders[0].persistentModelID
+        let start = Date()
+        let legacy = Set(podcasts.filter { podcast in
+            rows.contains { $0.podcast?.persistentModelID == podcast.persistentModelID && $0.folder?.persistentModelID == folderID }
+        }.map(\.persistentModelID))
+        let legacySeconds = Date().timeIntervalSince(start)
+        let indexedStart = Date()
+        let actual = FolderMembershipSelection.podcastIDs(in: folders[0], memberships: rows)
+        let indexedSeconds = Date().timeIntervalSince(indexedStart)
+        XCTAssertEqual(actual, legacy)
+        XCTAssertEqual(actual.count, 25)
+        let podcastID = podcasts[0].persistentModelID
+        let legacyFolders = Set(folders.filter { folder in
+            rows.contains { $0.podcast?.persistentModelID == podcastID && $0.folder?.persistentModelID == folder.persistentModelID }
+        }.map(\.persistentModelID))
+        XCTAssertEqual(FolderMembershipSelection.folderIDs(for: podcasts[0], memberships: rows), legacyFolders)
+        print("Folder picker simulator diagnostic: legacy=\(legacySeconds)s selectionSet=\(indexedSeconds)s; 500 podcasts/2000 memberships")
+    }
+
     // MARK: Nested tree construction
 
     func testOrderedHierarchyIsDepthFirstFromRoots() {
