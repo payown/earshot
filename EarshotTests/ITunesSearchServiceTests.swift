@@ -39,6 +39,33 @@ final class ITunesSearchServiceTests: XCTestCase {
         XCTAssertEqual(results[0].artworkURL, "https://img/600.jpg")
     }
 
+    func testExpandedSearchRequests200AndKeepsLaterMatchesInRelevanceOrder() async throws {
+        var rows: [[String: String]] = (0..<200).map { index in
+            ["collectionName": "Show \(index)", "feedUrl": "https://example.com/\(index).xml"]
+        }
+        // A duplicate beyond the former boundary must keep the earlier entry.
+        rows[75] = ["collectionName": "Duplicate", "feedUrl": "https://example.com/0.xml"]
+        rows[100] = ["collectionName": "Missing feed"]
+        let body = try JSONSerialization.data(withJSONObject: ["resultCount": 200, "results": rows])
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: body)])
+
+        let outcome = await makeService().search("science")
+
+        let url = try XCTUnwrap(MockURLProtocol.requestedURLs.first)
+        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(items.filter { $0.name == "limit" }.map(\.value), ["200"])
+        XCTAssertEqual(MockURLProtocol.requestedURLs.count, 1)
+        guard case .results(let results) = outcome else {
+            return XCTFail("Expected expanded results")
+        }
+        let expected = (0..<200).filter { $0 != 75 && $0 != 100 }.map { "Show \($0)" }
+        XCTAssertEqual(results.map(\.title), expected)
+        XCTAssertEqual(results.count, 198)
+        XCTAssertEqual(Set(results.map(\.id)).count, results.count)
+        XCTAssertEqual(results[25].title, "Show 25")
+        XCTAssertEqual(results.last?.title, "Show 199")
+    }
+
     // MARK: Result mapping fallbacks
 
     func test_missingCollectionName_fallsBackToTrackName() async {
@@ -212,19 +239,19 @@ final class ITunesSearchServiceTests: XCTestCase {
         // A term laden with query delimiters must not be able to inject extra
         // parameters into the request. With naive `.urlQueryAllowed` encoding the
         // `&` and `=` would survive and add a second `limit`/`evil` parameter.
-        _ = await makeService().search("swift&limit=200&evil=1")
+        _ = await makeService().search("swift&limit=999&evil=1")
 
         let url = try? XCTUnwrap(MockURLProtocol.requestedURLs.first)
         let components = url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
         let items = components?.queryItems ?? []
 
         XCTAssertEqual(components?.host, "itunes.apple.com")
-        // limit appears exactly once and is still 25 (not overridden to 200).
-        XCTAssertEqual(items.filter { $0.name == "limit" }.map(\.value), ["25"])
+        // limit appears exactly once and stays at 200, not the injected 999.
+        XCTAssertEqual(items.filter { $0.name == "limit" }.map(\.value), ["200"])
         // No stray "evil" parameter leaked out of the term.
         XCTAssertFalse(items.contains { $0.name == "evil" })
         // The whole hostile string is preserved as the single term value.
-        XCTAssertEqual(items.first { $0.name == "term" }?.value, "swift&limit=200&evil=1")
+        XCTAssertEqual(items.first { $0.name == "term" }?.value, "swift&limit=999&evil=1")
     }
 
     // MARK: Empty query short-circuits
