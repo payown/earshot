@@ -70,6 +70,8 @@ struct EpisodeListView: View {
     /// appear (default ``EpisodeListFilter/unheard``) and persisted on change
     /// under the `podcast_filter_<feedURL>` AppSetting key (#489).
     @State private var filter: EpisodeListFilter = SettingsDefault.episodeListFilter
+    /// Loaded with the per-feed filter before the first page request.
+    @State private var sortOrder: EpisodeSortOrder = SettingsDefault.episodeSortOrder
 
     /// The currently loaded, still-live page. Filtering, sorting, and search all
     /// happen in the store before these models enter view state.
@@ -167,7 +169,7 @@ struct EpisodeListView: View {
                         Button(showMoreEpisodesLabel) {
                             episodeList?.loadMore(
                                 filter: filter,
-                                sort: settings.episodeSortOrder,
+                                sort: sortOrder,
                                 searchText: searchText
                             )
                         }
@@ -185,7 +187,8 @@ struct EpisodeListView: View {
                 }
             }
         }
-        .task {
+        .task(id: podcast.feedURL) {
+            sortOrder = AppSettingsStore(context: context).episodeSortOrder(forFeedURL: podcast.feedURL)
             filter = AppSettingsStore(context: context).episodeListFilter(forFeedURL: podcast.feedURL)
             resetEpisodePage(moveFocusToResults: false)
         }
@@ -562,13 +565,14 @@ struct EpisodeListView: View {
     /// A reversible chronological sort control. Sorting changes only the list's
     /// presentation; it never starts playback or mutates the queue.
     private var chronologicalSortButton: some View {
-        let target = settings.episodeSortOrder.chronologicalToggleTarget
+        let target = sortOrder.chronologicalToggleTarget
         return Button {
-            settings.episodeSortOrder = target
+            sortOrder = target
+            AppSettingsStore(context: context).setEpisodeSortOrder(target, forFeedURL: podcast.feedURL)
             resetEpisodePage(moveFocusToResults: true)
             Announcer.announce(target.announcement)
         } label: {
-            Label(settings.episodeSortOrder.chronologicalToggleTitle, systemImage: "arrow.up.arrow.down")
+            Label(sortOrder.chronologicalToggleTitle, systemImage: "arrow.up.arrow.down")
         }
         .accessibilityHint("Changes the episode order without starting playback")
     }
@@ -753,7 +757,7 @@ struct EpisodeListView: View {
         guard !podcast.isDeleted else { return }
         ensureEpisodeList().resetAndLoad(
             filter: filter,
-            sort: settings.episodeSortOrder,
+            sort: sortOrder,
             searchText: searchText
         )
         if moveFocusToResults, matchingCount > 0 {
@@ -766,7 +770,7 @@ struct EpisodeListView: View {
         episodeList.podcastTitle = "\(podcast.title) \(podcast.displayName)"
         episodeList.reloadKeepingLoadedLimit(
             filter: filter,
-            sort: settings.episodeSortOrder,
+            sort: sortOrder,
             searchText: searchText
         )
     }

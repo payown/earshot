@@ -4,6 +4,43 @@ import SwiftData
 
 @MainActor
 final class AppSettingsStoreTests: XCTestCase {
+    func testPodcastSortChoicesAreIndependentAndPersistAcrossContexts() throws {
+        let context = TestStore.freshContext()
+        let store = AppSettingsStore(context: context)
+        let drama = "https://example.com/drama.xml"
+        let news = "https://example.com/news.xml"
+        store.setEpisodeSortOrder(.latestFirst)
+        store.setEpisodeSortOrder(.latestLast, forFeedURL: drama)
+        XCTAssertEqual(store.episodeSortOrder(forFeedURL: news), .latestFirst)
+        store.setEpisodeSortOrder(.latestFirst, forFeedURL: news)
+        try context.save()
+
+        let reloaded = AppSettingsStore(context: ModelContext(context.container))
+        XCTAssertEqual(reloaded.episodeSortOrder(forFeedURL: drama), .latestLast)
+        XCTAssertEqual(reloaded.episodeSortOrder(forFeedURL: news), .latestFirst)
+        XCTAssertEqual(reloaded.episodeSortOrder(), .latestFirst)
+        reloaded.setEpisodeSortOrder(.latestLast, forFeedURL: news)
+        reloaded.setEpisodeSortOrder(.latestFirst, forFeedURL: drama)
+        XCTAssertEqual(reloaded.episodeSortOrder(forFeedURL: news), .latestLast)
+        XCTAssertEqual(reloaded.episodeSortOrder(), .latestFirst)
+    }
+
+    func testPodcastSortFallbackCanonicalIdentityAndLocalScope() {
+        let context = TestStore.freshContext()
+        let store = AppSettingsStore(context: context)
+        let feed = "https://example.com/drama.xml"
+        XCTAssertEqual(store.episodeSortOrder(forFeedURL: feed), .latestFirst)
+        store.setEpisodeSortOrder(.latestLast)
+        XCTAssertEqual(store.episodeSortOrder(forFeedURL: feed), .latestLast)
+        store.setEpisodeSortOrder(.latestFirst, forFeedURL: " HTTPS://Example.COM:443/drama.xml#fragment ")
+        XCTAssertEqual(store.episodeSortOrder(forFeedURL: feed), .latestFirst)
+        let key = SettingsKey.podcastEpisodeSortOrder(feedURL: feed)
+        XCTAssertTrue(AppSettingScope.isLocal(key))
+        store.setRawValue("invalid", for: key)
+        XCTAssertEqual(store.episodeSortOrder(forFeedURL: feed), .latestLast)
+        XCTAssertEqual(store.episodeSortOrder(), .latestLast)
+    }
+
     func testPendingCloudFollowIntentIsCanonicalAndDeviceLocal() throws {
         let context = TestStore.freshContext()
         try PendingCloudFollowIntent.set(
