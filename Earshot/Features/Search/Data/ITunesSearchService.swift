@@ -38,6 +38,10 @@ enum DirectorySearchOutcome: Sendable, Equatable {
 /// body is JSON, so we decode directly from the bytes and never branch on the
 /// response content type.
 struct ITunesSearchService: Sendable {
+    /// Apple's documented maximum keeps discovery bounded without hiding matches
+    /// behind the former 25-result cap. The provider can return fewer results.
+    private static let maximumResults = 200
+
     private let session: URLSession
 
     init(session: URLSession = EarshotURLSession.shared) {
@@ -63,7 +67,7 @@ struct ITunesSearchService: Sendable {
         components.path = "/search"
         components.queryItems = [
             URLQueryItem(name: "media", value: "podcast"),
-            URLQueryItem(name: "limit", value: "25"),
+            URLQueryItem(name: "limit", value: String(Self.maximumResults)),
             URLQueryItem(name: "term", value: trimmed),
         ]
         guard let url = components.url else {
