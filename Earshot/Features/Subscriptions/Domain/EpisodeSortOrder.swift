@@ -1,7 +1,7 @@
 import Foundation
 
-/// User-selectable ordering for a podcast's episode list. Persisted globally as
-/// a String raw value under ``SettingsKey/episodeSortOrder``.
+/// User-selectable ordering for a podcast's episode list. Persisted per feed as
+/// a String raw value, with the legacy global preference as its default.
 ///
 /// Kept pure so the ordering rules are unit-testable without a model context
 /// (mirrors ``EpisodeListFilter`` and ``LibrarySort``). Date ties fall back to

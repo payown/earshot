@@ -110,6 +110,11 @@ enum SettingsKey {
     // raw value; defaults to ``EpisodeSortOrder/latestFirst`` which preserves the
     // pre-existing pubDate-descending order (#459).
     static let episodeSortOrder = "episode_sort_order"
+    /// Device-local per-feed override; the legacy global value remains the fallback.
+    static func podcastEpisodeSortOrder(feedURL: String) -> String {
+        "podcast_episode_sort_order_" + FeedURLIdentity.canonical(feedURL)
+    }
+
     static let lastPlayingEpisodeID = "last_playing_episode_id"
     static let statsStreaksEnabled = "stats_streaks_enabled"
     // How many of a newly-added podcast's most-recent episodes to seed into the
@@ -538,6 +543,20 @@ final class AppSettingsStore {
               let order = EpisodeSortOrder(rawValue: raw)
         else { return SettingsDefault.episodeSortOrder }
         return order
+    }
+
+    /// Preserve the listener's previous order until they explicitly change this podcast.
+    /// Uses device-local AppSetting storage; no schema or cloud-projection
+    /// contract changes are needed.
+    func episodeSortOrder(forFeedURL feedURL: String) -> EpisodeSortOrder {
+        guard let raw = rawValue(SettingsKey.podcastEpisodeSortOrder(feedURL: feedURL)),
+              let order = EpisodeSortOrder(rawValue: raw)
+        else { return episodeSortOrder() }
+        return order
+    }
+
+    func setEpisodeSortOrder(_ order: EpisodeSortOrder, forFeedURL feedURL: String) {
+        setRawValue(order.rawValue, for: SettingsKey.podcastEpisodeSortOrder(feedURL: feedURL))
     }
 
     func setEpisodeSortOrder(_ order: EpisodeSortOrder) {

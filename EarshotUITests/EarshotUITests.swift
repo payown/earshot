@@ -6,6 +6,30 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testEpisodeSortIsIndependentForEachPodcast() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        func openPodcast(_ title: String) {
+            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
+            row.tap()
+            XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5))
+        }
+        openPodcast("Technically Working")
+        let oldest = app.buttons["Sort oldest to newest"]
+        let newest = app.buttons["Sort newest to oldest"]
+        XCTAssertTrue(oldest.waitForExistence(timeout: 5))
+        oldest.tap()
+        XCTAssertTrue(newest.waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Library"].tap()
+        openPodcast("Our Perspective")
+        XCTAssertTrue(oldest.waitForExistence(timeout: 5), "Another podcast must retain newest-first")
+        app.navigationBars.buttons["Library"].tap()
+        openPodcast("Technically Working")
+        XCTAssertTrue(newest.waitForExistence(timeout: 5), "Returning must restore this podcast's oldest-first choice")
+    }
+
     func testHomeScreenBadgeOptInAndOptOut() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]

@@ -32,6 +32,23 @@ final class EpisodeListDataSourceTests: XCTestCase {
         )
     }
 
+    func testPersistedPodcastOrderAppliesToPagesSearchAndReload() throws {
+        let (context, podcast) = try fixture(count: 250)
+        let settings = AppSettingsStore(context: context)
+        settings.setEpisodeSortOrder(.latestLast, forFeedURL: podcast.feedURL)
+        let sort = settings.episodeSortOrder(forFeedURL: podcast.feedURL)
+        let data = source(context, podcast)
+        data.resetAndLoad(filter: .unheard, sort: sort, searchText: "Episode")
+        XCTAssertEqual(data.episodes.first?.guid, "000000")
+        data.loadMore(filter: .unheard, sort: sort, searchText: "Episode")
+        XCTAssertEqual(data.episodes.last?.guid, "000199")
+        XCTAssertEqual(data.episodes.count, 200)
+        let reloaded = source(context, podcast)
+        reloaded.resetAndLoad(filter: .all, sort: settings.episodeSortOrder(forFeedURL: podcast.feedURL), searchText: "Episode")
+        XCTAssertEqual(reloaded.episodes.first?.guid, "000000")
+        XCTAssertEqual(settings.episodeSortOrder(), .latestFirst)
+    }
+
     func testInitialAndExplicitNextPageAreBounded() throws {
         let (context, podcast) = try fixture(count: 250)
         let data = source(context, podcast)
