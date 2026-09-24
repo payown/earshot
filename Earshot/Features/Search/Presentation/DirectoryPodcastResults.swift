@@ -32,18 +32,25 @@ struct DirectoryPodcastResults: View {
     }
 
     var body: some View {
+        // Build once for this update, not twice per result. Dictation can settle
+        // a broad search with 200 results while VoiceOver needs the main thread.
+        let library = DirectoryPodcastLibraryIndex(podcasts: podcasts)
         ForEach(results) { result in
+            let followed = library.podcast(forFeedURL: result.feedURL)
+            let description = followed == nil
+                ? remoteDescriptions[FeedURLIdentity.canonical(result.feedURL)]
+                : followed?.podcastDescription
             DirectoryPodcastRow(
                 result: result,
-                subscribed: isSubscribed(result),
-                description: spokenDescription(for: result),
+                subscribed: followed != nil,
+                description: description,
                 descriptionMode: spokenDescriptionMode,
                 open: { openDetail(result) },
                 toggleFollow: { toggleFollow(result) },
                 readFullDescription: {
                     fullDescription = PodcastDescriptionPresentation(
                         title: result.title,
-                        descriptionHTML: spokenDescription(for: result)
+                        descriptionHTML: description
                     )
                 }
             )
@@ -80,19 +87,6 @@ struct DirectoryPodcastResults: View {
             guard !Task.isCancelled else { return }
             remoteDescriptions = loaded
         }
-    }
-
-    private func isSubscribed(_ result: PodcastSearchResult) -> Bool {
-        podcasts.contains { FeedURLIdentity.matches($0.feedURL, result.feedURL) }
-    }
-
-    private func spokenDescription(for result: PodcastSearchResult) -> String? {
-        if let podcast = podcasts.first(where: {
-            FeedURLIdentity.matches($0.feedURL, result.feedURL)
-        }) {
-            return podcast.podcastDescription
-        }
-        return remoteDescriptions[FeedURLIdentity.canonical(result.feedURL)]
     }
 
     private func openDetail(_ result: PodcastSearchResult) {
@@ -219,4 +213,26 @@ private struct DirectoryPodcastRow: View {
 private enum DirectoryPodcastNavigation: Hashable {
     case preview(PodcastSearchResult)
     case subscribed(Podcast)
+}
+
+/// A render-local lookup over the current followed-podcast query. Keep the first
+/// canonical match, exactly as the previous `first(where:)` lookup did. Rebuilt
+/// with each parent update so follow/unfollow and metadata changes cannot leave
+/// a persistent cache stale. No episode relationships are loaded.
+@MainActor
+struct DirectoryPodcastLibraryIndex {
+    private var podcastsByFeed: [String: Podcast] = [:]
+
+    init(podcasts: [Podcast]) {
+        for podcast in podcasts {
+            let key = FeedURLIdentity.canonical(podcast.feedURL)
+            if podcastsByFeed[key] == nil {
+                podcastsByFeed[key] = podcast
+            }
+        }
+    }
+
+    func podcast(forFeedURL feedURL: String) -> Podcast? {
+        podcastsByFeed[FeedURLIdentity.canonical(feedURL)]
+    }
 }
