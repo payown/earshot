@@ -76,6 +76,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe finishes both trouser hems and puts away her sewing things (Chapter 91).
+
 - She uses a Resume Listening shortcut while mending clothes, leaving her phone
   in her coat pocket (Chapter 90).
 
@@ -3336,5 +3338,43 @@ Renata called as she finished the hem.
 “And the other?”
 
 “Still employed.”
+
+---
+
+### Chapter 91 - Build 270
+
+**What to try first:**
+
+Close Earshot from the app switcher, reopen it, and immediately flick VoiceOver focus across the bottom tabs. Then repeat the cold launch and double-tap Queue, Downloads, and Library. Try this three times, especially if you have many downloaded episodes. Tell us whether any pause happens while moving focus, opening a tab, or both.
+
+Check that Inbox and Queue counts still sound normal, without an extra number-only stop. Play a downloaded episode. Confirm your saved launch tab and appearance still take effect, and that changing appearance updates immediately.
+
+This build moves download file checks off the main thread, avoids repeated launch-preference reads, and combines repeated tab-badge updates. Early phone testing feels smoother. A simulator test with 1,500 downloads showed a much shorter UI-thread pause, but a small-library navigation test showed no overall speedup. Your real-library results matter.
+
+These are the changes since TestFlight build 269. BBC insecure audio redirects remain a known issue. Include your iOS version and the show or exact steps when reporting a problem.
+
+**Kashe's story:**
+
+*Kashe has finished both hems. The thread is another matter.*
+
+She found the loose end caught around the handle of her mug. She unwound it, set the mug farther away, and opened Earshot before putting the sewing things back.
+
+Inbox. Queue. Library.
+
+Her thumb had already moved on when she realized she hadn't waited for the next tab to answer.
+
+Renata called while Kashe was folding the trousers.
+
+“Both legs?”
+
+“Both legs.”
+
+“And the sewing things?”
+
+Kashe felt along the table. Scissors, thread, needle case. The button tin was underneath the folded trousers, exactly where she'd decided it wouldn't be in the way.
+
+“Nearly.”
+
+She started an episode and put the scissors away first. The tin could wait until she had a free hand.
 
 ---
