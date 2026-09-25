@@ -73,7 +73,7 @@ extension LibraryPlaybackBridge {
 
 struct GetEarshotEpisodesIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Episodes from Earshot"
-    static let description = IntentDescription("Returns Queue, current episode, or the bounded searchable library as episode values for other actions. Requires Include library in Siri and Search. Private feed addresses are never returned.")
+    static let description = IntentDescription("Returns Queue, current episode, or the bounded searchable library as episode values for other actions. Enable library search in Earshot settings to use saved content. Private feed addresses are never returned.")
     @Parameter(title: "List", default: .queue) var list: ShortcutEpisodeList
     @Parameter(title: "Search text", default: "") var query: String
     static var parameterSummary: some ParameterSummary { Summary("Get \(\.$list) from Earshot matching \(\.$query)") }
