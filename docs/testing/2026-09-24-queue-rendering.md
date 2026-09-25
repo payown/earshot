@@ -27,8 +27,10 @@ Grouped rendering remains a separate profiling candidate.
 
 Xcode 27.0 / iOS 26.5 simulator: 123 focused tests passed across QueueLogicTests,
 QueueRepositoryTests, EpisodeSearchFilterTests and SearchResultPositionTests.
-The existing Queue clear/cancel UI test also passed. Signed Release build and
-physical VoiceOver acceptance remain pending.
+The existing Queue clear/cancel UI test also passed. Signed Release 1.2.3 (267)
+built successfully, passed strict signature verification, and was installed and
+launched on Michael’s iPhone. Production revision e99c375 (PR #986); later commits
+only document validation. Physical VoiceOver acceptance remains pending.
 
 ## Phone acceptance
 
