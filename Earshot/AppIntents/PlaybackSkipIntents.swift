@@ -65,7 +65,7 @@ final class PlaybackSkipIntentBridge {
     }
 }
 
-struct SkipForwardIntent: AppIntent {
+struct SkipForwardIntent: AudioPlaybackIntent {
     static let title: LocalizedStringResource = "Skip Forward in Earshot"
     static let description = IntentDescription(
         "Skips the episode forward by a custom number of seconds. Leave Seconds empty to use Earshot's configured forward interval."
@@ -89,6 +89,7 @@ struct SkipForwardIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        _ = try await LibraryPlaybackBridge.shared.preparedRuntime()
         let result = await PlaybackSkipIntentBridge.shared.skip(
             .forward,
             requestedSeconds: seconds
@@ -103,7 +104,7 @@ struct SkipForwardIntent: AppIntent {
     }
 }
 
-struct SkipBackwardIntent: AppIntent {
+struct SkipBackwardIntent: AudioPlaybackIntent {
     static let title: LocalizedStringResource = "Skip Back in Earshot"
     static let description = IntentDescription(
         "Skips the episode backward by a custom number of seconds. Leave Seconds empty to use Earshot's configured back interval."
@@ -127,6 +128,7 @@ struct SkipBackwardIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        _ = try await LibraryPlaybackBridge.shared.preparedRuntime()
         let result = await PlaybackSkipIntentBridge.shared.skip(
             .backward,
             requestedSeconds: seconds
@@ -143,6 +145,17 @@ struct SkipBackwardIntent: AppIntent {
 
 struct EarshotAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(intent: PauseListeningIntent(), phrases: ["Pause in \(.applicationName)"],
+                    shortTitle: "Pause", systemImageName: "pause.fill")
+        AppShortcut(intent: NextChapterIntent(), phrases: ["Next chapter in \(.applicationName)"],
+                    shortTitle: "Next Chapter", systemImageName: "forward.end")
+        AppShortcut(intent: PreviousChapterIntent(), phrases: ["Previous chapter in \(.applicationName)"],
+                    shortTitle: "Previous Chapter", systemImageName: "backward.end")
+        AppShortcut(intent: ClearEpisodeIntent(), phrases: ["Clear episode in \(.applicationName)"],
+                    shortTitle: "Clear and Play Next", systemImageName: "checkmark.circle")
+        AppShortcut(intent: PlaybackControlIntent(), phrases: ["Control playback in \(.applicationName)"],
+                    shortTitle: "Playback Controls", systemImageName: "slider.horizontal.3")
+
         AppShortcut(
             intent: ResumeListeningIntent(),
             phrases: ["Resume listening in \(.applicationName)", "Continue listening in \(.applicationName)"],

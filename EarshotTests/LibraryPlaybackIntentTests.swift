@@ -77,6 +77,7 @@ final class LibraryPlaybackIntentTests: XCTestCase {
         try await bridge.resume()
         XCTAssertEqual(calls, 1)
         XCTAssertEqual(runtime.player.nowPlayingEpisodeID, episode.persistentModelID)
+        runtime.player.stopAndUnload()
         runtime.player.releasePersistence()
     }
 
@@ -130,7 +131,7 @@ final class LibraryPlaybackIntentTests: XCTestCase {
         container.mainContext.insert(QueueItem(episode: queued, position: 0))
         try container.mainContext.save()
         let runtime = await readyRuntime(container)
-        defer { runtime.player.releasePersistence() }
+        defer { runtime.player.stopAndUnload(); runtime.player.releasePersistence() }
         let bridge = LibraryPlaybackBridge()
         bridge.install(runtime: runtime)
         try await bridge.play(id: SearchContent.identifier(feedURL: show.feedURL, guid: episode.guid))
@@ -152,16 +153,18 @@ final class LibraryPlaybackIntentTests: XCTestCase {
         var calls = 0
         let bridge = LibraryPlaybackBridge(continuePlayback: { _ in calls += 1 })
         bridge.install(runtime: runtime)
-        let request = Task { try await bridge.resume() }
-        try await Task.sleep(for: .milliseconds(150))
-        XCTAssertEqual(calls, 0)
-        _ = await runtime.activateRootServices(for: container) {
+        let activation = Task { await runtime.activateRootServices(for: container) {
+            try await Task.sleep(for: .milliseconds(150))
             runtime.player.configure(context: container.mainContext)
             runtime.settings.configure(context: container.mainContext)
             runtime.settings.onboardingComplete = true
             runtime.player.load(episode)
-        }
-        defer { runtime.player.releasePersistence() }
+        } }
+        while runtime.rootServiceActivationStatus != .inProgress { await Task.yield() }
+        let request = Task { try await bridge.resume() }
+        XCTAssertEqual(calls, 0)
+        _ = await activation.value
+        defer { runtime.player.stopAndUnload(); runtime.player.releasePersistence() }
         try await request.value
         XCTAssertEqual(calls, 1)
     }

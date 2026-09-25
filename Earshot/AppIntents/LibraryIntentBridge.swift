@@ -36,6 +36,7 @@ final class LibraryIntentBridge {
         for _ in 0..<100 {
             try Task.checkCancellation()
             guard !runtime.isResettingLocalData else { throw LibraryIntentError.notReady }
+            await runtime.completeBackgroundAudioLaunchIfReady()
             if let container = runtime.readyContainer { return container }
             if case .recovery = runtime.phase { throw LibraryIntentError.notReady }
             try await Task.sleep(for: .milliseconds(100))

@@ -6,6 +6,9 @@ struct SystemSearchSettingsView: View {
     var body: some View {
         Form {
             Section {
+                NavigationLink("Shortcuts guide") { ShortcutsGuideView() }
+            }
+            Section {
                 Toggle("Include library in Siri and Search", isOn: $enabled)
             } footer: {
                 Text("Allow Earshot to share podcast and episode titles and descriptions with system search on this device, including content from private subscriptions. Audio, transcripts, bookmark notes, and feed addresses are not included. Turning this off removes Earshot’s search entries.")
