@@ -244,16 +244,20 @@ struct QueueScreen: View {
     // MARK: Flat
 
     private var flatList: some View {
+        // Resolve relationships once per render, not once per realized row just
+        // to count the queue. Keep this local so query changes rebuild it.
+        let queueEpisodes = episodes
+        let total = queueEpisodes.count
         // Filter WITHOUT re-numbering: `index` stays each row's position in the
         // full queue, so a filtered row still speaks its true "position X of Y"
         // (#457) — X is where the episode actually sits, Y the whole queue.
         // With no search active this passes every row through unchanged.
-        let indexed = Array(episodes.enumerated()).filter {
+        let indexed = Array(queueEpisodes.enumerated()).filter {
             EpisodeSearchFilter.matches($0.element, query: searchText)
         }
         return List {
             ForEach(indexed, id: \.element.persistentModelID) { index, episode in
-                row(episode, position: index + 1, total: episodes.count, moveMode: .flat)
+                row(episode, position: index + 1, total: total, moveMode: .flat)
             }
             // Drag reorder is suspended while a search narrows the list: move
             // destination indices refer to the visible subset, not real queue
