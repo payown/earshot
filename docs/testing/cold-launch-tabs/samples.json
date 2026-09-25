@@ -1,0 +1,40 @@
+{
+  "before_operations": [
+    "COLDTAB_BADGES sample=0 max_main_gap_ms=23.271416663192213",
+    "COLDTAB_BADGES sample=1 max_main_gap_ms=14.229666674509645",
+    "COLDTAB_BADGES sample=2 max_main_gap_ms=23.964833351783454",
+    "COLDTAB_BADGES sample=3 max_main_gap_ms=13.717624999117106",
+    "COLDTAB_BADGES sample=4 max_main_gap_ms=24.540083366446197",
+    "COLDTAB_RECON sample=0 elapsed_ms=661.6866250406019 max_main_gap_ms=637.1157499961555",
+    "COLDTAB_RECON sample=1 elapsed_ms=657.5433333055116 max_main_gap_ms=634.8715416388586",
+    "COLDTAB_RECON sample=2 elapsed_ms=645.8191249985248 max_main_gap_ms=623.9684583852068",
+    "COLDTAB_RECON sample=3 elapsed_ms=649.8598333564587 max_main_gap_ms=627.9830416897312",
+    "COLDTAB_RECON sample=4 elapsed_ms=645.8602083148435 max_main_gap_ms=622.8561249445193"
+  ],
+  "after_operations": [
+    "COLDTAB_BADGES sample=0 max_main_gap_ms=8.064499997999519",
+    "COLDTAB_BADGES sample=1 max_main_gap_ms=2.37520836526528",
+    "COLDTAB_BADGES sample=2 max_main_gap_ms=2.2591250017285347",
+    "COLDTAB_BADGES sample=3 max_main_gap_ms=2.4197082966566086",
+    "COLDTAB_BADGES sample=4 max_main_gap_ms=2.449833322316408",
+    "COLDTAB_RECON sample=0 elapsed_ms=71.7987499665469 max_main_gap_ms=2.1177083253860474",
+    "COLDTAB_RECON sample=1 elapsed_ms=68.45020834589377 max_main_gap_ms=2.091333328280598",
+    "COLDTAB_RECON sample=2 elapsed_ms=68.58070829184726 max_main_gap_ms=2.1032916265539825",
+    "COLDTAB_RECON sample=3 elapsed_ms=68.83337500039488 max_main_gap_ms=2.1042500156909227",
+    "COLDTAB_RECON sample=4 elapsed_ms=70.22291672183201 max_main_gap_ms=2.111791691277176"
+  ],
+  "before_ui": [
+    "COLDTAB_UI sample=0 launch_ms=4876.823208294809 first_tab_cycle_ms=15245.256458350923",
+    "COLDTAB_UI sample=1 launch_ms=4387.726333341561 first_tab_cycle_ms=15074.237666616682",
+    "COLDTAB_UI sample=2 launch_ms=4403.963333345018 first_tab_cycle_ms=15190.921458299272",
+    "COLDTAB_UI sample=3 launch_ms=4396.489000006113 first_tab_cycle_ms=15163.736624992453",
+    "COLDTAB_UI sample=4 launch_ms=4426.706708327401 first_tab_cycle_ms=15195.91783330543"
+  ],
+  "after_ui": [
+    "COLDTAB_UI sample=0 launch_ms=4506.581874971744 first_tab_cycle_ms=15557.627333328128",
+    "COLDTAB_UI sample=1 launch_ms=4361.783291620668 first_tab_cycle_ms=15568.377291667275",
+    "COLDTAB_UI sample=2 launch_ms=4530.358416668605 first_tab_cycle_ms=15361.258708348032",
+    "COLDTAB_UI sample=3 launch_ms=4683.48654161673 first_tab_cycle_ms=15266.127291659359",
+    "COLDTAB_UI sample=4 launch_ms=4472.722749982495 first_tab_cycle_ms=15446.125208341982"
+  ]
+}
