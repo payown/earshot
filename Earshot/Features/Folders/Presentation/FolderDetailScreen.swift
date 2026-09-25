@@ -998,10 +998,7 @@ struct FolderDetailScreen: View {
     }
 
     private func shareItems(for episode: Episode) -> [Any] {
-        if let url = URL(string: episode.audioURL) {
-            return [episode.title, url]
-        }
-        return [episode.title]
+        EpisodeShareItems.make(title: episode.title, audioURL: episode.audioURL)
     }
 
     private func move(_ offsets: IndexSet, _ destination: Int) {
