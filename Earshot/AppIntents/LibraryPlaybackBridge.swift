@@ -23,7 +23,12 @@ final class LibraryPlaybackBridge {
     func resume() async throws {
         let runtime = try await preparedRuntime()
         guard !runtime.isResettingLocalData else { throw LibraryIntentError.notReady }
-        guard runtime.player.nowPlayingEpisode != nil else { throw LibraryPlaybackError.noEpisode }
+        if runtime.player.nowPlayingEpisode == nil {
+            guard let context = runtime.readyContainer?.mainContext,
+                  let first = QueueRepository(context: context).queue().first else { throw LibraryPlaybackError.noEpisode }
+            start(runtime.player, first)
+            return
+        }
         // Unlike a toggle, repeating the command never pauses playback or
         // restarts a pending cross-device position lookup.
         guard !runtime.player.hasActivePlaybackRequest else { return }
@@ -74,6 +79,9 @@ final class LibraryPlaybackBridge {
         guard LibrarySearchIndex.isEnabled else { throw LibraryPlaybackError.searchDisabled }
         let runtime = try await preparedRuntime()
         guard let container = runtime.readyContainer else { throw LibraryIntentError.notReady }
+        try Task.checkCancellation()
+        guard LibrarySearchIndex.isEnabled else { throw LibraryPlaybackError.searchDisabled }
+        guard !runtime.isResettingLocalData else { throw LibraryIntentError.notReady }
         if choice == .queueFirst, let episode = QueueRepository(context: container.mainContext).queue().first(where: {
             !$0.isPlayed && $0.podcast?.isFollowed == true
                 && $0.podcast.map { SearchContent.identifier(feedURL: $0.feedURL) } == showID

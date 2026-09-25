@@ -64,7 +64,7 @@ struct PodcastEntityQuery: EntityStringQuery {
 
 struct EpisodeEntityQuery: EntityStringQuery {
     func entities(for identifiers: [String]) async throws -> [EpisodeEntity] {
-        try await LibraryIntentBridge.shared.content().filter { $0.guid != nil && identifiers.contains($0.id) }.map(EpisodeEntity.init)
+        try await LibraryIntentBridge.shared.episodes(for: identifiers).map(EpisodeEntity.init)
     }
     func entities(matching string: String) async throws -> [EpisodeEntity] {
         try await LibraryIntentBridge.shared.content().filter {

@@ -116,6 +116,14 @@ final class ShortcutAutomationTests: XCTestCase {
         defer { clean(runtime, audio) }
         let bridge = LibraryPlaybackBridge()
         bridge.install(runtime: runtime)
+        episodes[0].podcast?.subscriptionStateRaw = "catalogOnly"
+        try runtime.readyContainer?.mainContext.save()
+        LibraryIntentBridge.shared.install(runtime: runtime)
+        let indexed = try await SearchContentStore.make(container: try XCTUnwrap(runtime.readyContainer)).snapshot()
+        let lastID = SearchContent.identifier(feedURL: "https://example.com/feed", guid: "224")
+        XCTAssertFalse(indexed.contains { $0.id == lastID }, "Fixture must actually exceed search index coverage")
+        let rehydrated = try await EpisodeEntityQuery().entities(for: [lastID])
+        XCTAssertEqual(rehydrated.map(\.id), [lastID])
         let results = try await bridge.listedEpisodes(.queue, query: "")
         XCTAssertEqual(results.count, 225)
         XCTAssertEqual(results.last?.title, "Episode 224")
@@ -201,6 +209,33 @@ final class ShortcutAutomationTests: XCTestCase {
         catch { XCTAssertTrue(error is CancellationError) }
         XCTAssertFalse(episodes[0].isPlayed)
         XCTAssertNotNil(episodes[0].queueItem)
+    }
+
+    func testOptOutWhilePreparingQueueFirstPreventsPlayback() async throws {
+        let wasEnabled = LibrarySearchIndex.isEnabled
+        UserDefaults.standard.set(true, forKey: LibrarySearchIndex.enabledKey)
+        defer { UserDefaults.standard.set(wasEnabled, forKey: LibrarySearchIndex.enabledKey) }
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let show = Podcast(feedURL: "https://example.com/private", title: "Private")
+        let episode = Episode(guid: "one", title: "One", audioURL: "https://example.com/one.mp3")
+        context.insert(show); context.insert(episode); episode.podcast = show
+        context.insert(QueueItem(episode: episode, position: 0)); try context.save()
+        let runtime = AppRuntime(load: .ready(container), mode: .testHost)
+        let bridge = LibraryPlaybackBridge(start: { _, _ in XCTFail("Playback after opt-out") })
+        bridge.install(runtime: runtime)
+        let activation = Task { await runtime.activateRootServices(for: container) {
+            try await Task.sleep(for: .milliseconds(150))
+            runtime.settings.configure(context: context)
+            runtime.settings.onboardingComplete = true
+            UserDefaults.standard.set(false, forKey: LibrarySearchIndex.enabledKey)
+        } }
+        while runtime.rootServiceActivationStatus != .inProgress { await Task.yield() }
+        do {
+            try await bridge.playUnheard(showID: SearchContent.identifier(feedURL: show.feedURL), choice: .queueFirst)
+            XCTFail("Expected opt-out")
+        } catch { XCTAssertEqual(error as? LibraryPlaybackError, .searchDisabled) }
+        _ = await activation.value
     }
 
     func testReadyToUseShortcutsStayWithinSystemLimit() {

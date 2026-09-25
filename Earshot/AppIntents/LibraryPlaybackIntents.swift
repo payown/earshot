@@ -3,7 +3,7 @@ import Foundation
 
 struct ResumeListeningIntent: AudioPlaybackIntent {
     static let title: LocalizedStringResource = "Resume Listening in Earshot"
-    static let description = IntentDescription("Resumes the current episode from its saved position.")
+    static let description = IntentDescription("Resumes the current episode from its saved position, or starts the first queued episode if none is loaded.")
     static var openAppWhenRun: Bool { false } // iOS 18–25 compatibility.
     @available(iOS 26.0, *) static var supportedModes: IntentModes { .background }
 
