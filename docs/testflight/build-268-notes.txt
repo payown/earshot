@@ -1,0 +1,37 @@
+### Chapter 90 - Build 268
+
+**What to try first:**
+
+Open Settings, Siri and Search, Shortcuts guide. Earshot now has 24 actions and ten supplied shortcuts. Try resume, pause, skip, next/previous chapter, and Clear and Play Next through Shortcuts, the Action button, or a saved gesture. Try outside Earshot and while locked. Use disposable Queue episodes for removal tests. Chapters must already exist in the episode.
+
+Build a shortcut with Get Episodes from Earshot, Queue, Choose from List, then Play Episode. Enable Include Library in Siri and Search for saved content. Also try directory/category discovery, newest/oldest unheard playback, Queue placement/shuffle, speed, volume boost, silence trimming, sleep timers, seeking, and bookmarks. A bedtime shortcut should start playback before setting its timer.
+
+Search Add Podcast for a broad topic. Searches now request up to 200 results; the provider may return fewer. With VoiceOver, start and stop iOS dictation using the two-finger double tap, then move through results. Check for delays and accurate Follow states.
+
+Set a drama podcast oldest first and a news show newest first from Library. Reopen both: each should remember its own order.
+
+In Library options, try Hide caught-up podcasts. In Settings, Appearance, try Badge downloaded unheard episodes. The badge is optional and starts off. Play or remove a download and check the count; disable it and check it clears.
+
+This build reduces repeated work at launch and in Downloads, Chapters, search results, folder pickers, and the ungrouped Queue. Try long lists, switching tabs, changing folder membership, and moving Queue episodes. Check responsiveness, spoken positions, and saved navigation.
+
+BBC insecure audio redirects remain a known issue. Report the show and episode for playback/download failures. For other problems, include your iOS version and exact shortcut or steps.
+
+**Kashe's story:**
+
+*Kashe has already found a place for her phone.*
+
+The phone was in her coat pocket. Her coat was on the chair. She was at the table, holding a needle with enough thread through it that getting up would feel like a defeat.
+
+She had set up a shortcut before sitting down. Resume Listening. One job, which suited her.
+
+The interview returned. Later, a second shortcut moved past a chapter she had heard yesterday. She kept sewing.
+
+Renata called as she finished the hem.
+
+“Have you been productive?”
+
+“One leg.”
+
+“And the other?”
+
+“Still employed.”
