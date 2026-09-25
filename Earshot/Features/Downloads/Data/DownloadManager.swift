@@ -787,41 +787,52 @@ final class DownloadManager {
     /// bounded query — catching it would mean querying the enum, which is
     /// impossible — and it only ever fired on rows that were already internally
     /// inconsistent. An empty-string path is still caught (`"" != nil`).
-    func reconcileDownloadPaths() async {
-        guard let context else { return }
-        let episodes = await episodesWithDownloadPath(in: context)
-        guard !episodes.isEmpty else { return }
-
-        var rewritten = 0
-        var reset = 0
-        for episode in episodes {
-            guard let name = DownloadPaths.storedFileName(episode.downloadPath) else {
-                // A non-nil but unusable path (empty string): inconsistent row;
-                // make it re-downloadable.
-                episode.downloadPath = nil
-                ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
-                reset += 1
-                continue
-            }
-            guard let resolved = DownloadPaths.resolveLocalURL(storedValue: name) else {
-                // Downloads directory unavailable right now — don't clear state
-                // we can't verify; try again next launch.
-                continue
-            }
-            if FileManager.default.fileExists(atPath: resolved.path) {
-                if episode.downloadPath != name {
-                    LocalStateStore.setDownloadPath(name, on: episode, in: context)
-                    rewritten += 1
-                }
-            } else {
-                episode.downloadPath = nil
-                ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
-                reset += 1
-            }
+    func reconcileDownloadPaths(
+        scan: @MainActor (ModelContainer) async throws -> [DownloadPathReconciliation.Correction] = {
+            try await DownloadPathReconciliation.scan(container: $0)
         }
-        guard rewritten > 0 || reset > 0 else { return }
+    ) async {
+        guard let context else { return }
         save()
-        AppLog.networking.info("Reconciled download paths: \(rewritten) legacy path(s) rewritten, \(reset) missing file(s) reset")
+        do {
+            let corrections = try await scan(context.container)
+            var rewritten = 0
+            var reset = 0
+            // Only repair candidates need mirrored Episode models. Bound each
+            // main-actor batch and yield so navigation can proceed between them.
+            for start in stride(from: 0, to: corrections.count, by: 50) {
+                guard !Task.isCancelled, self.context === context,
+                      !RecoveryDownloadRemoval.isPending else { return }
+                let batch = corrections[start..<min(start + 50, corrections.count)]
+                let episodes = try LocalStateStore.episodes(matching: batch.map(\.key), in: context)
+                for correction in batch {
+                    guard let episode = episodes[correction.key],
+                          episode.downloadPath == correction.originalPath,
+                          episode.downloadStatus.rawValue == correction.originalStatus else { continue }
+                    if let name = correction.replacementName {
+                        LocalStateStore.setDownloadPath(name, on: episode, in: context)
+                        rewritten += 1
+                    } else {
+                        // A transfer may have finished while the worker scanned.
+                        // Recheck only missing-file candidates before clearing.
+                        if let url = correction.checkedURL,
+                           FileManager.default.fileExists(atPath: url.path) { continue }
+                        episode.downloadPath = nil
+                        ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+                        reset += 1
+                    }
+                }
+                save()
+                await Task.yield()
+            }
+            if rewritten > 0 || reset > 0 {
+                AppLog.networking.info("Reconciled download paths: \(rewritten) legacy path(s) rewritten, \(reset) missing file(s) reset")
+            }
+        } catch is CancellationError {
+            // A later activation can retry without changing unverified rows.
+        } catch {
+            AppLog.networking.error("Download path reconciliation failed: \(error.localizedDescription)")
+        }
     }
 
     /// Episodes with a non-nil `downloadPath`, resolved on the caller's (main)

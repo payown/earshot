@@ -915,6 +915,105 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
+    func testReconciliationPreservesFileCompletedDuringScan() async throws {
+        let context = TestStore.freshContext()
+        let name = "earshot-race-\(UUID().uuidString).mp3"
+        let episode = Episode(guid: "race", title: "Race", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        await manager.reconcileDownloadPaths { container in
+            let corrections = try await DownloadPathReconciliation.scan(container: container)
+            XCTAssertEqual(corrections.count, 1)
+            _ = try self.plantDownloadFile(named: name)
+            return corrections
+        }
+        XCTAssertEqual(episode.downloadPath, name)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
+    func testReconciliationPreservesPathChangedDuringScan() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "changed", title: "Changed", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: UUID().uuidString)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        let newName = "earshot-new-\(UUID().uuidString).mp3"
+        _ = try plantDownloadFile(named: newName)
+        await manager.reconcileDownloadPaths { container in
+            let corrections = try await DownloadPathReconciliation.scan(container: container)
+            LocalStateStore.setDownloadPath(newName, on: episode, in: context)
+            return corrections
+        }
+        XCTAssertEqual(episode.downloadPath, newName)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
+    func testReconciliationPreservesTransferRestartedDuringScan() async throws {
+        let context = TestStore.freshContext()
+        let name = UUID().uuidString
+        let episode = Episode(guid: "restarted", title: "Restarted", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        await manager.reconcileDownloadPaths { container in
+            let corrections = try await DownloadPathReconciliation.scan(container: container)
+            XCTAssertEqual(corrections.count, 1)
+            ActiveDownload.setDownloadStatus(.downloading, on: episode, in: context)
+            return corrections
+        }
+        XCTAssertEqual(episode.downloadPath, name)
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+    }
+
+    func testReconciliationDoesNotApplyAfterPersistenceReleased() async throws {
+        let context = TestStore.freshContext()
+        let missing = UUID().uuidString
+        let episode = Episode(guid: "released", title: "Released", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: missing)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        await manager.reconcileDownloadPaths { container in
+            let corrections = try await DownloadPathReconciliation.scan(container: container)
+            await manager.releasePersistence()
+            return corrections
+        }
+        XCTAssertEqual(episode.downloadPath, missing)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
+    func testReconciliationRepairsMoreThanOneBatch() async throws {
+        let context = TestStore.freshContext()
+        let episodes = (0..<125).map { index in
+            Episode(guid: "batch-\(index)", title: "Episode", audioURL: "https://h/a.mp3",
+                    downloadStatus: .downloaded, downloadPath: "missing-\(UUID().uuidString).mp3")
+        }
+        try persistLocalDownloadState(for: episodes, in: context)
+        let manager = makeManager(context)
+        await manager.reconcileDownloadPaths()
+        XCTAssertTrue(episodes.allSatisfy { $0.downloadPath == nil && $0.downloadStatus == .none })
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalEpisodeState>()), 0)
+    }
+
+    func testReconciliationCancellationLeavesStateUntouched() async throws {
+        let context = TestStore.freshContext()
+        let missing = UUID().uuidString
+        let episode = Episode(guid: "cancelled", title: "Cancelled", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: missing)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        let task = Task {
+            await manager.reconcileDownloadPaths { container in
+                let corrections = try await DownloadPathReconciliation.scan(container: container)
+                withUnsafeCurrentTask { $0?.cancel() }
+                return corrections
+            }
+        }
+        await task.value
+        XCTAssertEqual(episode.downloadPath, missing)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
     // MARK: downloadAndWait fast paths (#576)
 
     // Only the paths that return WITHOUT parking a continuation are testable

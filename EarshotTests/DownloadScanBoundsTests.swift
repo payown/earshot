@@ -208,6 +208,10 @@ final class DownloadScanBoundsTests: XCTestCase {
         context.insert(missingA)
         context.insert(missingB)
         context.insert(noPath)
+        // Assign permanent IDs before populating the runtime projection. The
+        // synthetic unsaved models can otherwise alias a temporary identity,
+        // persisting A's path for B and no longer representing a hydrated store.
+        try context.save()
         ActiveDownload.setDownloadStatus(.downloaded, on: missingA, in: context)
         ActiveDownload.setDownloadStatus(.downloaded, on: missingB, in: context)
         try context.save()

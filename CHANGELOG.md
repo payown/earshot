@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cold-launch download checks run off the main thread, initial tab preferences are reused, and repeated tab badge updates are combined to reduce navigation stalls.
+
 - Remove from Inbox now deletes downloaded audio when Delete downloads when done is enabled, without marking the episode played. Automatic cleanup also cancels pending and active downloads. With the setting off, downloads are kept.
 
 - Podcast setting edits use targeted subscription updates and narrower settings/folder lookups, reducing unnecessary work while adjusting Inbox limits. Immediate persistence and VoiceOver controls are unchanged.

@@ -1,0 +1,93 @@
+import XCTest
+import SwiftData
+import UIKit
+@testable import Earshot
+
+@MainActor
+final class ColdLaunchBenchmarks: XCTestCase {
+    @MainActor final class Heartbeat {
+        var largestGap = 0.0
+        var last = ProcessInfo.processInfo.systemUptime
+        var task: Task<Void, Never>?
+        func start() {
+            last = ProcessInfo.processInfo.systemUptime
+            task = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(1))
+                    guard let self, !Task.isCancelled else { return }
+                    let now = ProcessInfo.processInfo.systemUptime
+                    largestGap = max(largestGap, now - last)
+                    last = now
+                }
+            }
+        }
+        func stop() { task?.cancel(); task = nil }
+    }
+
+    func testDownloadedLaunchWork() async throws {
+        let seed = TestStore.freshContext()
+        let directory = try DownloadPaths.downloadsDirectory()
+        let prefix = "cold-tab-benchmark-\(UUID().uuidString)"
+        var files: [URL] = []
+        var seededEpisodes: [Episode] = []
+        defer { for file in files { try? FileManager.default.removeItem(at: file) } }
+        let podcast = Podcast(feedURL: "https://benchmark.invalid/feed", title: "Benchmark")
+        seed.insert(podcast)
+        for i in 0..<1500 {
+            let name = "\(prefix)-\(i).mp3"
+            let url = directory.appendingPathComponent(name)
+            try Data([0]).write(to: url)
+            files.append(url)
+            let episode = Episode(guid: "download-\(i)", title: "Episode \(i)", audioURL: "", downloadStatus: .downloaded, downloadPath: name)
+            episode.podcast = podcast
+            seed.insert(episode)
+            seededEpisodes.append(episode)
+            seed.insert(LocalEpisodeState(podcastFeedURL: podcast.feedURL, episodeGUID: episode.guid, downloadStatus: .downloaded, downloadPath: name))
+        }
+        try seed.save()
+        for (i, episode) in seededEpisodes.enumerated() {
+            LocalRuntimeState.shared.setEpisode(episode.persistentModelID, status: .downloaded, path: files[i].lastPathComponent)
+        }
+        for sample in 0..<5 {
+            let context = ModelContext(seed.container)
+            let manager = DownloadManager()
+            manager.configure(context: context)
+            try await Task.sleep(for: .milliseconds(30))
+            let heartbeat = Heartbeat()
+            heartbeat.start()
+            await Task.yield()
+            let start = ProcessInfo.processInfo.systemUptime
+            await manager.reconcileDownloadPaths()
+            let elapsed = ProcessInfo.processInfo.systemUptime - start
+            try await Task.sleep(for: .milliseconds(10))
+            heartbeat.stop()
+            print("COLDTAB_RECON sample=\(sample) elapsed_ms=\(elapsed * 1000) max_main_gap_ms=\(heartbeat.largestGap * 1000)")
+            XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalEpisodeState>(predicate: #Predicate { $0.downloadPath != nil })), 1500)
+            await manager.releasePersistence()
+        }
+    }
+
+    func testBadgeUpdateBurst() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let tabs = UITabBarController()
+        tabs.viewControllers = ["Inbox", "Queue", "Library", "Downloads", "Settings"].map { title in
+            let view = UIViewController(); view.tabBarItem.title = title; return view
+        }
+        window.rootViewController = tabs
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(50))
+        for sample in 0..<5 {
+            let heartbeat = Heartbeat(); heartbeat.start(); await Task.yield()
+            for _ in 0..<100 {
+                TabBarBadgeApplier.apply(tabIndex: 0, count: 1500)
+                TabBarBadgeApplier.apply(tabIndex: 1, count: 100)
+            }
+            try await Task.sleep(for: .milliseconds(500))
+            heartbeat.stop()
+            print("COLDTAB_BADGES sample=\(sample) max_main_gap_ms=\(heartbeat.largestGap * 1000)")
+            XCTAssertEqual(tabs.tabBar.items?[0].badgeValue, "1500")
+        }
+    }
+}
