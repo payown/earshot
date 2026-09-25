@@ -3,7 +3,7 @@ import Foundation
 
 struct GetFollowedPodcastsIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Followed Podcasts from Earshot"
-    static let description = IntentDescription("Returns the podcasts in Earshot’s bounded Siri/Search library, with titles and descriptions. Requires Include library in Siri and Search.")
+    static let description = IntentDescription("Returns the podcasts in Earshot’s bounded searchable library, with titles and descriptions. Enable library search in Earshot settings to use saved content.")
     @MainActor func perform() async throws -> some IntentResult & ReturnsValue<[PodcastEntity]> {
         guard LibrarySearchIndex.isEnabled else { throw LibraryPlaybackError.searchDisabled }
         _ = try await LibraryPlaybackBridge.shared.preparedRuntime()

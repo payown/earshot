@@ -1,4 +1,4 @@
-# Build 268 changes since TestFlight build 267
+# Build 269 changes since TestFlight build 267
 
 Last distributed build: 1.2.3 (267), App Store Connect build
 `9cae8cad-a327-416b-ad2f-dbecc9162eff`. Its archive source was `41ad72c9`,
@@ -17,9 +17,14 @@ All app changes after that release are included:
 | #987 | Expand to 24 App Intents and ten supplied shortcuts; share background player preparation; add chapter, Queue, library/directory/category, audio-setting, timer, seek and bookmark actions; expand App Entities and add an in-app Shortcuts guide. |
 
 The complete Chapter 90 is identical in `docs/kashe.md` and
-`docs/testflight/build-268-notes.txt`. Testing priorities precede the story.
+`docs/testflight/build-269-notes.txt`. Testing priorities precede the story.
 BBC insecure media redirects remain unresolved. Generated chapters, Snipcast
 integration, and a configurable compressor/equalizer are not part of this build.
 
 Release scope: TestFlight Internal Testing Group and Public Testers, explicitly
 authorized by Michael September 25. No App Store release submission.
+
+Build 268 was rejected before distribution: Apple validation 90626 disallowed
+“Siri” in two App Intent descriptions. Build 269 replaces those descriptions
+with library-search guidance. Playback behavior and privacy checks are unchanged.
+Chapter 90 belongs to build 269; no build 268 chapter was distributed.
