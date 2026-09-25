@@ -8,7 +8,7 @@ struct PodcastEntity: IndexedEntity {
     static let defaultQuery = PodcastEntityQuery()
     let id: String
     @Property(title: "Title") var title: String
-    var summary: String = ""
+    @Property(title: "Description") var summary: String
 
     init(_ content: SearchContent) {
         id = content.id; title = content.title; summary = content.summary
@@ -28,9 +28,9 @@ struct EpisodeEntity: IndexedEntity {
     let id: String
     @Property(title: "Title") var title: String
     @Property(title: "Podcast") var showName: String
-    var summary: String = ""
-    var date: Date? = nil
-    var duration: Int? = nil
+    @Property(title: "Description") var summary: String
+    @Property(title: "Published") var date: Date?
+    @Property(title: "Duration in seconds") var duration: Int?
 
     init(_ content: SearchContent) {
         id = content.id; title = content.title; showName = content.showName
@@ -64,7 +64,7 @@ struct PodcastEntityQuery: EntityStringQuery {
 
 struct EpisodeEntityQuery: EntityStringQuery {
     func entities(for identifiers: [String]) async throws -> [EpisodeEntity] {
-        try await LibraryIntentBridge.shared.content().filter { $0.guid != nil && identifiers.contains($0.id) }.map(EpisodeEntity.init)
+        try await LibraryIntentBridge.shared.episodes(for: identifiers).map(EpisodeEntity.init)
     }
     func entities(matching string: String) async throws -> [EpisodeEntity] {
         try await LibraryIntentBridge.shared.content().filter {

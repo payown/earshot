@@ -103,7 +103,7 @@ struct PodcastAudioSearchQuery: IntentValueQuery {
 @AppIntent(schema: .audio.playAudio)
 struct PlayPodcastAudioIntent: AudioStartingIntent {
     static let title: LocalizedStringResource = "Play Podcast Audio in Earshot"
-    static var supportedModes: IntentModes { .foreground }
+    static var supportedModes: IntentModes { .background }
     var audioEntity: PodcastAudioItem
     @Parameter(default: []) var playbackAttributes: Set<PodcastPlaybackAttributes>
     var warmupAudioQueueResult: PodcastWarmupResult?

@@ -1737,6 +1737,17 @@ final class PlayerService {
         return orderedPairs
     }
 
+    /// Resolve explicit navigation before a shortcut rearranges the current row.
+    func shortcutQueueNeighbor(_ direction: QueueNavigationDirection) -> Episode? {
+        guard let current = currentEpisode, let context, !currentEpisodeIsTransient else { return nil }
+        let queued = QueueRepository(context: context).queue()
+        guard let id = PlaybackLogic.queueNeighborID(
+            queue: displayedQueuePairs(queued).map(\.id),
+            current: current.persistentModelID, direction: direction
+        ) else { return nil }
+        return queued.first { $0.persistentModelID == id }
+    }
+
     func previousInQueue() { navigateQueue(.previous) }
     func nextInQueue() { navigateQueue(.next) }
 

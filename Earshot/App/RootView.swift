@@ -561,52 +561,7 @@ struct RootView: View {
     }
 
     private func activateRoot() async {
-        let activationCompleted = await runtime.activateRootServices(for: modelContext.container) {
-            runtime.bindRootServicesIfNeeded(to: modelContext.container) {
-                #if DEBUG
-                if ScreenshotHarness.isSeeding { ScreenshotFixtures.seed(into: modelContext) }
-                #endif
-                player.configure(context: modelContext)
-                quickActions.configure(context: modelContext)
-                downloads.configure(context: modelContext)
-                runtime.feedRefreshStatus.configure(context: modelContext)
-            }
-            try Task.checkCancellation()
-            await downloads.reconcileStuckDownloads()
-            try Task.checkCancellation()
-            await downloads.reconcileDownloadPaths()
-            try Task.checkCancellation()
-            settings.configure(context: modelContext)
-            runtime.listeningPlaces.configure(context: modelContext)
-            tips.configure(context: modelContext)
-            let capSettings = AppSettingsStore(context: modelContext)
-            let count = (try? PodcastQuery.followedCount(in: modelContext)) ?? 0
-            capSettings.introducePodcastCapGatingIfNeeded(currentPodcastCount: count)
-            #if DEBUG
-            if !ScreenshotHarness.isActive {
-                _ = await ExpirationMaintenance.run(
-                    modelContainer: modelContext.container
-                )
-            }
-            #else
-            _ = await ExpirationMaintenance.run(
-                modelContainer: modelContext.container
-            )
-            #endif
-            try await runtime.activateCloudProjectionIfNeeded(container: modelContext.container)
-            let statsReport = await StatsMaintenance.applyRetention(
-                modelContainer: modelContext.container,
-                days: settings.historyRetentionDays
-            )
-            if statsReport.removed > 0 {
-                NotificationCenter.default.post(
-                    name: .earshotListeningHistoryDidChange,
-                    object: nil
-                )
-            }
-            PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
-            await player.folderRuns.connect(context: modelContext, player: player)
-        }
+        let activationCompleted = await runtime.preparePlaybackServices(container: modelContext.container)
         guard activationCompleted else { return }
         if selectedTab == nil { selectedTab = RootTab(launchScreen: settings.launchScreen) }
         showOnboarding = !settings.onboardingComplete

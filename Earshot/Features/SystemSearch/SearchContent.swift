@@ -63,6 +63,35 @@ actor SearchContentStore {
         )
     }
 
+    /// Paged scalar query for deliberate shortcut selection, independent of
+    /// Spotlight's global episode budget and without loading an inverse graph.
+    func unheardEpisode(forShowID id: String, oldest: Bool) throws -> SearchContent? {
+        var shows = PodcastQuery.followedDescriptor()
+        shows.fetchLimit = 1_000
+        guard let show = try modelContext.fetch(shows).first(where: {
+            SearchContent.identifier(feedURL: $0.feedURL) == id
+        }) else { return nil }
+        let feed = show.feedURL
+        var descriptor = FetchDescriptor<Episode>(predicate: #Predicate {
+            $0.podcast?.feedURL == feed && !$0.guid.isEmpty
+        }, sortBy: [SortDescriptor(\Episode.pubDate, order: oldest ? .forward : .reverse), SortDescriptor(\Episode.guid)])
+        descriptor.fetchLimit = 100
+        let names = try PodcastNamePolicy.snapshot(context: modelContext)
+        while true {
+            try Task.checkCancellation()
+            let batch = try modelContext.fetch(descriptor)
+            if let episode = batch.first(where: { !$0.isPlayed }) {
+                return SearchContent(id: SearchContent.identifier(feedURL: feed, guid: episode.guid),
+                    feedURL: feed, guid: episode.guid, title: SearchContent.text(episode.title),
+                    showName: SearchContent.text(names[FeedURLIdentity.canonical(feed)] ?? show.title),
+                    summary: SearchContent.text(episode.episodeDescription), date: episode.pubDate,
+                    duration: episode.durationSeconds)
+            }
+            if batch.count < 100 { return nil }
+            descriptor.fetchOffset = (descriptor.fetchOffset ?? 0) + batch.count
+        }
+    }
+
     func snapshot() throws -> [SearchContent] {
         try Task.checkCancellation()
         var records: [String: SearchContent] = [:]

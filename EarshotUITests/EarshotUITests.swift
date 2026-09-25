@@ -521,6 +521,20 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Bookmarks"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
+    func testShortcutsGuideIsReachableFromSiriSettings() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        app.tabBars.buttons["Settings"].tap()
+        let settings = app.buttons["Siri and Search"].firstMatch
+        for _ in 0..<5 where !settings.isHittable { app.swipeUp() }
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+        app.buttons["Shortcuts guide"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Shortcuts guide"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Ready to use"].firstMatch.exists)
+    }
+
     func testQueueClearRequiresConfirmationAndCancelPreservesQueue() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]

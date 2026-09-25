@@ -288,6 +288,30 @@ final class AppRuntime {
         }
     }
 
+    /// A settled, already-onboarded store can serve audio intents while the
+    /// scene stays backgrounded. Migration/recovery presentation still waits
+    /// for the normal foreground path; this never changes or retries migration.
+    func completeBackgroundAudioLaunchIfReady() async {
+        guard !resetInFlight, !isSceneActive, !showsLaunchPreparation,
+              let pendingStoreLoad, case .ready(let container) = pendingStoreLoad,
+              let attemptID = launchAttemptID,
+              AppSettingsStore(context: container.mainContext).bool(
+                SettingsKey.onboardingComplete, default: false
+              ) else { return }
+        if mode != .testHost {
+            await DownloadManager.prepareForReadyContainer(container)
+        }
+        guard !resetInFlight, !isSceneActive, !showsLaunchPreparation,
+              launchAttemptID == attemptID else { return }
+        preparedDownloadContainer = container
+        launchFocusRequest = Self.focusDestination(for: container)
+        launchTask = nil
+        launchAttemptID = nil
+        completionAnnouncementAttemptID = nil
+        self.pendingStoreLoad = nil
+        install(.ready(container))
+    }
+
     /// Re-enters exactly the same asynchronous launch path in-process after an
     /// operational migration failure. Other recovery states remain terminal and
     /// never gain a retry or destructive side effect.
