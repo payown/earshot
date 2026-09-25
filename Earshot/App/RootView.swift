@@ -270,9 +270,10 @@ struct RootView: View {
     /// launch-screen preference synchronously (#492) instead of rendering Inbox
     /// and then jumping. `nil` means "not chosen yet" — the selection binding
     /// below falls back to ``resolvedLaunchTab`` until either the user navigates
-    /// or the `.task` seeds it from the loaded preference. A notification tap can
+    /// or the `.task` seeds it from the initial preference. A notification tap can
     /// also set it to switch to Library.
     @State private var selectedTab: RootTab?
+    @State private var launchPreferences = RootLaunchPreferences()
     /// Navigation path for the Library tab, so a notification can push a podcast
     /// detail screen onto it (#72).
     @State private var libraryPath: [Podcast] = []
@@ -561,9 +562,9 @@ struct RootView: View {
     }
 
     private func activateRoot() async {
+        if selectedTab == nil { selectedTab = resolvedLaunchTab }
         let activationCompleted = await runtime.preparePlaybackServices(container: modelContext.container)
         guard activationCompleted else { return }
-        if selectedTab == nil { selectedTab = RootTab(launchScreen: settings.launchScreen) }
         showOnboarding = !settings.onboardingComplete
         #if DEBUG
         if ScreenshotHarness.isActive {
@@ -628,9 +629,10 @@ struct RootView: View {
     /// rather than flashing Inbox and jumping (#492). `settings.launchScreen` is
     /// still the default at first body evaluation (it loads in `.task`), so this
     /// reads ``AppSettingsStore`` directly. Consulted only while `selectedTab` is
-    /// nil — a handful of launch renders — after which the seeded value is used.
+    /// nil. The root caches this first-paint snapshot and seeds the selection
+    /// before awaiting startup services.
     private var resolvedLaunchTab: RootTab {
-        RootTab(launchScreen: AppSettingsStore(context: modelContext).launchScreen())
+        launchPreferences.value(in: modelContext).tab
     }
 
     // MARK: Appearance (#461)
@@ -648,10 +650,10 @@ struct RootView: View {
         var accent = settings.accentColor
         var density = settings.layoutDensity
         if !settings.loaded {
-            let store = AppSettingsStore(context: modelContext)
-            theme = store.themeOverride()
-            accent = store.accentChoice()
-            density = store.layoutDensity()
+            let initial = launchPreferences.value(in: modelContext)
+            theme = initial.theme
+            accent = initial.accent
+            density = initial.density
         }
         return (theme, accent, density)
     }

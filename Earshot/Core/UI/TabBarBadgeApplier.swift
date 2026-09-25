@@ -51,25 +51,38 @@ struct TabBarBadgeApplier: UIViewRepresentable {
         Self.apply(tabIndex: tabIndex, count: count)
     }
 
+    private static var pendingCounts: [Int: Int] = [:]
+    private static var flushScheduled = false
+    private static var settledSuppression: DispatchWorkItem?
+
     /// Sets (or clears) the native badge on the tab at `tabIndex`, then hides the
     /// badge subtree from accessibility. Deferred one runloop so the tab bar
     /// exists on first launch. Shared by `updateUIView` and the selection-change
     /// re-assert in RootView.
     static func apply(tabIndex: Int, count: Int) {
+        pendingCounts[tabIndex] = count
+        guard !flushScheduled else { return }
+        flushScheduled = true
         DispatchQueue.main.async {
-            guard let tabBar = findTabBar(),
-                  let items = tabBar.items,
-                  tabIndex >= 0, tabIndex < items.count else { return }
-            items[tabIndex].badgeValue = TabBadgeFormat.badgeText(count)
-            // Force the badge view to exist this runloop so the suppression runs
-            // before VoiceOver can read it.
+            flushScheduled = false
+            let counts = pendingCounts
+            pendingCounts.removeAll(keepingCapacity: true)
+            guard let tabBar = findTabBar(), let items = tabBar.items else { return }
+            for (index, count) in counts where items.indices.contains(index) {
+                let value = TabBadgeFormat.badgeText(count)
+                if items[index].badgeValue != value { items[index].badgeValue = value }
+            }
+            // Preserve immediate suppression even when counts are unchanged:
+            // UIKit may have recreated the badge during a tab selection.
             tabBar.layoutIfNeeded()
             hideBadgeAccessibility(in: tabBar)
-            // Re-apply after layout settles: on first launch (and when the count
-            // changes) UIKit can (re)create the badge subtree a beat later.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            settledSuppression?.cancel()
+            let suppression = DispatchWorkItem { [weak tabBar] in
+                guard let tabBar else { return }
                 hideBadgeAccessibility(in: tabBar)
             }
+            settledSuppression = suppression
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: suppression)
         }
     }
 
