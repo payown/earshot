@@ -34,14 +34,13 @@ struct PodcastFolderPickerView: View {
     /// Bumped after each membership write. Because `Podcast` has no inverse to
     /// `FolderMembership`, inserting/removing a membership doesn't by itself
     /// invalidate anything this view observes; referencing this token while
-    /// computing each row's checked state forces the rows to recompute.
+    /// computing the selection set forces the rows to recompute.
     @State private var membershipVersion = 0
 
-    private var orderedFolders: [PodcastFolder] {
-        Self.orderedHierarchy(from: allFolders)
-    }
-
     var body: some View {
+        let _ = membershipVersion
+        let memberIDs = FolderMembershipSelection.folderIDs(for: podcast, memberships: memberships)
+        let orderedFolders = Self.orderedHierarchy(from: allFolders)
         NavigationStack {
             List {
                 if orderedFolders.isEmpty {
@@ -52,7 +51,7 @@ struct PodcastFolderPickerView: View {
                 } else {
                     Section {
                         ForEach(orderedFolders, id: \.persistentModelID) { folder in
-                            row(for: folder)
+                            row(for: folder, isIn: memberIDs.contains(folder.persistentModelID))
                         }
                     } header: {
                         Text("Your folders")
@@ -89,11 +88,7 @@ struct PodcastFolderPickerView: View {
 
     // MARK: Rows
 
-    private func row(for folder: PodcastFolder) -> some View {
-        // Reference membershipVersion so the checked state recomputes after a
-        // write (see the property's note); the value itself is unused.
-        _ = membershipVersion
-        let isIn = isMember(folder)
+    private func row(for folder: PodcastFolder, isIn: Bool) -> some View {
         let path = FolderLogic.pathString(folder)
         return Button {
             toggle(folder)
