@@ -238,6 +238,52 @@ final class ShortcutAutomationTests: XCTestCase {
         _ = await activation.value
     }
 
+    func testResumeStartsQueueWhenNothingIsLoaded() async throws {
+        let (runtime, episodes, audio) = try await fixture()
+        defer { clean(runtime, audio) }
+        var selected: Episode?
+        let bridge = LibraryPlaybackBridge(start: { _, episode in selected = episode })
+        bridge.install(runtime: runtime)
+        try await bridge.resume()
+        XCTAssertEqual(selected?.persistentModelID, episodes[0].persistentModelID)
+    }
+
+    func testUnheardSelectionSkipsPlayedAndHonorsOldestNewestAndQueue() async throws {
+        let wasEnabled = LibrarySearchIndex.isEnabled
+        UserDefaults.standard.set(true, forKey: LibrarySearchIndex.enabledKey)
+        defer { UserDefaults.standard.set(wasEnabled, forKey: LibrarySearchIndex.enabledKey) }
+        let (runtime, episodes, audio) = try await fixture()
+        defer { clean(runtime, audio) }
+        let context = try XCTUnwrap(runtime.readyContainer).mainContext
+        for (n, episode) in episodes.enumerated() { episode.pubDate = Date(timeIntervalSince1970: Double(n * 100)) }
+        episodes[0].isPlayed = true
+        try context.save()
+        var selected: Episode?
+        let bridge = LibraryPlaybackBridge(start: { _, episode in selected = episode })
+        bridge.install(runtime: runtime)
+        let showID = SearchContent.identifier(feedURL: "https://example.com/feed")
+        try await bridge.playUnheard(showID: showID, choice: .oldest)
+        XCTAssertEqual(selected?.persistentModelID, episodes[1].persistentModelID)
+        try await bridge.playUnheard(showID: showID, choice: .newest)
+        XCTAssertEqual(selected?.persistentModelID, episodes[2].persistentModelID)
+        try await bridge.playUnheard(showID: showID, choice: .queueFirst)
+        XCTAssertEqual(selected?.persistentModelID, episodes[1].persistentModelID)
+    }
+
+    func testColdBackgroundPreparationDoesNotNeedRootView() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        AppSettingsStore(context: container.mainContext).setBool(true, for: SettingsKey.onboardingComplete)
+        let runtime = AppRuntime(mode: .testHost, launchOperation: { _ in .ready(container) })
+        defer { runtime.player.stopAndUnload(); runtime.player.releasePersistence() }
+        runtime.updateLaunchScenePhase(.background)
+        let bridge = LibraryPlaybackBridge(); bridge.install(runtime: runtime)
+        let prepared = try await bridge.preparedRuntime()
+        XCTAssertTrue(prepared === runtime)
+        XCTAssertTrue(prepared.readyContainer === container)
+        XCTAssertEqual(prepared.rootServiceActivationStatus, .completed)
+        XCTAssertEqual(runtime.launchAttemptCount, 1)
+    }
+
     func testReadyToUseShortcutsStayWithinSystemLimit() {
         XCTAssertEqual(EarshotAppShortcuts.appShortcuts.count, 10)
         XCTAssertFalse(ResumeListeningIntent.openAppWhenRun)
