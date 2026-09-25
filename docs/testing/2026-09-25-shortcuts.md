@@ -54,7 +54,25 @@ checks guard operations. No signing, entitlements, reset or migration edits.
 Queue operations reuse the player/repository. Independent review identified and
 prompted fixes for Play Next grouped overrides, current-episode removal, defer
 from the middle of a Queue, and full Queue results beyond the search-index cap.
-Final review and physical-device acceptance are pending.
+The second agent approved production commit `2707cc1` and the final test changes
+at `e402be2`, with no remaining findings. Physical-device acceptance is pending.
+
+Focused validation passed on iOS 26.5 (132 tests; four iOS 27-only cases skipped)
+and iOS 27 (68 tests). A final iOS 27 run passed all 16 shortcut automation tests
+and the Shortcuts guide navigation UI test. The signed Release build's extracted
+App Intents metadata contains 24 actions and ten supplied App Shortcuts, including
+background playback registration. This verifies registration, not real-device
+Siri or Action button acceptance.
+
+The full eligible unit suite on a dedicated iOS 26.5 simulator passed: 2,391
+passed, zero failed, 33 skipped. The two known StoreKit suites were excluded
+per AGENTS.md. An earlier shared-simulator run was discarded after another
+test job interfered with it; the isolated run completed without a restart.
+
+Signed Release 1.2.3 (267), built from production commit `2707cc1`, was installed
+and launched on Michael's iPhone on September 25. Only tests and this report
+changed after that production commit. PR: https://github.com/payown/earshot/pull/987.
+Phone acceptance and GitHub CI remain pending.
 
 ## Phone checks
 
