@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Now Playing's More options includes Share episode link, separate from exporting the audio file.
+
 - Opt-in podcast and episode results in system search open Earshot's library and show notes. Siri and Shortcuts can resume listening and play selected episodes; iOS 27 adds podcast audio search and latest locally stored episode playback.
 - A separate, optional listening-suggestions setting shares successful manually selected playback with the system. Turning it off or removing searchable content clears the corresponding donations.
 

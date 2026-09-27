@@ -70,6 +70,26 @@ quick-action and bookmark-sharing tests are included.
    summary arrives and can be played in Earshot from the subscribed summary
    feed. Earshot does not create or configure that external workflow.
 
-Keep the feature in testing until a real Snipcast submission and the documented
-spoken-summary return path are verified. No merge, phone install or TestFlight
-release is implied by the payload tests.
+Keep the broader Snipcast feature in testing until a real Snipcast submission
+and the documented spoken-summary return path are verified. Payload tests alone
+do not establish that external workflow.
+
+## September 27 Now Playing sharing and phone acceptance
+
+Now Playing's More options now includes **Share episode link**, separate from
+Export audio file. The action captures the episode title and audio URL before
+closing More options, presents the same single-URL share payload, and uses the
+existing return-focus path when the Share Sheet closes. Existing episode-row
+Share actions and the player artwork rotor are unchanged.
+
+Michael found that Share had been disabled in his configured episode Quick
+Actions. That explained its absence from his episode-row Actions rotor.
+
+The new menu action was built together with PR #991's payload changes using
+Xcode 27.0 (27A266a). The signed Release build and signature verification passed.
+Version 1.2.3 (270) was installed directly on Michael's iPhone running iOS 27.2,
+and device launch succeeded. This local build retained the existing build number.
+Michael then reported "all is working" and requested merge/closure and a main
+update, accepting the installed sharing change. No TestFlight distribution was
+performed. No separate Snipcast submission or Listen Later return-path result
+was supplied in this confirmation.
