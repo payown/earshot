@@ -20,6 +20,12 @@ struct PlaybackFolderNavigationAction: Sendable {
     }
 }
 
+private struct EpisodeLinkShareRequest: Identifiable {
+    let id = UUID()
+    let title: String
+    let audioURL: String
+}
+
 private struct PlaybackFolderNavigationKey: EnvironmentKey {
     static let defaultValue = PlaybackFolderNavigationAction()
 }
@@ -70,6 +76,7 @@ struct NowPlayingScreen: View {
     // disable itself while in flight.
     @State private var exportURL: ExportFile?
     @State private var isExporting = false
+    @State private var episodeLinkShareRequest: EpisodeLinkShareRequest?
 
     @AccessibilityFocusState private var speedBadgeFocused: Bool
 
@@ -146,6 +153,12 @@ struct NowPlayingScreen: View {
             }
             .sheet(item: $exportURL, onDismiss: restoreOptionsFocus) { file in
                 ShareSheet(items: [file.url])
+            }
+            .sheet(item: $episodeLinkShareRequest, onDismiss: restoreOptionsFocus) { request in
+                ShareSheet(items: EpisodeShareItems.make(
+                    title: request.title,
+                    audioURL: request.audioURL
+                ))
             }
             .sheet(isPresented: $showingBookmarks, onDismiss: restoreOptionsFocus) {
                 if let episode = player.nowPlayingEpisode {
@@ -857,6 +870,17 @@ struct NowPlayingScreen: View {
                 Label(exportActionLabel, systemImage: "square.and.arrow.up")
             }
             .disabled(isExporting)
+
+            Button {
+                guard let episode = player.nowPlayingEpisode else { return }
+                let request = EpisodeLinkShareRequest(
+                    title: episode.title,
+                    audioURL: episode.audioURL
+                )
+                closeOptionsThen { episodeLinkShareRequest = request }
+            } label: {
+                Label("Share episode link", systemImage: "link")
+            }
 
             Button {
                 closeOptionsThen { showingBookmarks = true }

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Episode sharing supplies a single audio URL to Share Sheet shortcuts, with the title kept in preview metadata instead of a separate input item.
+
 - Cold-launch download checks run off the main thread, initial tab preferences are reused, and repeated tab badge updates are combined to reduce navigation stalls.
 
 - Remove from Inbox now deletes downloaded audio when Delete downloads when done is enabled, without marking the episode played. Automatic cleanup also cancels pending and active downloads. With the setting off, downloads are kept.
@@ -20,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System playback controls can resume the saved episode when Earshot relaunches in the background after a pause. Corrected audio-session configuration and prevented late startup work from interrupting resumed playback.
 
 ### Added
+
+- Now Playing's More options includes Share episode link, separate from exporting the audio file.
 
 - Opt-in podcast and episode results in system search open Earshot's library and show notes. Siri and Shortcuts can resume listening and play selected episodes; iOS 27 adds podcast audio search and latest locally stored episode playback.
 - A separate, optional listening-suggestions setting shares successful manually selected playback with the system. Turning it off or removing searchable content clears the corresponding donations.

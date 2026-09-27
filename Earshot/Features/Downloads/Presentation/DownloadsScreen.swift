@@ -549,9 +549,6 @@ struct DownloadsScreen: View {
     }
 
     private func shareItems(for episode: Episode) -> [Any] {
-        if let url = URL(string: episode.audioURL) {
-            return [episode.title, url]
-        }
-        return [episode.title]
+        EpisodeShareItems.make(title: episode.title, audioURL: episode.audioURL)
     }
 }
