@@ -1,0 +1,35 @@
+Chapter 93 - Build 272
+
+What to try first:
+
+Personal Audio is still alpha and needs thorough testing. Local testing has worked, but real audio files, existing libraries, and different VoiceOver setups can turn up problems. Please expect rough edges and tell us when something doesn't work.
+
+When upgrading from build 271, first check that your existing Library, subscriptions, downloads, and Queue are still there, including the Queue's items and order. Build 272 does not add another database schema change; Personal Audio remains stored on this device.
+
+Open Library, then Personal Audio. With VoiceOver, check that the hierarchy is clear and that each item speaks its useful details and playback state. Open the Actions rotor and try Play now, Mark as played or unplayed, and Delete. Check the confirmation, then cancel if you don't want to remove the item. The touch Actions menu should still work too.
+
+Try Add to Earshot from the empty screen and again after you have an item. Import an MP3 or M4A, play and resume it, seek, change speed, and try chapters if the file has them. Test background and Lock Screen controls. Confirm deleting an Earshot copy leaves the original in Files. Please include your iOS version and steps in any report.
+
+This build refines Personal Audio's VoiceOver actions, item details, and focus behavior. It does not change the V13 data model introduced in build 271.
+
+Kashe's story:
+
+Kashe has found the onions. The recording has more to say.
+
+The pot was on low. Kashe set the phone beside it and found the recording without searching through Files this time.
+
+VoiceOver said Personal Audio, then the title Renata had given it. Kashe opened the Actions rotor. Play now. Mark as played. Delete.
+
+“Delete?” she said.
+
+Renata was on speaker. “You don't have to.”
+
+“I'm checking what it does.” The confirmation said Earshot would remove its copy. The original would stay in Files. Kashe canceled and went back to the recording.
+
+She backed up to the part about the onions. Renata had added a note about letting them soften before the garlic.
+
+“I found the onions,” Kashe said.
+
+“And?”
+
+“They're still there.”

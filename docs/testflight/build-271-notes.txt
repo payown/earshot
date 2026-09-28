@@ -1,0 +1,31 @@
+### Chapter 92 - Build 271
+
+**What to try first:**
+
+Personal Audio is an alpha feature and needs thorough testing. Our local testing has worked, but it hasn't been tested with enough real-world audio files and existing Earshot libraries yet. Please expect rough edges; some things may not work as expected.
+
+If you're upgrading Earshot, first check that your Library, subscriptions, downloads, and Queue are still present, including the Queue's items and order. If Personal Audio is empty, try its Add to Earshot action. Import a file from Files, then try playback, seeking, chapters, and played state. Check the title, artist, and duration when available, and try removing the item. Please report anything unexpected, including missing existing data, import or playback problems, and VoiceOver or focus issues. Include your iOS version and the steps you took.
+
+This build adds a Personal Audio destination in Library and a dedicated screen for importing and playing local audio files. Personal Audio stays on this device and is separate from podcasts.
+
+**Kashe's story:**
+
+*Kashe has a recording for the road. The onions can wait.*
+
+Kashe had saved the recording in Files weeks ago, which was why she could never remember where it was.
+
+Renata had sent it after a client mentioned a soup Kashe used to make. The recording was mostly a list of ingredients, with a pause in the middle while Renata found the right cupboard.
+
+Kashe opened Personal Audio and added the file to Earshot. The title came through. She started it while putting her work bag by the door, then backed up when the recipe reached the part about the onions.
+
+The phone stayed on the counter while she found a pen.
+
+Renata called.
+
+“Did you make it?”
+
+“I found the onions.”
+
+“That wasn't the question.”
+
+“I'm getting there.”

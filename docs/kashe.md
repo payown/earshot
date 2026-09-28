@@ -15,9 +15,9 @@ chapter is not done when it goes out in TestFlight notes, it is done when it liv
 here. To prevent drift:
 
 1. **Write the chapter into this file as part of shipping it.** When you draft a
-   new chapter for a TestFlight build, add the full chapter (heading, build
-   number, italic intro, prose, and "What to test") to "The story" section below
-   in the same change that deploys the build, not later from memory.
+   new chapter for a TestFlight build, add the full chapter (chapter/build
+   heading, "What to try first," and Kashe's story) to "The story" below in the
+   same change that distributes the build, not later from memory.
 2. **Update "Details established so far"** above with any new facts the chapter
    revealed about Kashe, so future chapters stay consistent.
 3. **The chapter number and build number must match what actually deployed.**
@@ -70,13 +70,16 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 - She doesn't know she's in a story. She's just a person.
 - Reveal details about her life gradually. Don't dump backstory. Let it surface.
 - Her relationship with Earshot is earned, not instant. She's skeptical. Trust builds slowly.
-- Every chapter that corresponds to a build ends with a plain-language "What to test" section.
+- Every chapter that corresponds to a build starts with a plain-language "What to try first" section before Kashe's story.
 - The story breathes with the product. No forced cadence or artificial drama.
 - Keep new details consistent with what's already been established (see chapters below).
 
 ## Details established so far
 
 - Kashe finishes both trouser hems and puts away her sewing things (Chapter 91).
+
+- Renata once sent Kashe a voice recording with a soup recipe after a client
+  mentioned it (Chapter 92).
 
 - She uses a Resume Listening shortcut while mending clothes, leaving her phone
   in her coat pocket (Chapter 90).
@@ -3378,3 +3381,73 @@ Kashe felt along the table. Scissors, thread, needle case. The button tin was un
 She started an episode and put the scissors away first. The tin could wait until she had a free hand.
 
 ---
+
+### Chapter 92 - Build 271
+
+**What to try first:**
+
+Personal Audio is an alpha feature and needs thorough testing. Our local testing has worked, but it hasn't been tested with enough real-world audio files and existing Earshot libraries yet. Please expect rough edges; some things may not work as expected.
+
+If you're upgrading Earshot, first check that your Library, subscriptions, downloads, and Queue are still present, including the Queue's items and order. If Personal Audio is empty, try its Add to Earshot action. Import a file from Files, then try playback, seeking, chapters, and played state. Check the title, artist, and duration when available, and try removing the item. Please report anything unexpected, including missing existing data, import or playback problems, and VoiceOver or focus issues. Include your iOS version and the steps you took.
+
+This build adds a Personal Audio destination in Library and a dedicated screen for importing and playing local audio files. Personal Audio stays on this device and is separate from podcasts.
+
+**Kashe's story:**
+
+*Kashe has a recording for the road. The onions can wait.*
+
+Kashe had saved the recording in Files weeks ago, which was why she could never remember where it was.
+
+Renata had sent it after a client mentioned a soup Kashe used to make. The recording was mostly a list of ingredients, with a pause in the middle while Renata found the right cupboard.
+
+Kashe opened Personal Audio and added the file to Earshot. The title came through. She started it while putting her work bag by the door, then backed up when the recipe reached the part about the onions.
+
+The phone stayed on the counter while she found a pen.
+
+Renata called.
+
+“Did you make it?”
+
+“I found the onions.”
+
+“That wasn't the question.”
+
+“I'm getting there.”
+
+---
+
+### Chapter 93 - Build 272
+
+**What to try first:**
+
+Personal Audio is still alpha and needs thorough testing. Local testing has worked, but real audio files, existing libraries, and different VoiceOver setups can turn up problems. Please expect rough edges and tell us when something doesn't work.
+
+When upgrading from build 271, first check that your existing Library, subscriptions, downloads, and Queue are still there, including the Queue's items and order. Build 272 does not add another database schema change; Personal Audio remains stored on this device.
+
+Open Library, then Personal Audio. With VoiceOver, check that the hierarchy is clear and that each item speaks its useful details and playback state. Open the Actions rotor and try Play now, Mark as played or unplayed, and Delete. Check the confirmation, then cancel if you don't want to remove the item. The touch Actions menu should still work too.
+
+Try Add to Earshot from the empty screen and again after you have an item. Import an MP3 or M4A, play and resume it, seek, change speed, and try chapters if the file has them. Test background and Lock Screen controls. Confirm deleting an Earshot copy leaves the original in Files. Please include your iOS version and steps in any report.
+
+This build refines Personal Audio's VoiceOver actions, item details, and focus behavior. It does not change the V13 data model introduced in build 271.
+
+**Kashe's story:**
+
+*Kashe has found the onions. The recording has more to say.*
+
+The pot was on low. Kashe set the phone beside it and found the recording without searching through Files this time.
+
+VoiceOver said Personal Audio, then the title Renata had given it. Kashe opened the Actions rotor. Play now. Mark as played. Delete.
+
+“Delete?” she said.
+
+Renata was on speaker. “You don't have to.”
+
+“I'm checking what it does.” The confirmation said Earshot would remove its copy. The original would stay in Files. Kashe canceled and went back to the recording.
+
+She backed up to the part about the onions. Renata had added a note about letting them soften before the garlic.
+
+“I found the onions,” Kashe said.
+
+“And?”
+
+“They're still there.”
