@@ -3,13 +3,13 @@ import SwiftData
 import CryptoKit
 @testable import Earshot
 
-/// Guards the V12 live graph against an unversioned model edit (#425) and audits
+/// Guards the V13 live graph against an unversioned model edit (#425) and audits
 /// the exact compatibility rules required before the mirrored configuration may
 /// be switched from `.none` to CloudKit in a later phase.
 @MainActor
 final class SchemaDriftTests: XCTestCase {
 
-    /// The live model graph, kept in lockstep with the current V12 model lists.
+    /// The live model graph, kept in lockstep with the current V13 model lists.
     private static let liveModels: [any PersistentModel.Type] = [
         Podcast.self,
         Episode.self,
@@ -25,6 +25,7 @@ final class SchemaDriftTests: XCTestCase {
         LocalPodcastState.self,
         LocalEpisodeState.self,
         LocalAppSetting.self,
+        PersonalAudioItem.self,
     ]
 
     /// `entityName.attributeName` -> `isOptional|valueType` for every attribute.
@@ -87,13 +88,16 @@ final class SchemaDriftTests: XCTestCase {
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 
-    func testLiveAttributesMatchV12AndShippedV11HasNotDrifted() {
-        let currentV12 = attributeMap(Schema(versionedSchema: EarshotSchemaV12.self))
+    func testLiveAttributesMatchV13AndShippedV12AndV11RemainFrozen() {
+        let shippedV12 = attributeMap(Schema(versionedSchema: EarshotSchemaV12.self))
+        let currentV13 = attributeMap(Schema(versionedSchema: EarshotSchemaV13.self))
         let frozenV11 = attributeMap(Schema(versionedSchema: EarshotSchemaV11.self))
         let live = attributeMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, currentV12)
+        XCTAssertEqual(live, currentV13)
+        XCTAssertNil(shippedV12["PersonalAudioItem.id"])
+        XCTAssertEqual(currentV13["PersonalAudioItem.id"], "false|String")
         XCTAssertNil(frozenV11["Podcast.subscriptionStateRaw"])
-        XCTAssertEqual(currentV12["Podcast.subscriptionStateRaw"], "true|Optional<String>")
+        XCTAssertEqual(shippedV12["Podcast.subscriptionStateRaw"], "true|Optional<String>")
         XCTAssertNil(attributeMap(Schema(versionedSchema: EarshotSchemaV10.self))[
             "LocalEpisodeState.volumeBoostRaw"
         ])
@@ -142,20 +146,24 @@ final class SchemaDriftTests: XCTestCase {
         )
     }
 
-    /// The additive V12 field does not change any relationship.
-    func testLiveRelationshipsMatchV12AndV11() {
+    /// V13 adds only a local entity; mirrored relationships remain unchanged.
+    func testLiveRelationshipsMatchV13AndV12() {
         let frozenV11 = relationshipMap(Schema(versionedSchema: EarshotSchemaV11.self))
-        let currentV12 = relationshipMap(Schema(versionedSchema: EarshotSchemaV12.self))
+        let shippedV12 = relationshipMap(Schema(versionedSchema: EarshotSchemaV12.self))
+        let currentV13 = relationshipMap(Schema(versionedSchema: EarshotSchemaV13.self))
         let live = relationshipMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, currentV12)
-        XCTAssertEqual(currentV12, frozenV11)
+        XCTAssertEqual(live, currentV13)
+        XCTAssertEqual(shippedV12, frozenV11)
+        var v13WithoutPersonalAudio = currentV13
+        v13WithoutPersonalAudio.removeValue(forKey: "PersonalAudioItem")
+        XCTAssertEqual(v13WithoutPersonalAudio, shippedV12)
     }
 
-    /// Guards the lockstep assumption between the live list and V12.
-    func testLiveListMatchesV12ModelsList() {
-        let v11Names = Set(Schema(versionedSchema: EarshotSchemaV12.self).entities.map(\.name))
+    /// Guards the lockstep assumption between the live list and V13.
+    func testLiveListMatchesV13ModelsList() {
+        let v13Names = Set(Schema(versionedSchema: EarshotSchemaV13.self).entities.map(\.name))
         let liveNames = Set(Schema(Self.liveModels).entities.map(\.name))
-        XCTAssertEqual(v11Names, liveNames)
+        XCTAssertEqual(v13Names, liveNames)
     }
 
 }
@@ -233,10 +241,20 @@ final class CloudKitSchemaCompatibilityTests: XCTestCase {
     func testV12LocalSchemaHasNoRelationshipsAndSplitContainerConstructs() throws {
         let local = Schema(EarshotSchemaV12.localModels)
         XCTAssertTrue(local.entities.allSatisfy { $0.relationships.isEmpty })
+        let localV13 = Schema(EarshotSchemaV13.localModels)
+        XCTAssertTrue(localV13.entities.allSatisfy { $0.relationships.isEmpty })
+        XCTAssertFalse(Schema(EarshotSchemaV13.mirroredModels).entities.contains {
+            $0.name == "PersonalAudioItem"
+        })
         let container = try ModelContainerFactory.makeInMemory()
         XCTAssertEqual(container.configurations.count, 2)
         container.mainContext.insert(Podcast(feedURL: "https://example.com/feed", title: "Show"))
         container.mainContext.insert(LocalAppSetting(key: "cache", value: "local"))
+        container.mainContext.insert(PersonalAudioItem(
+            title: "Local only", originalFilename: "source.mp3",
+            mediaFilename: "generated.mp3", typeIdentifier: "public.mp3",
+            byteSize: 42, contentHash: "hash"
+        ))
         try container.mainContext.save()
     }
 }

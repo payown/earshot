@@ -58,7 +58,7 @@ enum MigrationBackupError: Error, Equatable, Sendable {
 /// Creates, catalogs, restores, and retires migration safety snapshots. A
 /// manifest is written last so a partial copy is never considered a backup.
 enum MigrationBackupManager {
-    static let targetSchemaMajor = 12
+    static let targetSchemaMajor = 13
     static let initialFreeSpaceMultiplier = 4.5
     static let retainedBackupFreeSpaceMultiplier = 3.5
     #if DEBUG
@@ -375,27 +375,29 @@ enum MigrationBackupManager {
 
     private static func knownPrimaryRoute(from sourceMajor: Int) -> Set<Int> {
         switch sourceMajor {
-        case 5: [5, 10, 12]
-        case 6: [6, 7, 10, 12]
-        case 7: [7, 10, 12]
-        case 8, 9: [sourceMajor, 10, 12]
-        case 10: [10, 12]
-        case 11: [11, 12]
+        case 5: [5, 10, 12, 13]
+        case 6: [6, 7, 10, 12, 13]
+        case 7: [7, 10, 12, 13]
+        case 8, 9: [sourceMajor, 10, 12, 13]
+        case 10: [10, 12, 13]
+        case 11: [11, 12, 13]
+        case 12: [12, 13]
         default: []
         }
     }
 
     private static func knownLocalRoute(from sourceMajor: Int) -> Set<Int> {
         switch sourceMajor {
-        case 8, 9: [sourceMajor, 10, 11, 12]
-        case 10: [10, 11, 12]
-        case 11: [11, 12]
+        case 8, 9: [sourceMajor, 10, 11, 12, 13]
+        case 10: [10, 11, 12, 13]
+        case 11: [11, 12, 13]
+        case 12: [12, 13]
         default: []
         }
     }
 
     private static func knownCreatedLocalRoute(from sourceMajor: Int) -> Set<Int> {
-        (5...7).contains(sourceMajor) ? [12] : []
+        (5...7).contains(sourceMajor) ? [12, 13] : []
     }
     static func restore(_ backup: MigrationBackupDescriptor, at storeURL: URL) throws {
         try recoverInterruptedErasure(at: storeURL)

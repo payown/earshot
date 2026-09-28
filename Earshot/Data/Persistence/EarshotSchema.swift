@@ -2108,6 +2108,32 @@ enum EarshotMirroredSchemaV12: VersionedSchema {
     static var models: [any PersistentModel.Type] { EarshotSchemaV12.mirroredModels }
 }
 
+/// V13 adds device-local Personal Audio records. The mirrored model graph is
+/// unchanged; imported identities and media must never enter Earshot CloudKit.
+enum EarshotSchemaV13: VersionedSchema {
+    static let versionIdentifier = Schema.Version(13, 0, 0)
+    static var models: [any PersistentModel.Type] { mirroredModels + localModels }
+
+    static let mirroredModels = EarshotSchemaV12.mirroredModels
+    static let localModels: [any PersistentModel.Type] =
+        EarshotSchemaV12.localModels + [PersonalAudioItem.self]
+}
+
+enum EarshotMirroredSchemaV13: VersionedSchema {
+    static let versionIdentifier = Schema.Version(13, 0, 0)
+    static var models: [any PersistentModel.Type] { EarshotSchemaV13.mirroredModels }
+}
+
+enum EarshotV12ToV13MigrationPlan: SchemaMigrationPlan {
+    static var schemas: [any VersionedSchema.Type] {
+        [EarshotSchemaV12.self, EarshotSchemaV13.self]
+    }
+
+    static var stages: [MigrationStage] {
+        [.lightweight(fromVersion: EarshotSchemaV12.self, toVersion: EarshotSchemaV13.self)]
+    }
+}
+
 enum EarshotV10ToV11MigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
         [EarshotSchemaV10.self, EarshotSchemaV11.self]
