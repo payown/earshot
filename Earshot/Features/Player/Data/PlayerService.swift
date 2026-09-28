@@ -36,7 +36,7 @@ final class PlayerService {
     func beginStartupRestoration() -> Bool {
         guard !startupRestorationCompleted else { return false }
         startupRestorationCompleted = true
-        return currentEpisode == nil
+        return currentEpisode == nil && currentPersonalAudio == nil
     }
 
     // MARK: Observed state (drives the UI)
@@ -112,6 +112,17 @@ final class PlayerService {
     /// observed surface: list rows read it to show a "Now Playing" badge and
     /// re-render when the loaded episode changes. `nil` when nothing is loaded.
     private(set) var nowPlayingEpisodeID: PersistentIdentifier?
+    /// Local audio identity is kept separate from Episode's SwiftData identity.
+    private(set) var nowPlayingPersonalAudioID: String?
+    @ObservationIgnored private var currentPersonalAudio: PersonalAudioItem?
+
+    var nowPlayingPersonalAudio: PersonalAudioItem? { currentPersonalAudio }
+    var playbackContentIdentity: PlaybackContentIdentity? {
+        if let id = nowPlayingPersonalAudioID { return .personalAudio(id) }
+        guard let episode = currentEpisode else { return nil }
+        return .episode(DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid))
+    }
+    var hasLoadedContent: Bool { currentEpisode != nil || currentPersonalAudio != nil }
 
     /// The sleep timer. Observed so the UI shows the live countdown; the player
     /// pauses when it fires.
@@ -121,6 +132,7 @@ final class PlayerService {
 
     @ObservationIgnored private let player = AVPlayer()
     @ObservationIgnored private let playbackHandoff: any PlaybackHandoffClient
+    @ObservationIgnored private let personalAudioStorage: PersonalAudioStorage
     /// A direct handoff fetch is bounded and cancellable. A new transport action
     /// supersedes the old request so a late response can never seek the wrong
     /// episode or start audio after the user has paused again.
@@ -220,12 +232,14 @@ final class PlayerService {
         playbackHandoff: any PlaybackHandoffClient = PlaybackHandoffClientFactory.make(),
         audioSession: any PlayerAudioSession = AVAudioSession.sharedInstance(),
         mediaHTTPSProbe: any MediaHTTPSProbing = MediaHTTPSProbe(),
-        mediaRecoveryFeed: any FeedFetching = FeedService()
+        mediaRecoveryFeed: any FeedFetching = FeedService(),
+        personalAudioStorage: PersonalAudioStorage = PersonalAudioStorage()
     ) {
         self.playbackHandoff = playbackHandoff
         self.audioSession = audioSession
         self.mediaHTTPSProbe = mediaHTTPSProbe
         self.mediaRecoveryFeed = mediaRecoveryFeed
+        self.personalAudioStorage = personalAudioStorage
     }
 
     /// Generation token for the sleep-timer volume fade (review P1-4). Each fade
@@ -521,11 +535,133 @@ final class PlayerService {
             invalidatePendingUserSeek()
         }
         currentEpisode = episode
+        if episode != nil {
+            currentPersonalAudio = nil
+            nowPlayingPersonalAudioID = nil
+        }
         nowPlayingEpisodeID = episode?.persistentModelID
         if let episode, let context, !currentEpisodeIsTransient {
             currentVolumeBoostOverride = LocalStateStore.volumeBoost(for: episode, in: context)
         } else {
             currentVolumeBoostOverride = nil
+        }
+    }
+
+    private func setCurrentPersonalAudio(_ item: PersonalAudioItem?) {
+        if currentPersonalAudio?.id != item?.id { invalidatePendingUserSeek() }
+        currentPersonalAudio = item
+        nowPlayingPersonalAudioID = item?.id
+        if item != nil {
+            currentEpisode = nil
+            nowPlayingEpisodeID = nil
+            currentEpisodeIsTransient = false
+            currentVolumeBoostOverride = nil
+        }
+    }
+
+    /// Plays app-managed Personal Audio through the same AVPlayer, audio session,
+    /// remote commands, rate controls, and Now Playing pipeline as Episodes.
+    func play(_ item: PersonalAudioItem) {
+        guard let url = personalAudioStorage.resolve(item.mediaFilename) else { return }
+        beginUserMediaAttempt()
+        cancelHandoffOperation()
+        folderRuns.pauseForTransport()
+        _ = persistCurrentPosition()
+        flushListeningSession()
+        beginMediaResolution()
+        guard configureSession() else { return }
+        cancelFadeIfNeeded()
+        currentChapters = []
+        resetChapterObservables()
+        lastAutoSkipFromChapterIndex = nil
+        isFastForwarding = false
+        rateBeforeFastForward = nil
+        playbackOrigin = nil
+        currentEpisodeIsTransient = false
+        setCurrentEpisode(nil)
+        setCurrentPersonalAudio(item)
+        handoffRateOverride = nil
+        currentTitle = item.title
+        currentArtist = item.artist
+        durationSeconds = item.durationSeconds ?? 0
+        currentPlaybackURL = url
+        currentMediaResolutionComplete = true
+        let playerItem = makePlayerItem(url: url)
+        player.pause()
+        player.replaceCurrentItem(with: playerItem)
+        observeCurrentItem(playerItem)
+        applyAudioProcessing(to: playerItem)
+        let resume = resumePosition(for: item)
+        if resume > 0 { player.seek(to: CMTime(seconds: resume, preferredTimescale: 1)) }
+        currentPositionSeconds = Double(resume)
+        lastPersistedSecond = nil
+        resetListeningTracking()
+        applyRate()
+        player.play()
+        isPlaying = true
+        intendsToPlay = true
+        pausedByInterruption = false
+        settings?.setRawValue(
+            PlaybackContentIdentity.personalAudioPrefix + item.id,
+            for: SettingsKey.lastPlayingEpisodeID
+        )
+        updateNowPlayingInfo()
+        loadChapters(for: item, audioURL: url)
+    }
+
+    /// Loads a Personal Audio item paused, including crash-recovered position.
+    func load(_ item: PersonalAudioItem, autoplay: Bool = false) {
+        if autoplay { play(item); return }
+        guard let url = personalAudioStorage.resolve(item.mediaFilename) else { return }
+        cancelHandoffOperation()
+        beginMediaResolution()
+        currentChapters = []
+        resetChapterObservables()
+        lastAutoSkipFromChapterIndex = nil
+        isFastForwarding = false
+        rateBeforeFastForward = nil
+        playbackOrigin = PlaybackLogic.playbackOrigin(after: .restoredAfterRelaunch, current: playbackOrigin)
+        currentEpisodeIsTransient = false
+        setCurrentEpisode(nil)
+        setCurrentPersonalAudio(item)
+        handoffRateOverride = nil
+        currentTitle = item.title
+        currentArtist = item.artist
+        durationSeconds = item.durationSeconds ?? 0
+        currentPlaybackURL = url
+        currentMediaResolutionComplete = true
+        let playerItem = makePlayerItem(url: url)
+        player.pause()
+        player.replaceCurrentItem(with: playerItem)
+        observeCurrentItem(playerItem)
+        applyAudioProcessing(to: playerItem)
+        let resume = resumePosition(for: item)
+        if resume > 0 { player.seek(to: CMTime(seconds: resume, preferredTimescale: 1)) }
+        currentPositionSeconds = Double(resume)
+        isPlaying = false
+        intendsToPlay = false
+        lastPersistedSecond = nil
+        settings?.setRawValue(
+            PlaybackContentIdentity.personalAudioPrefix + item.id,
+            for: SettingsKey.lastPlayingEpisodeID
+        )
+        updateNowPlayingInfo()
+        loadChapters(for: item, audioURL: url)
+    }
+
+    /// Clears a matching restored/current item before deleting its model/file.
+    func unloadPersonalAudioIfCurrent(id: String) {
+        let restorationID = PlaybackContentIdentity.personalAudioPrefix + id
+        if nowPlayingPersonalAudioID == id {
+            _ = persistCurrentPosition()
+            settings?.setRawValue("", for: SettingsKey.lastPlayingEpisodeID)
+            unloadWithoutPersisting()
+        } else if settings?.rawValue(SettingsKey.lastPlayingEpisodeID) == restorationID {
+            settings?.setRawValue("", for: SettingsKey.lastPlayingEpisodeID)
+            let defaults = UserDefaults.standard
+            if defaults.string(forKey: LivePositionKey.episode) == restorationID {
+                clearLivePosition()
+            }
         }
     }
 
@@ -1023,8 +1159,12 @@ final class PlayerService {
     }
 
     private func resume(providesStartHaptic: Bool) {
-        if folderRuns.resumeTransportIfNeeded() { return }
+        if currentPersonalAudio == nil, folderRuns.resumeTransportIfNeeded() { return }
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
+        if currentPersonalAudio != nil {
+            resumeImmediately(providesStartHaptic: providesStartHaptic)
+            return
+        }
         guard let episode = currentEpisode else { return }
         if !currentMediaResolutionComplete,
            let cleartextURL = currentPlaybackURL,
@@ -1070,7 +1210,7 @@ final class PlayerService {
 
     private func resumeImmediately(providesStartHaptic: Bool) {
         recordPlaybackDiagnostic("resume.begin")
-        guard currentEpisode != nil else { return }
+        guard hasLoadedContent else { return }
         // Resuming during a sleep-timer fade supersedes it (P1-4).
         cancelFadeIfNeeded()
         guard configureSession() else { return }
@@ -1112,14 +1252,16 @@ final class PlayerService {
     private func pause(providesPauseHaptic: Bool, folderRunInternal: Bool = false) {
         recordPlaybackDiagnostic("pause.begin")
         if !folderRunInternal { folderRuns.pauseForTransport() }
-        guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
+        // A start may still be fetching a handoff before any item is installed.
+        // Pause must cancel that request even though there is not loaded content.
+        cancelHandoffOperation()
+        guard !releaseInvalidCurrentEpisodeIfNeeded(), hasLoadedContent else { return }
         let wasPlaying = isPlaying
             || intendsToPlay
             || player.timeControlStatus == .playing
         // An explicit pause while Siri owns the route (including a Siri-issued
         // remote pause command) cancels automatic post-interruption resume.
         pausedByInterruption = false
-        cancelHandoffOperation()
         player.pause()
         isPlaying = false
         intendsToPlay = false
@@ -1203,6 +1345,8 @@ final class PlayerService {
 
         // Drop every episode-derived reference and observable surface.
         setCurrentEpisode(nil)
+        setCurrentPersonalAudio(nil)
+        setCurrentPersonalAudio(nil)
         currentEpisodeIsTransient = false
         handoffRateOverride = nil
         currentTitle = nil
@@ -1250,6 +1394,7 @@ final class PlayerService {
     private func clearNowPlayingPresentation() {
         playbackOrigin = PlaybackLogic.playbackOrigin(after: .stopped, current: playbackOrigin)
         setCurrentEpisode(nil)
+        setCurrentPersonalAudio(nil)
         currentTitle = nil
         currentArtist = nil
         durationSeconds = 0
@@ -1283,7 +1428,7 @@ final class PlayerService {
     /// instead of claiming a seek occurred (#551).
     @discardableResult
     func skipForward(seconds: Int) -> Bool {
-        guard currentEpisode != nil else { return false }
+        guard hasLoadedContent else { return false }
         seek(by: Double(max(0, seconds)))
         return true
     }
@@ -1291,7 +1436,7 @@ final class PlayerService {
     /// Skips backward by an explicit interval supplied by a system App Intent.
     @discardableResult
     func skipBack(seconds: Int) -> Bool {
-        guard currentEpisode != nil else { return false }
+        guard hasLoadedContent else { return false }
         seek(by: -Double(max(0, seconds)))
         return true
     }
@@ -1418,6 +1563,8 @@ final class PlayerService {
     /// Current effective playback rate (per-podcast override or global). Readable
     /// by the UI to display e.g. "1.5×".
     var effectiveRate: Double { currentEffectiveRate }
+
+    var loadedChapterSnapshot: [Chapter] { currentChapters }
 
     /// The rate to publish to `MPNowPlayingInfoPropertyPlaybackRate`. Derived from
     /// playback intent and the intended effective rate — NOT the live
@@ -1591,7 +1738,7 @@ final class PlayerService {
     /// rate (including any per-podcast override) so release restores it. No-op
     /// when nothing is loaded or a scan is already running. Announces the start.
     func beginFastForward() {
-        guard currentEpisode != nil, !isFastForwarding else { return }
+        guard hasLoadedContent, !isFastForwarding else { return }
         rateBeforeFastForward = currentEffectiveRate
         isFastForwarding = true
         // Ensure audio is actually moving so the scan is audible / progresses.
@@ -2011,6 +2158,49 @@ final class PlayerService {
         }
     }
 
+    private func loadChapters(for item: PersonalAudioItem, audioURL: URL) {
+        let id = item.id
+        chapterLoadEpisodeGUID = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let found = await self.chapterService.chapters(
+                chapterURL: nil,
+                audioURL: audioURL.absoluteString,
+                downloadPath: audioURL.path,
+                descriptionHTML: nil
+            )
+            guard self.nowPlayingPersonalAudioID == id else { return }
+            self.currentChapters = found
+            self.lastAutoSkipFromChapterIndex = nil
+            self.chapterCount = found.count
+            self.currentChapterIndex = nil
+            self.updateCurrentChapter()
+        }
+    }
+
+    /// Marks local audio played/unplayed without queue, podcast statistics, or
+    /// donation attribution. Played items have no resume position.
+    func setPersonalAudioPlayed(_ id: String, played: Bool) {
+        guard let context else { return }
+        var descriptor = FetchDescriptor<PersonalAudioItem>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        guard let item = try? context.fetch(descriptor).first else { return }
+        item.isPlayed = played
+        item.playedAt = played ? .now : nil
+        if played {
+            item.positionSeconds = 0
+            if nowPlayingPersonalAudioID == id {
+                currentPositionSeconds = 0
+                player.seek(to: .zero)
+                clearLivePosition()
+            }
+        } else if nowPlayingPersonalAudioID == id {
+            writeLivePosition(item, second: Int(item.positionSeconds))
+        }
+        _ = saveContext()
+        NotificationCenter.default.post(name: .earshotPersonalAudioDidChange, object: nil)
+    }
+
     /// Recomputes the observable ``currentChapterIndex`` / ``currentChapterTitle``
     /// from the live position. Called from the per-tick handler and whenever a new
     /// chapter list is installed. Cheap and idempotent: when the active chapter
@@ -2080,7 +2270,9 @@ final class PlayerService {
     /// silently. When chapters exist they defer to the same seek+announce path.
     func nextChapterOrAnnounceNoChapters() {
         guard chapterCount > 0 else {
-            Announcer.announce("This episode has no chapters")
+            Announcer.announce(currentPersonalAudio == nil
+                ? "This episode has no chapters"
+                : "This Personal Audio item has no chapters")
             return
         }
         nextChapter()
@@ -2094,7 +2286,9 @@ final class PlayerService {
 
     func previousChapterOrAnnounceNoChapters() {
         guard chapterCount > 0 else {
-            Announcer.announce("This episode has no chapters")
+            Announcer.announce(currentPersonalAudio == nil
+                ? "This episode has no chapters"
+                : "This Personal Audio item has no chapters")
             return
         }
         previousChapter()
@@ -2112,7 +2306,7 @@ final class PlayerService {
 
     /// Whether `chapter` is currently marked skipped for the loaded episode.
     func isChapterSkipped(_ chapter: Chapter) -> Bool {
-        guard let key = currentEpisode?.guid else { return false }
+        guard let key = currentChapterSkipKey else { return false }
         return skippedChapterIndices[key]?.contains(chapter.index) ?? false
     }
 
@@ -2121,7 +2315,7 @@ final class PlayerService {
     /// VoiceOver user hears the result of activating the control.
     @discardableResult
     func toggleChapterSkipped(_ chapter: Chapter) -> Bool {
-        guard let key = currentEpisode?.guid else { return false }
+        guard let key = currentChapterSkipKey else { return false }
         var set = skippedChapterIndices[key] ?? []
         let nowSkipped: Bool
         if set.contains(chapter.index) {
@@ -2143,7 +2337,7 @@ final class PlayerService {
     /// ends the episode if none remain). The loop guard ensures the seek's own
     /// position update doesn't re-trigger the same boundary.
     private func evaluateChapterAutoSkip() {
-        guard let key = currentEpisode?.guid,
+        guard let key = currentChapterSkipKey,
               let skipped = skippedChapterIndices[key], !skipped.isEmpty,
               !currentChapters.isEmpty else { return }
 
@@ -2176,6 +2370,12 @@ final class PlayerService {
         case .endOfEpisode:
             handlePlaybackEnded()
         }
+    }
+
+    private var currentChapterSkipKey: String? {
+        if let episode = currentEpisode { return episode.guid }
+        if let id = nowPlayingPersonalAudioID { return PlaybackContentIdentity.personalAudioPrefix + id }
+        return nil
     }
 
     // MARK: Private — audio session
@@ -2313,6 +2513,12 @@ final class PlayerService {
         defaults.set(second, forKey: LivePositionKey.seconds)
     }
 
+    private func writeLivePosition(_ item: PersonalAudioItem, second: Int) {
+        let defaults = UserDefaults.standard
+        defaults.set(PlaybackContentIdentity.personalAudioPrefix + item.id, forKey: LivePositionKey.episode)
+        defaults.set(second, forKey: LivePositionKey.seconds)
+    }
+
     private func clearLivePosition() {
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: LivePositionKey.episode)
@@ -2335,6 +2541,15 @@ final class PlayerService {
     /// longer writes to the store.
     private func resumePosition(for episode: Episode) -> Int {
         max(episode.positionSeconds, livePosition(for: episode) ?? 0)
+    }
+
+    private func resumePosition(for item: PersonalAudioItem) -> Double {
+        let key = PlaybackContentIdentity.personalAudioPrefix + item.id
+        let defaults = UserDefaults.standard
+        let live = defaults.string(forKey: LivePositionKey.episode) == key
+            ? defaults.object(forKey: LivePositionKey.seconds).map { _ in defaults.integer(forKey: LivePositionKey.seconds) }
+            : nil
+        return max(item.positionSeconds, Double(live ?? 0))
     }
 
     /// Durably persists position + listening session when the app backgrounds —
@@ -2483,6 +2698,15 @@ final class PlayerService {
     private func persistCurrentPosition() -> Bool {
         // A transient Search-preview stream is never persisted (#517).
         guard !currentEpisodeIsTransient else { return true }
+        if let item = currentPersonalAudio, currentPositionSeconds.isFinite {
+            guard !item.isDeleted, !item.isPlayed else { return true }
+            let second = max(0, currentPositionSeconds)
+            item.positionSeconds = second
+            lastPersistedSecond = Int(second)
+            guard saveContext() else { return false }
+            writeLivePosition(item, second: Int(second))
+            return true
+        }
         guard let episode = currentEpisode, currentPositionSeconds.isFinite else { return true }
         // Never write to a deleted instance (#574) — SwiftData traps.
         guard !episode.isDeleted else {
@@ -2513,6 +2737,21 @@ final class PlayerService {
     private func persistPositionThrottled(currentSecond: Int) {
         // A transient Search-preview stream is never persisted (#517).
         guard !currentEpisodeIsTransient else { return }
+        if let item = currentPersonalAudio {
+            guard !item.isDeleted, !item.isPlayed else { return }
+            guard PlaybackLogic.shouldPersistTick(
+                currentSecond: currentSecond,
+                lastPersistedSecond: lastPersistedSecond,
+                interval: Int(ceil(PlaybackLogic.mediaSeconds(
+                    forWallClockSeconds: Double(PlaybackLogic.positionPersistInterval),
+                    playbackRate: timeObserverMediaInterval ?? currentEffectiveRate
+                ))),
+                isPlayed: item.isPlayed
+            ) else { return }
+            lastPersistedSecond = currentSecond
+            writeLivePosition(item, second: max(0, currentSecond))
+            return
+        }
         guard let episode = currentEpisode else { return }
         // Never write to a deleted instance (#574) — SwiftData traps.
         guard !episode.isDeleted else {
@@ -2719,6 +2958,19 @@ final class PlayerService {
 
     private func handlePlaybackEnded() {
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
+        if let item = currentPersonalAudio {
+            guard !automaticPlaybackStoppedByTimer else { return }
+            isPlaying = false
+            intendsToPlay = false
+            item.isPlayed = true
+            item.playedAt = .now
+            item.positionSeconds = 0
+            currentPositionSeconds = 0
+            clearLivePosition()
+            _ = saveContext()
+            clearNowPlayingPresentation()
+            return
+        }
         guard let finished = currentEpisode, let context else {
             isPlaying = false
             intendsToPlay = false
@@ -3467,7 +3719,7 @@ final class PlayerService {
     /// no-op — no busy loop, no repeated hammering. `applyRate()` restores the
     /// exact effective (or fast-forward) rate the user was at.
     private func attemptStallRecovery() {
-        guard currentEpisode != nil, let item = player.currentItem else { return }
+        guard hasLoadedContent, let item = player.currentItem else { return }
         guard StallRecoveryLogic.shouldResume(
             intendedToPlay: intendsToPlay,
             isLikelyToKeepUp: item.isPlaybackLikelyToKeepUp,
@@ -3539,7 +3791,12 @@ final class PlayerService {
         let artworkURL = currentEpisode.flatMap {
             ($0.artworkURL ?? $0.podcast?.artworkURL).flatMap(URL.init)
         }
-        Task { [weak self] in await self?.updateNowPlayingArtwork(from: artworkURL) }
+        if let filename = currentPersonalAudio?.artworkFilename,
+           let localURL = personalAudioStorage.resolve(filename) {
+            Task { [weak self] in await self?.updateNowPlayingLocalArtwork(from: localURL) }
+        } else {
+            Task { [weak self] in await self?.updateNowPlayingArtwork(from: artworkURL) }
+        }
     }
 
     /// Returns true after releasing a retained Episode whose row no longer
@@ -3591,6 +3848,15 @@ final class PlayerService {
             for: url,
             maxPixelSize: ArtworkCache.nowPlayingMaxPixelSize
         ) else { return }
+        lastArtworkURL = url
+        setArtwork(image)
+    }
+
+    private func updateNowPlayingLocalArtwork(from url: URL) async {
+        guard url != lastArtworkURL else { return }
+        let data = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
+        guard let data, let image = UIImage(data: data),
+              currentPersonalAudio?.artworkFilename == url.lastPathComponent else { return }
         lastArtworkURL = url
         setArtwork(image)
     }
@@ -3652,10 +3918,10 @@ final class PlayerService {
     /// one saved episode synchronously rather than waiting for maintenance.
     func handleRemotePlaybackCommand(_ command: RemotePlaybackCommand) -> MPRemoteCommandHandlerStatus {
         recordPlaybackDiagnostic("remote.\(command)")
-        if currentEpisode == nil, command != .pause, let context {
+        if !hasLoadedContent, command != .pause, let context {
             PlaybackStartup.restoreLastEpisode(into: self, context: context)
         }
-        guard currentEpisode != nil else { return .noSuchContent }
+        guard hasLoadedContent else { return .noSuchContent }
         switch command {
         case .play: resume()
         case .pause: pause()

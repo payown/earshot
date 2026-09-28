@@ -18,6 +18,16 @@ enum PlaybackStartup {
         guard let stored = settings.rawValue(SettingsKey.lastPlayingEpisodeID), !stored.isEmpty else {
             return
         }
+        if case .personalAudio(let id)? = PlaybackContentIdentity(restorationValue: stored) {
+            var descriptor = FetchDescriptor<PersonalAudioItem>(predicate: #Predicate { $0.id == id })
+            descriptor.fetchLimit = 1
+            guard let item = try? context.fetch(descriptor).first else {
+                AppLog.player.info("No stored Personal Audio item found for stored key")
+                return
+            }
+            player.load(item, autoplay: false)
+            return
+        }
         guard let episode = DownloadTaskKey.episode(matching: stored, in: context) else {
             AppLog.player.info("No stored last episode found for stored key")
             return

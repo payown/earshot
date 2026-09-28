@@ -66,7 +66,9 @@ struct ChapterListView: View {
         ContentUnavailableView(
             "No chapters",
             systemImage: "list.bullet",
-            description: Text("This episode doesn't have chapters.")
+            description: Text(player.nowPlayingPersonalAudio == nil
+                ? "This episode doesn't have chapters."
+                : "This Personal Audio item doesn't have chapters.")
         )
     }
 
@@ -123,6 +125,12 @@ struct ChapterListView: View {
     }
 
     private func loadChapters() async {
+        if player.nowPlayingPersonalAudio != nil {
+            chapters = player.loadedChapterSnapshot
+            skipState = Dictionary(uniqueKeysWithValues: chapters.map { ($0.index, player.isChapterSkipped($0)) })
+            loadingChapters = false
+            return
+        }
         guard let episode = player.nowPlayingEpisode else {
             chapters = []
             loadingChapters = false

@@ -28,6 +28,7 @@ struct SubscriptionsView: View {
     // blocks VoiceOver even though this screen never needs those episodes.
     @State private var podcasts: [Podcast] = []
     @State private var hasLoadedPodcasts = false
+    @State private var personalAudioCount = 0
     @State private var unplayedCounts: [PersistentIdentifier: Int] = [:]
     @State private var countRevision = 0
     @State private var isRefreshing = false
@@ -104,24 +105,37 @@ struct SubscriptionsView: View {
         let visible = visiblePodcasts
         let visibleIDs = visible.map(\.persistentModelID)
         Group {
-            if hasLoadedPodcasts && podcasts.isEmpty {
-                ContentUnavailableView {
-                    Label("No podcasts yet", systemImage: "music.note")
-                } description: {
-                    Text("Add a podcast feed to get started.")
-                } actions: {
-                    NavigationLink("Discover podcasts") {
-                        AddPodcastView()
+            List {
+                NavigationLink {
+                    PersonalAudioLibraryScreen()
+                } label: {
+                    HStack {
+                        Label("Personal Audio", systemImage: "waveform")
+                        Spacer()
+                        if personalAudioCount > 0 {
+                            Text(personalAudioCount.formatted()).foregroundStyle(.secondary)
+                        }
                     }
+                    .contentShape(Rectangle())
                 }
-            } else if hasLoadedPodcasts && settings.hideCaughtUpPodcasts && visible.isEmpty {
-                ContentUnavailableView(
-                    "All caught up",
-                    systemImage: "checkmark.circle",
-                    description: Text("To show all podcasts, turn off Hide caught-up podcasts in Library options.")
-                )
-            } else {
-                List {
+                .accessibilityLabel("Personal Audio")
+                .accessibilityValue(PersonalAudioLibraryPresentation.itemCountValue(personalAudioCount))
+
+                if hasLoadedPodcasts && podcasts.isEmpty {
+                    ContentUnavailableView {
+                        Label("No podcasts yet", systemImage: "music.note")
+                    } description: {
+                        Text("Add a podcast feed to get started.")
+                    } actions: {
+                        NavigationLink("Discover podcasts") { AddPodcastView() }
+                    }
+                } else if hasLoadedPodcasts && settings.hideCaughtUpPodcasts && visible.isEmpty {
+                    ContentUnavailableView(
+                        "All caught up",
+                        systemImage: "checkmark.circle",
+                        description: Text("To show all podcasts, turn off Hide caught-up podcasts in Library options.")
+                    )
+                } else {
                     ForEach(visible) { podcast in
                         rowContainer(for: podcast, readOnlyIDs: readOnlyIDs)
                             // Same focus id on whichever row variant renders, so
@@ -130,8 +144,8 @@ struct SubscriptionsView: View {
                             .accessibilityFocused($focusedRowID, equals: podcast.persistentModelID)
                     }
                 }
-                .refreshable { await performRefresh(trigger: .manualPullToRefresh) }
             }
+            .refreshable { await performRefresh(trigger: .manualPullToRefresh) }
         }
         // Persistent multi-select bar (#757): its primary button's label carries
         // the live count ("Add 3 podcasts to folder") and is the count's
@@ -178,6 +192,7 @@ struct SubscriptionsView: View {
             // restoring the expensive live @Query this screen intentionally
             // avoids for large libraries.
             loadPodcasts()
+            loadPersonalAudioCount()
             requestLaunchHeadingFocus()
             requestTabEntryFocus()
         }
@@ -358,6 +373,11 @@ struct SubscriptionsView: View {
             for: .earshotCloudProjectionDidApply
         ).receive(on: DispatchQueue.main)) { _ in
             loadPodcasts()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .earshotPersonalAudioDidChange
+        ).receive(on: DispatchQueue.main)) { _ in
+            loadPersonalAudioCount()
         }
         // Confirm the reorder for VoiceOver: the menu dismisses and the list
         // silently re-sorts, so without this the change gives no feedback. Mirrors
@@ -820,6 +840,10 @@ struct SubscriptionsView: View {
         podcasts = (try? context.fetch(descriptor)) ?? []
         hasLoadedPodcasts = true
         countRevision += 1
+    }
+
+    private func loadPersonalAudioCount() {
+        personalAudioCount = (try? context.fetchCount(FetchDescriptor<PersonalAudioItem>())) ?? 0
     }
 
     private func requestLaunchHeadingFocus() {

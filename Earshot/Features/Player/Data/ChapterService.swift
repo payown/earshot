@@ -91,9 +91,22 @@ struct ChapterService {
         let asset = AVURLAsset(url: url)
         do {
             let languages = Locale.preferredLanguages
-            let groups = try await asset.loadChapterMetadataGroups(
+            var groups = try await asset.loadChapterMetadataGroups(
                 bestMatchingPreferredLanguages: languages
             )
+            if groups.isEmpty {
+                // Preferred-language matching can miss chapter tracks whose
+                // locale is reported in a legacy ISO-639 form. Try the asset's
+                // declared chapter locales before treating the file as unchaptered.
+                let locales = try await asset.load(.availableChapterLocales)
+                for locale in locales {
+                    groups = try await asset.loadChapterMetadataGroups(
+                        withTitleLocale: locale,
+                        containingItemsWithCommonKeys: []
+                    )
+                    if !groups.isEmpty { break }
+                }
+            }
             guard !groups.isEmpty else { return nil }
 
             var chapters: [Chapter] = []

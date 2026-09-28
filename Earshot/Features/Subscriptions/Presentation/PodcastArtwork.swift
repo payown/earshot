@@ -58,7 +58,15 @@ struct PodcastArtwork: View {
         // Decode to the actual draw size in pixels so a large source isn't
         // decoded full-resolution on the main thread during scroll (#481).
         let maxPixelSize = size * displayScale
-        let fetched = await ArtworkCache.shared.image(for: url, maxPixelSize: maxPixelSize)
+        let fetched: UIImage?
+        if url.isFileURL {
+            // Personal Audio artwork is an app-managed local JPEG. Keep file IO
+            // away from the main actor just like the shared network cache path.
+            let data = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
+            fetched = data.flatMap(UIImage.init(data:))
+        } else {
+            fetched = await ArtworkCache.shared.image(for: url, maxPixelSize: maxPixelSize)
+        }
         // The view may have been reused for a different URL while awaiting; only
         // commit if this load is still the current one.
         guard !Task.isCancelled, self.urlString == urlString else { return }

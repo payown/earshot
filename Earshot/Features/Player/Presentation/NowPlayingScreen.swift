@@ -174,7 +174,10 @@ struct NowPlayingScreen: View {
         // boundary instead of leaving a stale, empty Now Playing destination on
         // screen after a remote unfollow.
         .onChange(of: player.nowPlayingEpisodeID) { _, episodeID in
-            if episodeID == nil { dismiss() }
+            if episodeID == nil && player.nowPlayingPersonalAudioID == nil { dismiss() }
+        }
+        .onChange(of: player.nowPlayingPersonalAudioID) { oldID, newID in
+            if oldID != nil && newID == nil && player.nowPlayingEpisodeID == nil { dismiss() }
         }
     }
 
@@ -250,8 +253,9 @@ struct NowPlayingScreen: View {
                 RoutePickerView()
                     .frame(width: 64, height: 56)
                     .frame(maxWidth: .infinity)
-                showNotesButton
-                    .frame(maxWidth: .infinity)
+                if player.nowPlayingPersonalAudio == nil {
+                    showNotesButton.frame(maxWidth: .infinity)
+                }
             }
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -298,8 +302,10 @@ struct NowPlayingScreen: View {
             // Collapse PodcastArtwork's internal elements into one definite node so
             // the label, value, and rotor action below reliably attach to it.
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Episode artwork")
-            .accessibilityHint("Use Actions for playback and episode options")
+            .accessibilityLabel(player.nowPlayingPersonalAudio == nil ? "Episode artwork" : "Personal Audio artwork")
+            .accessibilityHint(player.nowPlayingPersonalAudio == nil
+                ? "Use Actions for playback and episode options"
+                : "Use Actions for playback and Personal Audio options")
             // Offer the scan rotor action (#610), plus the three episode actions
             // (#371) so VoiceOver users reach Mark as played, Export audio file,
             // and Stop after this episode from the artwork rotor — the same set
@@ -335,6 +341,14 @@ struct NowPlayingScreen: View {
                 })
             }
         }
+        if let personalAudio = player.nowPlayingPersonalAudio {
+            actions.append(QuickActionItem(
+                label: personalAudio.isPlayed ? "Mark Unplayed" : "Mark Played",
+                isDestructive: false
+            ) {
+                player.setPersonalAudioPlayed(personalAudio.id, played: !personalAudio.isPlayed)
+            })
+        } else {
         actions.append(QuickActionItem(label: "Previous in Queue", isDestructive: false) {
             player.previousInQueue()
         })
@@ -362,6 +376,7 @@ struct NowPlayingScreen: View {
             actions.append(QuickActionItem(label: "Bookmarks", isDestructive: false) {
                 showingBookmarks = true
             })
+        }
         }
         // Mirror the visible prev/next chapter controls into the artwork rotor
         // so VoiceOver users reach them the same way they reach the episode
@@ -855,6 +870,11 @@ struct NowPlayingScreen: View {
 
     @ViewBuilder
     private var episodeOptions: some View {
+        if let personalAudio = player.nowPlayingPersonalAudio {
+            Button(personalAudio.isPlayed ? "Mark Unplayed" : "Mark Played") {
+                player.setPersonalAudioPlayed(personalAudio.id, played: !personalAudio.isPlayed)
+            }
+        } else {
         Button("Previous in Queue", action: player.previousInQueue)
         Button("Next in Queue", action: player.nextInQueue)
         Button("Mark as played and next in Queue", action: player.markCurrentPlayedAndNextInQueue)
@@ -894,6 +914,7 @@ struct NowPlayingScreen: View {
             } label: {
                 Label("Refresh episode audio", systemImage: "arrow.clockwise")
             }
+        }
     }
 
     private func closeOptionsThen(_ action: @escaping () -> Void) {
@@ -950,7 +971,9 @@ struct NowPlayingScreen: View {
     // MARK: Derived
 
     private var artworkURLString: String? {
-        player.nowPlayingEpisode?.artworkURL ?? player.nowPlayingEpisode?.podcast?.artworkURL
+        if let filename = player.nowPlayingPersonalAudio?.artworkFilename,
+           let url = PersonalAudioStorage().resolve(filename) { return url.absoluteString }
+        return player.nowPlayingEpisode?.artworkURL ?? player.nowPlayingEpisode?.podcast?.artworkURL
     }
 
     private var hasShowNotes: Bool {
