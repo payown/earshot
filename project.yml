@@ -14,7 +14,7 @@ fileGroups:
 settings:
   base:
     MARKETING_VERSION: "1.2.3"
-    CURRENT_PROJECT_VERSION: "270"
+    CURRENT_PROJECT_VERSION: "272"
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
 targets:
@@ -62,6 +62,9 @@ targets:
     platform: iOS
     sources:
       - path: EarshotTests
+    resources:
+      - path: EarshotTests/Fixtures/PersonalAudioChapters.m4a
+      - path: EarshotTests/Fixtures/PersonalAudioChapters.mp3
     dependencies:
       - target: Earshot
       - sdk: StoreKitTest.framework
