@@ -20,18 +20,20 @@ struct PlayerControlsSheet<EpisodeActions: View>: View {
                     }
                 }
 
-                Section("Episode actions") {
+                Section(player.nowPlayingPersonalAudio == nil ? "Episode actions" : "Personal Audio actions") {
                     episodeActions()
                 }
                 Section {
                     sleepTimerControls
                     volumeBoostControls
-                    Button {
-                        player.toggleStopAfterEpisode()
-                    } label: {
-                        Label("Stop after this episode", systemImage: player.stopAfterCurrentEpisode ? "checkmark" : "stop.circle")
+                    if player.nowPlayingPersonalAudio == nil {
+                        Button {
+                            player.toggleStopAfterEpisode()
+                        } label: {
+                            Label("Stop after this episode", systemImage: player.stopAfterCurrentEpisode ? "checkmark" : "stop.circle")
+                        }
+                        .accessibilityValue(player.stopAfterCurrentEpisode ? "On" : "Off")
                     }
-                    .accessibilityValue(player.stopAfterCurrentEpisode ? "On" : "Off")
                 } header: {
                     Text("Playback settings")
                 } footer: {

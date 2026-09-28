@@ -131,11 +131,13 @@ struct NowPlayingBar: View {
                 action: player.skipForward
             )
 
-            TransportButton(
-                systemImage: "bookmark",
-                label: "Add bookmark",
-                action: addBookmark
-            )
+            if player.nowPlayingPersonalAudio == nil {
+                TransportButton(
+                    systemImage: "bookmark",
+                    label: "Add bookmark",
+                    action: addBookmark
+                )
+            }
         }
     }
 

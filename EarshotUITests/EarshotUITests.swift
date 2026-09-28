@@ -597,6 +597,25 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 5))
     }
 
+    func testPersonalAudioIsFirstLibraryDestinationAndShowsItsEmptyStateAndAddAction() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let personalAudio = app.buttons["Personal Audio"].firstMatch
+        let podcast = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Technically Working")).firstMatch
+        XCTAssertTrue(personalAudio.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(podcast.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertLessThan(personalAudio.frame.minY, podcast.frame.minY)
+        XCTAssertEqual(personalAudio.value as? String, "0 items")
+
+        personalAudio.tap()
+        XCTAssertTrue(app.navigationBars["Personal Audio"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Add audio files from Files to listen to them in Earshot."].exists)
+        let add = app.buttons["Add to Earshot"].firstMatch
+        XCTAssertTrue(add.exists)
+    }
+
     func testAddPodcastSearchAndCategoryLandingOrder() {
         let app = XCUIApplication()
         app.launchArguments = [
