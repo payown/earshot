@@ -1,12 +1,14 @@
 # Next TestFlight change inventory
 
-Status: Chapter 81, build 251 was uploaded to TestFlight and confirmed installed
-by Michael on 2026-09-01. Build 251 superseded the uninstalled build 250
-responsiveness candidate and is the current device-distributed integration
-baseline.
+Current TestFlight build: Chapter 94, build 273 (version 1.2.3), uploaded on
+2026-09-29 and processed as `VALID`. It is available to Internal Testing Group
+and Public Testers; external beta review is approved and automatic tester
+notification is enabled. See `build-273-change-inventory.md` for the exact
+change and verification record. Physical-device VoiceOver timing remains to be
+checked.
 
-The current shipped story is Chapter 81 for build 251. Future TestFlight uploads
-must continue to follow the maintenance contract in `docs/kashe.md`:
+Future TestFlight uploads must continue to follow the maintenance contract in
+`docs/kashe.md`:
 
 - assign the chapter to the build that is actually uploaded;
 - append the full chapter to `docs/kashe.md` in the same shipping change;
@@ -14,24 +16,16 @@ must continue to follow the maintenance contract in `docs/kashe.md`:
 - use that exact chapter as the TestFlight `--notes` payload;
 - keep the complete chapter at or below 2,500 characters before upload.
 
-## Changes represented by build 251
+## Changes represented by build 273
 
-Chapter 81’s “What changed” and “What to test” sections account for every
-applicable item below.
+Chapter 94's “What to try first” and “Kashe's story” sections account for every
+applicable item below. No database migration was added.
 
-- Refresh reconciles corrected feed metadata for bounded recent and
-  device-active episodes even when their GUID and publication date do not change.
-- Corrected or invalid local audio is replaced without losing played,
-  Inbox, queue, or listening-position state; superseded background completions
-  cannot restore stale media.
-- Episode Actions and Now Playing include Refresh episode audio, with
-  one automatic retry for a failed local copy and a persistent accessible failure
-  message when recovery does not succeed.
-- Cold-launch maintenance, badge counts, refresh work, and compact Cloud
-  projection no longer repeatedly occupy the main actor while VoiceOver is
-  navigating Inbox and Settings.
-- Queue folder grouping, group actions, reordering, and playback advancement use
-  an episode's direct folder before its podcast's default folder.
+- Root activation defers noncritical startup maintenance until after the
+  interface is interactive.
+- Personal Audio playback speed is remembered per imported file without
+  changing the app or podcast default.
+- No SwiftData or CloudKit schema change was added.
 
 ## Shipping checklist
 
@@ -44,6 +38,7 @@ applicable item below.
 - [x] Save the exact same text as `docs/testflight/build-N-notes.txt`.
 - [x] Verify the payload is at most 2,500 characters with `wc -m`.
 - [x] Obtain Michael’s explicit TestFlight-upload approval.
-- [x] Upload using the checked-in notes file and verify build 251 is available
-  through TestFlight.
-- [x] Confirm Michael installed and is using build 251.
+- [x] Upload using the checked-in notes file and verify build 273 is available
+  to both tester groups.
+- [ ] Confirm physical-device VoiceOver startup timing and Personal Audio
+  per-file playback speed behavior.

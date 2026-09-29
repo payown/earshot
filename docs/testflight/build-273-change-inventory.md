@@ -37,5 +37,17 @@ Personal Audio playback-rate overrides per imported item.
 ## TestFlight
 
 Chapter 94 / build 273 notes are saved in `build-273-notes.txt` and appended
-verbatim to `docs/kashe.md`. Target groups: Internal Testing Group and Public
-Testers. Upload/distribution status will be recorded here after processing.
+verbatim to `docs/kashe.md`; the App Store Connect `en-US` notes were verified
+to match. Build 273 (`f0853902-fa5b-4675-bdcf-713e089f449e`) was uploaded on
+2026-09-29 and processed as `VALID`. It is available in both Internal Testing
+Group and Public Testers. External beta review state is `APPROVED`, and
+automatic tester notification is enabled.
+
+## CI follow-up
+
+The final revision's first GitHub Actions attempt (`36561284854`) ran 1,200
+tests successfully and skipped three. Four failures were reported: three
+test-host processes were killed by `SIGKILL`, followed by the test process
+failing to bootstrap; there were no assertion failures among those failures.
+The failed job was retried on the same source revision and passed the full test
+job. The focused local suites listed above also passed.
