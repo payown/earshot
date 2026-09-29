@@ -544,6 +544,7 @@ final class PlayerService {
         if episode != nil {
             currentPersonalAudio = nil
             nowPlayingPersonalAudioID = nil
+            currentPersonalAudioRateOverride = nil
         }
         nowPlayingEpisodeID = episode?.persistentModelID
         if let episode, let context, !currentEpisodeIsTransient {

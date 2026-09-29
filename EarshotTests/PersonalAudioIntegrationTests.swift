@@ -114,6 +114,15 @@ final class PersonalAudioIntegrationTests: XCTestCase {
         player.load(second)
         XCTAssertEqual(player.effectiveRate, 1.6, accuracy: 0.001,
                        "A different Personal Audio file should use the global default")
+        let podcast = Podcast(feedURL: "https://rates.example/feed", title: "Rate check")
+        let episode = Episode(guid: "rate-check", title: "Episode", audioURL: firstSource.absoluteString)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try context.save()
+        player.load(episode)
+        XCTAssertEqual(player.effectiveRate, 1.6, accuracy: 0.001,
+                       "Podcast playback after Personal Audio should use the unchanged default")
         player.load(first)
         XCTAssertEqual(player.effectiveRate, 2.2, accuracy: 0.001,
                        "The first file should retain its own selected speed")

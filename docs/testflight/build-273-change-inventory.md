@@ -25,8 +25,8 @@ Personal Audio playback-rate overrides per imported item.
 ## Verification
 
 - `PersonalAudioIntegrationTests` and `AdvancedPlaybackTests` passed, including
-  per-file rate persistence, switching to a second file, reset, global-rate
-  invariance, and observable VoiceOver rate revisions.
+  per-file rate persistence, switching to a second file and podcast, reset,
+  global-rate invariance, and observable VoiceOver rate revisions.
 - `AppRuntimeTests` and `RootLaunchPreferencesTests` passed.
 - `EarshotUITests.testCustomSpeedAndMiniPlayerLabel` passed, preserving the
   adjustable badge semantics and speed-sheet interaction for podcast playback.
