@@ -43,6 +43,10 @@ final class PlayerService {
 
     /// Title of the loaded episode, or `nil` when nothing is loaded.
     var currentTitle: String?
+    /// Changes whenever the effective speed or loaded content can change. This
+    /// observable revision lets controls react to per-item rates stored in
+    /// UserDefaults, which Observation cannot track directly.
+    private(set) var effectiveRateRevision: UInt64 = 0
     /// Podcast / author name for the loaded episode, if known.
     var currentArtist: String?
     /// Whether audio is currently playing.
@@ -115,6 +119,7 @@ final class PlayerService {
     /// Local audio identity is kept separate from Episode's SwiftData identity.
     private(set) var nowPlayingPersonalAudioID: String?
     @ObservationIgnored private var currentPersonalAudio: PersonalAudioItem?
+    @ObservationIgnored private var currentPersonalAudioRateOverride: Double?
 
     var nowPlayingPersonalAudio: PersonalAudioItem? { currentPersonalAudio }
     var playbackContentIdentity: PlaybackContentIdentity? {
@@ -533,6 +538,7 @@ final class PlayerService {
     private func setCurrentEpisode(_ episode: Episode?) {
         if currentEpisode !== episode {
             invalidatePendingUserSeek()
+            effectiveRateRevision &+= 1
         }
         currentEpisode = episode
         if episode != nil {
@@ -548,9 +554,18 @@ final class PlayerService {
     }
 
     private func setCurrentPersonalAudio(_ item: PersonalAudioItem?) {
-        if currentPersonalAudio?.id != item?.id { invalidatePendingUserSeek() }
+        if currentPersonalAudio?.id != item?.id {
+            invalidatePendingUserSeek()
+            effectiveRateRevision &+= 1
+        }
         currentPersonalAudio = item
         nowPlayingPersonalAudioID = item?.id
+        if let itemID = item?.id,
+           let storedRate = UserDefaults.standard.object(forKey: Self.personalAudioRateKey(itemID)) as? Double {
+            currentPersonalAudioRateOverride = PlaybackLogic.clampedSpeed(storedRate)
+        } else {
+            currentPersonalAudioRateOverride = nil
+        }
         if item != nil {
             currentEpisode = nil
             nowPlayingEpisodeID = nil
@@ -1548,20 +1563,21 @@ final class PlayerService {
 
     // MARK: Private — rate
 
-    /// The playback rate that applies to the loaded episode (per-podcast override
-    /// or the global speed). Also the speed recorded on listening sessions.
+    /// The playback rate that applies to loaded content: handoff rate, then
+    /// Personal Audio file override, podcast override, or global default. Also
+    /// the speed recorded on listening sessions.
     private var currentEffectiveRate: Double {
         if let handoffRateOverride { return handoffRateOverride }
         let global = settings?.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
             ?? SettingsDefault.globalSpeed
+        if let currentPersonalAudioRateOverride { return currentPersonalAudioRateOverride }
         return PlaybackLogic.effectivePlaybackRate(
             podcastSpeedOverride: currentEpisode?.podcast?.speedOverride,
             globalSpeed: global
         )
     }
 
-    /// Current effective playback rate (per-podcast override or global). Readable
-    /// by the UI to display e.g. "1.5×".
+    /// Current effective playback rate, readable by the UI (for example, "1.5×").
     var effectiveRate: Double { currentEffectiveRate }
 
     var loadedChapterSnapshot: [Chapter] { currentChapters }
@@ -1623,6 +1639,7 @@ final class PlayerService {
                 object: podcast.feedURL
             )
         }
+        effectiveRateRevision &+= 1
         applyRate()
         publishCurrentPlaybackHandoff()
         if announce {
@@ -1642,6 +1659,7 @@ final class PlayerService {
                 object: podcast.feedURL
             )
         }
+        effectiveRateRevision &+= 1
         applyRate()
         publishCurrentPlaybackHandoff()
         let global = settings?.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
@@ -1667,11 +1685,63 @@ final class PlayerService {
                 object: podcastWithClearedOverride.feedURL
             )
         }
+        effectiveRateRevision &+= 1
         applyRate()
         publishCurrentPlaybackHandoff()
         if announce {
             Announcer.announce("Speed set to \(PlaybackLogic.spokenRate(clamped)) globally")
         }
+    }
+
+    /// Sets a speed override for the currently loaded Personal Audio file only.
+    /// The override is stored outside SwiftData so this feature does not require
+    /// a library schema migration. Other files and podcasts continue using their
+    /// own override or the global default.
+    func setPersonalAudioSpeedOverride(_ speed: Double, announce: Bool = true) {
+        guard let itemID = nowPlayingPersonalAudioID else { return }
+        let clamped = PlaybackLogic.clampedSpeed(speed)
+        handoffRateOverride = nil
+        UserDefaults.standard.set(clamped, forKey: Self.personalAudioRateKey(itemID))
+        currentPersonalAudioRateOverride = clamped
+        effectiveRateRevision &+= 1
+        applyRate()
+        publishCurrentPlaybackHandoff()
+        if announce {
+            Announcer.announce("Speed set to \(PlaybackLogic.spokenRate(clamped)) for this audio file")
+        }
+    }
+
+    /// Removes the current Personal Audio file's override, returning it to the
+    /// global default without changing that default.
+    func clearPersonalAudioSpeedOverride() {
+        guard let itemID = nowPlayingPersonalAudioID else { return }
+        handoffRateOverride = nil
+        UserDefaults.standard.removeObject(forKey: Self.personalAudioRateKey(itemID))
+        currentPersonalAudioRateOverride = nil
+        effectiveRateRevision &+= 1
+        applyRate()
+        publishCurrentPlaybackHandoff()
+        let global = settings?.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
+            ?? SettingsDefault.globalSpeed
+        Announcer.announce("Speed reset to global \(PlaybackLogic.spokenRate(global))")
+    }
+
+    func removePersonalAudioSpeedOverride(for id: String) {
+        UserDefaults.standard.removeObject(forKey: Self.personalAudioRateKey(id))
+        guard nowPlayingPersonalAudioID == id else { return }
+        handoffRateOverride = nil
+        currentPersonalAudioRateOverride = nil
+        effectiveRateRevision &+= 1
+        applyRate()
+    }
+
+    private static func personalAudioRateKey(_ id: String) -> String {
+        "player.personalAudioSpeed.\(id)"
+    }
+
+    var hasPersonalAudioSpeedOverride: Bool {
+        guard let itemID = nowPlayingPersonalAudioID else { return false }
+        return UserDefaults.standard.object(forKey: Self.personalAudioRateKey(itemID)) != nil
     }
 
     /// True when the currently loaded episode's podcast has a speed override set.

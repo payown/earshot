@@ -205,6 +205,7 @@ struct PersonalAudioLibraryScreen: View {
     }
 
     private func delete(_ item: PersonalAudioItem) {
+        player.removePersonalAudioSpeedOverride(for: item.id)
         player.unloadPersonalAudioIfCurrent(id: item.id)
         do {
             try importer.delete(itemID: item.id, in: context.container)

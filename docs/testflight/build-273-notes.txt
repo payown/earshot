@@ -1,0 +1,19 @@
+Chapter 94 - Build 273
+
+What to try first:
+
+Personal Audio is still alpha and needs thorough testing. Local testing has worked, but real files, existing libraries, and different VoiceOver setups can reveal problems. Please expect rough edges and let us know when something doesn't work.
+
+When upgrading from build 272, confirm your Library, subscriptions, downloads, and Queue are still there, including the Queue's items and order. Then try opening Earshot from a cold launch and returning from the background. With VoiceOver, notice how quickly you can reach Main and Now Playing. Include your device, iOS version, and what you were doing if you feel a delay.
+
+In Personal Audio, change the speed on one file, then play a different file and check that it uses the usual default. Return to the first file and check that its own speed is remembered. Reset it and confirm the app's default speed is unchanged. Try the Playback Speed screen and the adjustable Playback speed control with VoiceOver.
+
+This build moves noncritical launch maintenance out of the first interactive moment and keeps Personal Audio speed changes with the file they belong to. No database migration is added.
+
+Kashe's story:
+
+Kashe was listening to Renata's recipe recording again on the drive home. She slowed it down to catch the part about the onions, then moved on to an interview she'd saved for later.
+
+The interview played at its usual speed.
+
+“Good,” she said. “I meant the onions, not everything else.”

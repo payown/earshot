@@ -549,6 +549,14 @@ struct RootView: View {
             guard rootServicesActivated else { return }
             await dismissLegacyPlayedInboxRows()
         }
+        .task(id: rootServicesActivated) {
+            guard rootServicesActivated else { return }
+            await runtime.finishDeferredRootStartup(container: modelContext.container)
+        }
+        .task(id: rootServicesActivated) {
+            guard rootServicesActivated else { return }
+            await opmlImportCoordinator.restorePendingImport()
+        }
         // Keep this outermost so RootView-owned presentations, especially the
         // automatic Now Playing sheet above, inherit the folder route as well as
         // the tab content. Placing it directly on TabView hides the origin button
@@ -563,7 +571,10 @@ struct RootView: View {
 
     private func activateRoot() async {
         if selectedTab == nil { selectedTab = resolvedLaunchTab }
-        let activationCompleted = await runtime.preparePlaybackServices(container: modelContext.container)
+        let activationCompleted = await runtime.preparePlaybackServices(
+            container: modelContext.container,
+            deferNoncriticalMaintenance: true
+        )
         guard activationCompleted else { return }
         showOnboarding = !settings.onboardingComplete
         #if DEBUG
@@ -578,7 +589,6 @@ struct RootView: View {
         }
         #endif
         if let intent = notificationRouter.pendingIntent { route(intent) }
-        await opmlImportCoordinator.restorePendingImport()
         rootServicesActivated = true
         handlePendingIncomingFile()
     }

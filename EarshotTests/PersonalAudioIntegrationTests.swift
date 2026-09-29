@@ -66,6 +66,63 @@ final class PersonalAudioIntegrationTests: XCTestCase {
         player.stopAndUnload()
     }
 
+    func testPersonalAudioSpeedOverrideIsScopedToOneFileAndPreservesGlobalDefault() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let storage = PersonalAudioStorage(rootURL: root.appending(path: "PersonalAudio"))
+        let firstSource = try makePlayableAudioFile(name: "first.caf", durationSeconds: 2)
+        let secondSource = try makePlayableAudioFile(name: "second.caf", durationSeconds: 2)
+        // These short fixtures share audio bytes; stage independently to avoid
+        // duplicate detection obscuring the per-item rate behavior under test.
+        let firstID = UUID().uuidString
+        let firstStaged = try storage.stageCopy(from: firstSource, id: firstID)
+        let firstManaged = try storage.finalize(firstStaged, artworkStagingFilename: nil)
+        let secondID = UUID().uuidString
+        let secondStaged = try storage.stageCopy(from: secondSource, id: secondID)
+        let secondManaged = try storage.finalize(secondStaged, artworkStagingFilename: nil)
+        let first = PersonalAudioItem(
+            id: firstID, title: "First", originalFilename: firstSource.lastPathComponent,
+            mediaFilename: firstManaged.mediaFilename, typeIdentifier: firstStaged.typeIdentifier,
+            durationSeconds: 2, byteSize: firstStaged.byteSize, contentHash: firstStaged.contentHash
+        )
+        let second = PersonalAudioItem(
+            id: secondID, title: "Second", originalFilename: secondSource.lastPathComponent,
+            mediaFilename: secondManaged.mediaFilename, typeIdentifier: secondStaged.typeIdentifier,
+            durationSeconds: 2, byteSize: secondStaged.byteSize, contentHash: secondStaged.contentHash
+        )
+        context.insert(first)
+        context.insert(second)
+        try context.save()
+        let settings = AppSettingsStore(context: context)
+        settings.setDouble(1.6, for: SettingsKey.globalSpeed)
+        let player = PlayerService(personalAudioStorage: storage)
+        player.configure(context: context)
+        defer {
+            player.clearPersonalAudioSpeedOverride()
+            player.stopAndUnload()
+        }
+
+        player.load(first)
+        XCTAssertEqual(player.effectiveRate, 1.6, accuracy: 0.001)
+        let initialRateRevision = player.effectiveRateRevision
+        player.setPersonalAudioSpeedOverride(2.2, announce: false)
+        XCTAssertEqual(player.effectiveRate, 2.2, accuracy: 0.001)
+        XCTAssertGreaterThan(player.effectiveRateRevision, initialRateRevision,
+                             "The VoiceOver speed value must observe per-file rate changes")
+        XCTAssertEqual(settings.double(SettingsKey.globalSpeed, default: 1), 1.6, accuracy: 0.001)
+
+        player.load(second)
+        XCTAssertEqual(player.effectiveRate, 1.6, accuracy: 0.001,
+                       "A different Personal Audio file should use the global default")
+        player.load(first)
+        XCTAssertEqual(player.effectiveRate, 2.2, accuracy: 0.001,
+                       "The first file should retain its own selected speed")
+
+        player.clearPersonalAudioSpeedOverride()
+        XCTAssertEqual(player.effectiveRate, 1.6, accuracy: 0.001)
+        XCTAssertEqual(settings.double(SettingsKey.globalSpeed, default: 1), 1.6, accuracy: 0.001)
+    }
+
     func testLibraryEntryCountRepresentsAllItemsWithoutAnInlinePreviewLimit() throws {
         let container = try ModelContainerFactory.makeInMemory()
         let context = container.mainContext

@@ -160,6 +160,7 @@ final class AppRuntime {
     private var entitlementContainer: ModelContainer?
     private var boundRootServicesContainer: ModelContainer?
     private var rootServiceActivationState: RootServiceActivationState = .notStarted
+    var noncriticalRootMaintenanceTask: Task<Void, Never>?
     private var launchTask: Task<Void, Never>?
     private var launchAttemptID: UUID?
     private var pendingStoreLoad: StoreLoad?
@@ -725,6 +726,7 @@ final class AppRuntime {
                 return false
             }
         }
+        await cancelAndWaitForDeferredRootStartup()
         await cloudProjectionCoordinator?.stop()
         cloudProjectionCoordinator = nil
         let launchToAwait = launchTask
