@@ -695,12 +695,11 @@ struct NowPlayingScreen: View {
             }
             Spacer()
         }
-        .onChange(of: player.effectiveRate) { _, newValue in
-            // Drop the latch once the player catches up, so external speed changes
-            // (the sheet, a per-podcast override) drive the spoken value again.
-            if let latch = speedAdjustLatch, abs(newValue - latch) < 0.001 {
-                speedAdjustLatch = nil
-            }
+        .onChange(of: player.effectiveRateRevision) { _, _ in
+            // Revision changes also cover UserDefaults-backed Personal Audio
+            // rates, and content switches, neither of which Observation can
+            // infer from the per-file rate value alone.
+            speedAdjustLatch = nil
         }
     }
 
@@ -732,7 +731,9 @@ struct NowPlayingScreen: View {
         // announce: false — the badge is adjustable, so VoiceOver re-reads its
         // accessibilityValue (the new speed) automatically; an announce here
         // would speak it twice.
-        if player.canOverridePerPodcast {
+        if player.nowPlayingPersonalAudio != nil {
+            player.setPersonalAudioSpeedOverride(speed, announce: false)
+        } else if player.canOverridePerPodcast {
             player.setPodcastSpeedOverride(speed, announce: false)
         } else {
             player.setGlobalSpeed(speed, announce: false)
@@ -748,12 +749,13 @@ struct NowPlayingScreen: View {
         let formatted = rate.truncatingRemainder(dividingBy: 1) == 0
             ? String(format: "%.0f", rate)
             : String(format: "%g", rate)
-        let overrideIndicator = player.hasPodcastSpeedOverride ? "*" : ""
+        let overrideIndicator = (player.hasPodcastSpeedOverride || player.hasPersonalAudioSpeedOverride) ? "*" : ""
         return "\(formatted)x\(overrideIndicator)"
     }
 
     private var speedAccessibilityValue: String {
         let label = PlaybackLogic.spokenRate(displayRate)
+        if player.hasPersonalAudioSpeedOverride { return "\(label), file override active" }
         return player.hasPodcastSpeedOverride ? "\(label), podcast override active" : label
     }
 

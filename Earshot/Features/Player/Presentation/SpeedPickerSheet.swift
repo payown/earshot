@@ -5,8 +5,8 @@ import SwiftUI
 /// Layout:
 /// - Quick-tap grid of common speeds.
 /// - A stepper for precise 0.1x adjustments across the full 0.5x-5.0x range.
-/// - A segmented scope: "This podcast" vs "Global". Changing the scope writes
-///   or clears `Podcast.speedOverride` accordingly.
+/// - A segmented scope: "This podcast" vs "All podcasts" for podcast playback.
+///   Personal Audio is always scoped to its current file.
 ///
 /// The selected speed applies immediately via `PlayerService`. Designed so VoiceOver
 /// users can both swipe through the grid and use the stepper without extra layers.
@@ -36,11 +36,21 @@ struct SpeedPickerSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                scopeSection
+                if player.nowPlayingPersonalAudio == nil {
+                    scopeSection
+                } else {
+                    Section {
+                        LabeledContent("Apply speed to", value: "This file only")
+                    } header: {
+                        Text("Scope")
+                    } footer: {
+                        Text("Saves a speed override for this Personal Audio file only. The global default is unchanged.")
+                    }
+                }
                 shortcutsSection
                 stepperSection
                 customSpeedSection
-                if podcastScope {
+                if player.hasPersonalAudioSpeedOverride || (podcastScope && player.hasPodcastSpeedOverride) {
                     resetSection
                 }
             }
@@ -203,15 +213,21 @@ struct SpeedPickerSheet: View {
     private var resetSection: some View {
         Section {
             Button(role: .destructive) {
-                podcastScope = false
-                player.clearPodcastSpeedOverride()
+                if player.nowPlayingPersonalAudio != nil {
+                    player.clearPersonalAudioSpeedOverride()
+                } else {
+                    podcastScope = false
+                    player.clearPodcastSpeedOverride()
+                }
                 stepperSpeed = player.effectiveRate
                 updateCustomSpeedText()
             } label: {
                 Label("Reset to global speed", systemImage: "arrow.counterclockwise")
             }
             .accessibilityLabel("Reset to global speed")
-            .accessibilityHint("Removes the speed override for this podcast")
+            .accessibilityHint(player.nowPlayingPersonalAudio == nil
+                ? "Removes the speed override for this podcast"
+                : "Removes the speed override for this Personal Audio file")
         }
     }
 
@@ -221,7 +237,9 @@ struct SpeedPickerSheet: View {
         let clamped = PlaybackLogic.clampedSpeed(speed)
         stepperSpeed = clamped
         updateCustomSpeedText()
-        if podcastScope {
+        if player.nowPlayingPersonalAudio != nil {
+            player.setPersonalAudioSpeedOverride(clamped)
+        } else if podcastScope {
             player.setPodcastSpeedOverride(clamped)
         } else {
             player.setGlobalSpeed(clamped)
