@@ -56,7 +56,8 @@ final class PersonalAudioFoundationTests: XCTestCase {
         XCTAssertEqual(staged.id, id)
         XCTAssertEqual(staged.contentHash.count, 64)
         XCTAssertEqual(staged.byteSize, Int64(64 * 1024 + 44))
-        XCTAssertTrue(staged.stagingFilename.hasPrefix(".staging-\(id)."))
+        XCTAssertTrue(staged.stagingFilename.hasPrefix(".staging-"))
+        XCTAssertTrue(staged.stagingFilename.contains(id))
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
 
         let result = try storage.finalize(staged, artworkStagingFilename: nil)
@@ -74,7 +75,7 @@ final class PersonalAudioFoundationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
-    func testStorageReportsBoundedCopyProgressAndCleansInterruptedStaging() throws {
+    func testStorageReportsBoundedCopyProgressAndPreservesActiveStaging() throws {
         let source = try makeWaveFile(name: "large.wav", audioBytes: 7 * 1_048_576)
         let storage = PersonalAudioStorage(rootURL: root.appending(path: "PersonalAudio"))
         let updates = CopyProgressRecorder()
@@ -86,9 +87,59 @@ final class PersonalAudioFoundationTests: XCTestCase {
         let orphanID = UUID().uuidString
         let orphan = root.appending(path: "PersonalAudio/\(orphanID).mp3")
         try Data([1, 2, 3]).write(to: orphan)
+        let oldStaging = root.appending(path: "PersonalAudio/.staging-\(UUID().uuidString).partial.wav")
+        try Data([4, 5, 6]).write(to: oldStaging)
+        let artworkStaging = try storage.writeStagedArtwork(Data([7, 8, 9]), id: staged.id)
         try storage.reconcile(keeping: [])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.stagingFilename))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storage.rootURL.appending(path: staged.stagingFilename).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storage.rootURL.appending(path: artworkStaging).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldStaging.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: orphan.path))
+        storage.discardStaged(staged, artworkFilename: artworkStaging)
+    }
+
+    func testFileResetRemovesPersonalAudioCopiesWithoutDeletingOriginals() async throws {
+        let support = root.appending(path: "support")
+        let documents = root.appending(path: "documents")
+        let caches = root.appending(path: "caches")
+        let storage = PersonalAudioStorage(rootURL: support.appending(path: PersonalAudioStorage.subdirectoryName))
+        let source = try makeWaveFile(name: "original.wav", audioBytes: 1_024)
+        let staged = try storage.stageCopy(from: source, id: UUID().uuidString)
+        let managed = try storage.finalize(staged, artworkStagingFilename: nil)
+
+        let success = await SettingsReset.performFileReset(
+            applicationSupport: support, documents: documents, caches: caches
+        )
+        XCTAssertTrue(success)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storage.rootURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: support.appending(path: PersonalAudioStorage.subdirectoryName).appending(path: managed.mediaFilename).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+
+    func testFileResetRetriesFailedQuarantineCleanup() async throws {
+        let support = root.appending(path: "support")
+        let documents = root.appending(path: "documents")
+        let caches = root.appending(path: "caches")
+        let storage = PersonalAudioStorage(rootURL: support.appending(path: PersonalAudioStorage.subdirectoryName))
+        try storage.prepare()
+        try Data([1, 2, 3]).write(to: storage.rootURL.appending(path: "recording.wav"))
+
+        let firstAttempt = await SettingsReset.performFileReset(
+            applicationSupport: support, documents: documents, caches: caches,
+            removeQuarantine: { _ in throw CocoaError(.fileWriteNoPermission) }
+        )
+        XCTAssertFalse(firstAttempt)
+        let journal = support.appending(path: "settings-reset-transaction.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
+
+        let retry = await SettingsReset.performFileReset(
+            applicationSupport: support, documents: documents, caches: caches
+        )
+        XCTAssertTrue(retry)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storage.rootURL.path))
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: support.path)
+        XCTAssertFalse(leftovers.contains { $0.hasPrefix("settings-reset-quarantine-") })
     }
 
     func testStorageRejectsNonAudioAndCleansCopyOnReadFailure() throws {
