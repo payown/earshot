@@ -1,11 +1,16 @@
 # Next TestFlight change inventory
 
-Current TestFlight build: Chapter 94, build 273 (version 1.2.3), uploaded on
-2026-09-29 and processed as `VALID`. It is available to Internal Testing Group
-and Public Testers; external beta review is approved and automatic tester
-notification is enabled. See `build-273-change-inventory.md` for the exact
-change and verification record. Physical-device VoiceOver timing remains to be
-checked.
+Current public TestFlight build: Chapter 94, build 273 (version 1.2.3),
+uploaded on 2026-09-29 and processed as `VALID`. It remains available to
+Internal Testing Group and Public Testers; external beta review is approved.
+See `build-273-change-inventory.md` for its exact change and verification
+record. Michael confirmed the on-phone acceptance test passed.
+
+Chapter 95, build 274 (version 1.2.4), was uploaded on 2026-10-05 and
+processed as `VALID` for App Store review. Its exact notes are in
+`build-274-notes.txt` and `docs/kashe.md`. Internal Testing Group has access
+through its all-builds setting. Build 274 is not assigned to Public Testers,
+so their approved 1.2.3 build remains available.
 
 Future TestFlight uploads must continue to follow the maintenance contract in
 `docs/kashe.md`:
@@ -40,5 +45,4 @@ applicable item below. No database migration was added.
 - [x] Obtain Michael’s explicit TestFlight-upload approval.
 - [x] Upload using the checked-in notes file and verify build 273 is available
   to both tester groups.
-- [ ] Confirm physical-device VoiceOver startup timing and Personal Audio
-  per-file playback speed behavior.
+- [x] Confirm on-phone acceptance with Michael before advancing the release.
