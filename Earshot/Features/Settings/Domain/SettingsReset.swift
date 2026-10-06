@@ -40,7 +40,10 @@ enum SettingsReset {
     /// Test seam for a fully disposable directory tree; production always uses
     /// the process's Application Support, Documents, and Caches roots above.
     static func performFileReset(
-        applicationSupport: URL, documents: URL, caches: URL
+        applicationSupport: URL, documents: URL, caches: URL,
+        removeQuarantine: @escaping @Sendable (URL) throws -> Void = {
+            try FileManager.default.removeItem(at: $0)
+        }
     ) async -> Bool {
         let primary = applicationSupport.appending(path: "default.store")
         let paths = Paths(
@@ -54,8 +57,8 @@ enum SettingsReset {
         )
         return await Task.detached(priority: .userInitiated) {
             do {
-                try recover(paths)
-                try transact(paths)
+                try recover(paths, removeQuarantine: removeQuarantine)
+                try transact(paths, removeQuarantine: removeQuarantine)
                 return true
             } catch {
                 AppLog.data.error("Settings reset failed: \(error.localizedDescription, privacy: .public)")
@@ -64,13 +67,18 @@ enum SettingsReset {
         }.value
     }
 
-    private static func transact(_ paths: Paths) throws {
+    private static func transact(
+        _ paths: Paths, removeQuarantine: (URL) throws -> Void
+    ) throws {
         let fm = FileManager.default
         let quarantineName = "settings-reset-quarantine-\(UUID().uuidString)"
         let quarantine = paths.applicationSupport.appending(path: quarantineName, directoryHint: .isDirectory)
         try fm.createDirectory(at: quarantine, withIntermediateDirectories: false)
         var candidates = storeFiles(paths.primary) + storeFiles(paths.local)
         candidates.append(paths.applicationSupport.appending(path: "FolderRuns", directoryHint: .isDirectory))
+        candidates.append(paths.applicationSupport.appending(
+            path: PersonalAudioStorage.subdirectoryName, directoryHint: .isDirectory
+        ))
         candidates += [paths.backups, paths.downloads]
         if let artwork = paths.artwork { candidates.append(artwork) }
         let existing = candidates.filter { fm.fileExists(atPath: $0.path) }
@@ -85,11 +93,13 @@ enum SettingsReset {
         }
         journal = Journal(phase: .committed, quarantine: quarantineName, entries: entries)
         try write(journal, at: paths.journal)
-        try? fm.removeItem(at: quarantine)
+        try removeQuarantine(quarantine)
         try fm.removeItem(at: paths.journal)
     }
 
-    private static func recover(_ paths: Paths) throws {
+    private static func recover(
+        _ paths: Paths, removeQuarantine: (URL) throws -> Void
+    ) throws {
         guard FileManager.default.fileExists(atPath: paths.journal.path) else { return }
         let journal = try JSONDecoder().decode(Journal.self, from: Data(contentsOf: paths.journal))
         let quarantine = paths.applicationSupport.appending(path: journal.quarantine, directoryHint: .isDirectory)
@@ -103,7 +113,9 @@ enum SettingsReset {
                 try FileManager.default.moveItem(at: staged, to: source)
             }
         }
-        try? FileManager.default.removeItem(at: quarantine)
+        if FileManager.default.fileExists(atPath: quarantine.path) {
+            try removeQuarantine(quarantine)
+        }
         try FileManager.default.removeItem(at: paths.journal)
     }
 

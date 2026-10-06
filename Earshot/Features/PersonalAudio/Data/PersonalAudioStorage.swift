@@ -22,6 +22,7 @@ struct PersonalAudioStorage: Sendable {
     static let subdirectoryName = "PersonalAudio"
     static let copyChunkSize = 1_048_576
     static let progressIntervalBytes: Int64 = 4 * 1_048_576
+    private static let currentProcessStagingPrefix = ".staging-\(UUID().uuidString)-"
 
     let rootURL: URL
 
@@ -55,7 +56,7 @@ struct PersonalAudioStorage: Sendable {
         }
         // Keep the real extension last so AVFoundation recognizes the staged
         // file while it is still hidden from model-backed library queries.
-        let stagingFilename = ".staging-\(id).partial.\(fileExtension)"
+        let stagingFilename = "\(Self.currentProcessStagingPrefix)\(id).partial.\(fileExtension)"
         let stagingURL = url(for: stagingFilename)
         try? FileManager.default.removeItem(at: stagingURL)
 
@@ -134,7 +135,7 @@ struct PersonalAudioStorage: Sendable {
 
     func writeStagedArtwork(_ data: Data, id: String) throws -> String {
         try prepare()
-        let filename = ".staging-\(id)-artwork.partial"
+        let filename = "\(Self.currentProcessStagingPrefix)\(id)-artwork.partial"
         try data.write(to: url(for: filename), options: .atomic)
         return filename
     }
@@ -181,8 +182,10 @@ struct PersonalAudioStorage: Sendable {
         return url(for: relativeFilename)
     }
 
-    /// Removes crash-left staging files and generated final files with no model
-    /// record. Call only after the local SwiftData store has opened successfully.
+    /// Removes staging files from earlier processes and generated final files
+    /// with no model record. Current-process staging may still belong to an
+    /// import or duplicate confirmation on another instance of the screen.
+    /// Call only after the local SwiftData store has opened successfully.
     func reconcile(keeping filenames: Set<String>) throws {
         try prepare()
         for entry in try FileManager.default.contentsOfDirectory(
@@ -190,7 +193,9 @@ struct PersonalAudioStorage: Sendable {
         ) {
             let name = entry.lastPathComponent
             if name.hasPrefix(".staging-") {
-                try FileManager.default.removeItem(at: entry)
+                if !name.hasPrefix(Self.currentProcessStagingPrefix) {
+                    try FileManager.default.removeItem(at: entry)
+                }
                 continue
             }
             guard Self.isGeneratedFinalFilename(name), !filenames.contains(name) else { continue }
