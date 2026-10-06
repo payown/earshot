@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Renata sent Kashe a second soup recording with timing for the recipe
+  (Chapter 95).
+
 - Kashe can set a different playback speed for Renata's recipe recording
   without changing the speed of her other audio (Chapter 94).
 
@@ -3476,3 +3479,25 @@ Kashe was listening to Renata's recipe recording again on the drive home. She sl
 The interview played at its usual speed.
 
 “Good,” she said. “I meant the onions, not everything else.”
+
+---
+
+### Chapter 95 - Build 274
+
+What to try first:
+
+Personal Audio is still alpha. Please tell us if an import fails, a file disappears, or VoiceOver feels slow. Include your device, iOS version, file type, and the steps you took.
+
+Check that your Library, subscriptions, downloads, and Queue are still present after updating. In Personal Audio, import an MP3 or M4A from Files, leave and return to the screen while the import is running, then play the imported copy. Confirm the original file is still in Files. If you use Reset Earshot, check that Earshot removes its Personal Audio copies while the originals in Files remain.
+
+This build protects an import while its screen refreshes and includes Personal Audio copies in a full app reset. It also prepares version 1.2.4 for App Store review. No database migration or VoiceOver wording changed.
+
+Kashe's story:
+
+Renata sent Kashe another recording, this time with the timing for the soup. Kashe added it to Earshot, then stepped back to her Library while the file copied.
+
+When she returned, the recording was there. She played the part about the garlic and opened Files to make sure the original was still there too.
+
+“Keeping both?” Renata asked.
+
+“One for listening. One for when I forget where I put the first.”
