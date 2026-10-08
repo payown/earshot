@@ -315,6 +315,7 @@
 		AE2B47C61C095E5CCE625394 /* DownloadStateBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200AF8715178EB80E8153925 /* DownloadStateBadge.swift */; };
 		AFACD9A90AE7643C4F2387F4 /* DownloadPathReconciliation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 387834C9C0D510EA2715D8DF /* DownloadPathReconciliation.swift */; };
 		B02A3E45F1D53182B2A57ECA /* SettingsReset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B744CD0D217BC04C25FAB2B /* SettingsReset.swift */; };
+		B043A5A38E32CF938B36BA18 /* KeepFinishedQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0303EB1FC8E9E6060BE5B24E /* KeepFinishedQueueTests.swift */; };
 		B0F47AB43E4118CC618A5862 /* DirectoryPodcastDescriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483AA7ECFCF646DFE020FA18 /* DirectoryPodcastDescriptionServiceTests.swift */; };
 		B0F6B2E47441073A38A3B57B /* PersonalAudioIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16D81BFF4A4A67F73A92D1A3 /* PersonalAudioIntegrationTests.swift */; };
 		B20E786A211DF6AE5A5139B1 /* PersonalAudioChapters.m4a in Resources */ = {isa = PBXBuildFile; fileRef = C5A4DDA2FE4FD7F4F7CF0671 /* PersonalAudioChapters.m4a */; };
@@ -503,6 +504,7 @@
 		01D982AB8F3D53E99E5C264E /* StoreMigrationFloorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreMigrationFloorTests.swift; sourceTree = "<group>"; };
 		0205C57EF25E382BE2ECD9B6 /* RecoveryDownloadRemovalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryDownloadRemovalTests.swift; sourceTree = "<group>"; };
 		02A02D971B095CF5F43CDFD4 /* PodcastSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastSettingsView.swift; sourceTree = "<group>"; };
+		0303EB1FC8E9E6060BE5B24E /* KeepFinishedQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepFinishedQueueTests.swift; sourceTree = "<group>"; };
 		03715203B50D5DE8AE64CEB5 /* PodcastFolderPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastFolderPickerView.swift; sourceTree = "<group>"; };
 		044D6ACA2D0B0C41F1170B2A /* DownloadPathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadPathsTests.swift; sourceTree = "<group>"; };
 		064DC8E32EAD773F3D9DC9F5 /* TipPurchaseSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipPurchaseSource.swift; sourceTree = "<group>"; };
@@ -1338,6 +1340,7 @@
 				21426D34A6272D33878D6A13 /* InboxExpirationServiceTests.swift */,
 				17E95BEBF055BA2A6E2302DA /* InboxHistoryMaintenanceTests.swift */,
 				7D1FF1B05CD9DD1E0A619E9F /* ITunesSearchServiceTests.swift */,
+				0303EB1FC8E9E6060BE5B24E /* KeepFinishedQueueTests.swift */,
 				3F992A474580C7C064FBD876 /* LargeLibraryMemoryTests.swift */,
 				B63D00B5CCA069A4A6021AF3 /* LibraryPlaybackIntentTests.swift */,
 				ADEA1A20F44BB53D2F82E575 /* LibraryPodcastFilterTests.swift */,
@@ -2677,6 +2680,7 @@
 				C1573F6F4D682C0133FE05D5 /* InboxBadgeCountTests.swift in Sources */,
 				D0EAF35C0542B99058B990D8 /* InboxExpirationServiceTests.swift in Sources */,
 				C4F7C0544F3894E1B221C17C /* InboxHistoryMaintenanceTests.swift in Sources */,
+				B043A5A38E32CF938B36BA18 /* KeepFinishedQueueTests.swift in Sources */,
 				69EF05CA2664706F91AA2EC4 /* LargeLibraryMemoryTests.swift in Sources */,
 				3A6C8B842101B32D0269EA31 /* LibraryPlaybackIntentTests.swift in Sources */,
 				BC27164506A9AE6CE6705A31 /* LibraryPodcastFilterTests.swift in Sources */,
@@ -2819,7 +2823,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 274;
+				CURRENT_PROJECT_VERSION = 275;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -2838,7 +2842,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MARKETING_VERSION = 1.2.4;
+				MARKETING_VERSION = 1.2.5;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -2925,7 +2929,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 274;
+				CURRENT_PROJECT_VERSION = 275;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2938,7 +2942,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MARKETING_VERSION = 1.2.4;
+				MARKETING_VERSION = 1.2.5;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -3043,7 +3047,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 274;
+				CURRENT_PROJECT_VERSION = 275;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -3056,7 +3060,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MARKETING_VERSION = 1.2.4;
+				MARKETING_VERSION = 1.2.5;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

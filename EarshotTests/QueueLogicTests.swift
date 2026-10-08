@@ -136,6 +136,18 @@ final class QueueLogicTests: XCTestCase {
         XCTAssertEqual(QueueLogic.moveDownWithinGroup(items, id: 3), [1, 2, 3])
     }
 
+    func testDirectAndPickupMovesStayInCurrentGroupSlots() {
+        let items: [(id: Int, key: String)] = [
+            (1, "A"), (2, "B"), (3, "A"), (4, "C"), (5, "A"), (6, "B")
+        ]
+        XCTAssertEqual(QueueLogic.moveToTopWithinGroup(items, id: 5), [5, 2, 1, 4, 3, 6])
+        XCTAssertEqual(QueueLogic.moveToBottomWithinGroup(items, id: 1), [3, 2, 5, 4, 1, 6])
+        XCTAssertEqual(QueueLogic.moveWithinGroup(items, id: 5, destination: 1, after: true),
+                       [1, 2, 5, 4, 3, 6])
+        XCTAssertEqual(QueueLogic.moveWithinGroup(items, id: 2, destination: 3, after: false),
+                       items.map(\.id), "cross-group drops must be rejected")
+    }
+
     // MARK: whole-group moves
 
     func testMoveGroupUpSwapsWithPreviousGroupAndDeInterleaves() {
@@ -175,6 +187,16 @@ final class QueueLogicTests: XCTestCase {
         let items: [(id: Int, key: String)] = [(1, "A"), (2, "A")]
         XCTAssertEqual(QueueLogic.moveGroupUp(items, key: "A"), [1, 2])
         XCTAssertEqual(QueueLogic.moveGroupDown(items, key: "A"), [1, 2])
+    }
+
+    func testWholeGroupDirectAndPickupMovesPreserveMembers() {
+        let items: [(id: Int, key: String)] = [
+            (1, "A"), (2, "B"), (3, "A"), (4, "C"), (5, "B")
+        ]
+        XCTAssertEqual(QueueLogic.moveGroupToTop(items, key: "C"), [4, 1, 3, 2, 5])
+        XCTAssertEqual(QueueLogic.moveGroupToBottom(items, key: "A"), [2, 5, 4, 1, 3])
+        XCTAssertEqual(QueueLogic.moveGroup(items, key: "C", destination: "A", after: true),
+                       [1, 3, 4, 2, 5])
     }
 
     // MARK: sortedByDate (Play newest / oldest first)

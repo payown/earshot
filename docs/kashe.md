@@ -76,6 +76,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe keeps finished Queue episodes so she can return to the end she missed, and uses group and episode moves to set her next listening order (Chapter 96).
+
 - Renata sent Kashe a second soup recording with timing for the recipe
   (Chapter 95).
 
@@ -3501,3 +3503,21 @@ When she returned, the recording was there. She played the part about the garlic
 “Keeping both?” Renata asked.
 
 “One for listening. One for when I forget where I put the first.”
+
+---
+
+### Chapter 96 - Build 275
+
+What to try first:
+
+In Settings, Playback, turn on “Keep finished episodes in Queue.” Finish a queued episode and check that it stays in place, marked played. Automatic playback should continue to the next unheard episode, including when Queue wrap is on. Tap a finished episode to replay it. Turn the option off to restore the usual removal behavior for future completions. Download cleanup remains a separate setting.
+
+In Queue, try None, By podcast, and By folder grouping. On an episode’s VoiceOver Actions rotor, Move to top and Move to bottom now act within the displayed group (or the whole list in None). On a group heading, Move Group to Top and Move Group to Bottom move the whole group without changing its internal order. For an exact position, choose Pick up for move on an episode, navigate to another episode in the same group, then choose Drop before or Drop after. You can also pick up a group and drop it before or after another group. Cancel move leaves the order alone. Please tell us if focus jumps, a move lands in the wrong place, or Queue navigation slows on a long list.
+
+Kashe's story:
+
+Kashe came back from a late visit and found the interview she meant to hear had already finished. She'd been listening, mostly. The last bit had gone by while she was carrying bags in from the car.
+
+She turned on the new Queue option and tried again the next day. This time the finished episode stayed where she'd put it. She moved a whole folder of shows to the top, then picked up one interview and dropped it just before the next one she wanted.
+
+“That's where I meant you to go,” she told the phone. Renata, on the call, thought Kashe was talking to her. Kashe let her think so.

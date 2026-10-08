@@ -215,7 +215,7 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Play now", "Remove from queue", "Open show notes", "Download"])
     }
 
-    func testQueueActionsGroupedModeKeepsUpDownButDropsTopBottom() {
+    func testQueueActionsGroupedModeScopesAllMovesToGroup() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)
         let items = buildQueueActions(
@@ -228,7 +228,7 @@ final class QuickActionBuildersTests: XCTestCase {
             onShowNotes: {},
             onFocus: { _ in }
         )
-        XCTAssertEqual(items.map(\.label), ["Move up", "Play now", "Move down"])
+        XCTAssertEqual(items.map(\.label), ["Move to top of group", "Move up", "Play now", "Move down", "Move to bottom of group"])
     }
 
     func testQueueActionsFolderGroupedModeKeepsSameAccessibleMoveActions() {
@@ -244,7 +244,7 @@ final class QuickActionBuildersTests: XCTestCase {
             onShowNotes: {},
             onFocus: { _ in }
         )
-        XCTAssertEqual(items.map(\.label), ["Move up", "Play now", "Move down"])
+        XCTAssertEqual(items.map(\.label), ["Move to top of group", "Move up", "Play now", "Move down", "Move to bottom of group"])
     }
 
     func testQueueActionsFlatModeIncludesAllMovesInConfiguredOrder() {
@@ -273,7 +273,7 @@ final class QuickActionBuildersTests: XCTestCase {
         )
         XCTAssertEqual(
             availableQueueActions(order: order, moveMode: .grouped),
-            [.moveUp, .playNow, .moveDown]
+            order
         )
         XCTAssertEqual(availableQueueActions(order: order, moveMode: .flat), order)
     }

@@ -235,10 +235,10 @@ final class FolderRunController {
         }
     }
 
-    func completeCurrent(_ episode: Episode, continuePlayback: Bool) -> Bool {
+    func completeCurrent(_ episode: Episode, continuePlayback: Bool, naturalCompletion: Bool = false) -> Bool {
         guard driving, identity(episode) == currentItem?.identity, let item = currentItem else { return false }
         guard !isAdvancing else { return true }
-        guard player?.finishFolderEpisode(episode) == true else {
+        guard player?.finishFolderEpisode(episode, naturalCompletion: naturalCompletion) == true else {
             message = "Could not save episode completion. Folder playback stopped."
             player?.pause()
             return true

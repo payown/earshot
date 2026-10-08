@@ -12,6 +12,10 @@ processed as `VALID` for App Store review. Its exact notes are in
 through its all-builds setting. Build 274 is not assigned to Public Testers,
 so their approved 1.2.3 build remains available.
 
+Chapter 96, build 275 (version 1.2.5), is processed as valid and assigned to
+both groups. Internal access is active; Public Testers access awaits Apple beta
+review. See `build-275-change-inventory.md` for the exact status and checks.
+
 Future TestFlight uploads must continue to follow the maintenance contract in
 `docs/kashe.md`:
 

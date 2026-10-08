@@ -96,6 +96,7 @@ enum SettingsKey {
     // continueAfterEpisode off → stop at every episode boundary.
     // continueAfterGroupEnds off → stop when the next queue item is a different
     // podcast. Checked tightest-first at the on-complete handler.
+    static let keepFinishedEpisodesInQueue = "keep_finished_episodes_in_queue"
     static let wrapQueue = "wrap_queue"
     static let continueAfterEpisode = "continue_after_episode"
     static let continueAfterGroupEnds = "continue_after_group_ends"
@@ -266,6 +267,7 @@ enum AppSettingScope {
         SettingsKey.showEpisodeNumbers, SettingsKey.openPlayerOnPlay,
         SettingsKey.dismissPlayerWhenPlaybackEnds,
         SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds, SettingsKey.wrapQueue,
+        SettingsKey.keepFinishedEpisodesInQueue,
         SettingsKey.defaultLaunchScreen, SettingsKey.librarySortOrder, SettingsKey.hideCaughtUpPodcasts,
         SettingsKey.episodeSortOrder, SettingsKey.statsStreaksEnabled,
         SettingsKey.inboxDefaultCount, SettingsKey.themeOverride,

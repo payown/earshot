@@ -431,6 +431,26 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(titles(repo), ["Ep a1", "Ep b1", "Ep a2"])
     }
 
+    func testDirectAndArbitraryPodcastMovesPersistWithoutChangingOtherGroupSlots() throws {
+        let ctx = TestStore.freshContext()
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        let a = ["a1", "a2", "a3"].map { makeEpisode(ctx, $0, podcast: pa) }
+        let b = makeEpisode(ctx, "b1", podcast: pb)
+        let repo = QueueRepository(context: ctx)
+        [a[0], b, a[1], a[2]].forEach(repo.add)
+
+        XCTAssertTrue(repo.moveToTopWithinGroup(a[2]))
+        XCTAssertEqual(repo.queue().map(\.guid), ["a3", "b1", "a1", "a2"])
+        XCTAssertTrue(repo.move(a[0], relativeTo: a[1], after: true, mode: .grouped))
+        XCTAssertEqual(repo.queue().map(\.guid), ["a3", "b1", "a2", "a1"])
+        XCTAssertFalse(repo.move(a[0], relativeTo: b, after: false, mode: .grouped))
+        XCTAssertFalse(repo.moveToBottomWithinGroup(a[0]))
+        XCTAssertFalse(ctx.hasChanges)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<QueueItem>(sortBy: [SortDescriptor(\.position)]))
+            .compactMap { $0.episode?.guid }, ["a3", "b1", "a2", "a1"])
+    }
+
     // MARK: whole-group moves (#476)
 
     func testMoveGroupUpBringsGroupAboveAndDeInterleaves() {

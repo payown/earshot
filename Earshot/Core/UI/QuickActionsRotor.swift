@@ -286,11 +286,24 @@ extension View {
     /// Stable-enum queue variant used by the potentially unbounded Queue list.
     func queueActionsRotor(
         _ actions: [DeferredActionPresentation<QueueItemAction>],
+        supplementalActions: [QuickActionItem] = [],
         perform: @escaping (QueueItemAction) -> Void
     ) -> some View {
         accessibilityActions {
-            ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
-                Button(action.label) { perform(action.action) }
+            if QuickActionsRotor.compensatesReversedEmission {
+                ForEach(supplementalActions.reversed()) { action in
+                    Button(action.label) { action.run() }
+                }
+                ForEach(actions.reversed()) { action in
+                    Button(action.label) { perform(action.action) }
+                }
+            } else {
+                ForEach(actions) { action in
+                    Button(action.label) { perform(action.action) }
+                }
+                ForEach(supplementalActions) { action in
+                    Button(action.label) { action.run() }
+                }
             }
         }
     }

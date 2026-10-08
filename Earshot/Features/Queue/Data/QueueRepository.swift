@@ -603,7 +603,7 @@ final class QueueRepository {
     @discardableResult
     func cancelFromQueue(_ episode: Episode) -> Bool {
         remove(episode) {
-            $0.status = .newEpisode
+            if !$0.isPlayed { $0.status = .newEpisode }
             $0.inboxDismissed = true
             // Reuse the existing opt-in download cleanup rule. A deliberate
             // queue removal means the listener is done with this episode just
@@ -618,6 +618,18 @@ final class QueueRepository {
     /// elsewhere, so a spurious completion can't destroy a saved place.
     @discardableResult
     func markPlayedAndRemove(_ episode: Episode) -> Bool {
+        markPlayed(episode, keepingQueueMembership: false)
+    }
+
+    /// Natural completion honors retention without changing Queue membership or order.
+    @discardableResult
+    func finishPlayback(_ episode: Episode) -> Bool {
+        markPlayed(episode, keepingQueueMembership: AppSettingsStore(context: context).bool(
+            SettingsKey.keepFinishedEpisodesInQueue, default: false
+        ))
+    }
+
+    private func markPlayed(_ episode: Episode, keepingQueueMembership: Bool) -> Bool {
         // Also dismiss from the inbox: an episode played to completion should
         // leave the inbox durably, matching the mark-played Quick Action and
         // swipe (#546). `inboxDismissed` stays set even if later marked unplayed.
@@ -633,7 +645,10 @@ final class QueueRepository {
             DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)
         }
         let saved: Bool
-        if queuedEpisode != nil {
+        if queuedEpisode != nil, keepingQueueMembership {
+            mutate(episodeToMark)
+            saved = save()
+        } else if queuedEpisode != nil {
             saved = remove(episodeToMark, mutate)
         } else {
             // Restored playback and jump-to-bookmark intentionally do not queue
@@ -647,10 +662,11 @@ final class QueueRepository {
         return true
     }
 
-    /// Empties the queue, reverting every episode to `newEpisode` while keeping
+    /// Empties the queue, preserving completed episodes and reverting unfinished
+    /// entries to `newEpisode` while keeping
     /// it dismissed from the inbox, matching ``cancelFromQueue(_:)``.
     ///
-    /// Reverts through `isPlayed = false` rather than a raw `status = .newEpisode`
+    /// Unfinished entries revert through `isPlayed = false` rather than a raw `status = .newEpisode`
     /// so `playedAt` is cleared alongside `status`, preserving the invariant that
     /// a `.newEpisode` episode is unplayed. This matters now that the inbox badge
     /// and list fetch unplayed episodes only (`InboxQuery.normalUnplayed`): a
@@ -670,7 +686,7 @@ final class QueueRepository {
                     isQueued: false,
                     in: context
                 ) || stagedFollowedRemoval
-                episode.isPlayed = false
+                if !episode.isPlayed { episode.isPlayed = false }
                 episode.inboxDismissed = true
                 if shouldDeleteDownloads {
                     DownloadCleanup.removeDownloadFileAndState(episode, in: context)
@@ -722,6 +738,16 @@ final class QueueRepository {
         reorderWithinGroup(episode, keyedBy: podcastKey) { QueueLogic.moveDownWithinGroup($0, id: $1) }
     }
 
+    @discardableResult
+    func moveToTopWithinGroup(_ episode: Episode) -> Bool {
+        reorderWithinGroup(episode, keyedBy: podcastKey) { QueueLogic.moveToTopWithinGroup($0, id: $1) }
+    }
+
+    @discardableResult
+    func moveToBottomWithinGroup(_ episode: Episode) -> Bool {
+        reorderWithinGroup(episode, keyedBy: podcastKey) { QueueLogic.moveToBottomWithinGroup($0, id: $1) }
+    }
+
     /// Folder-grouped analogue of ``moveUpWithinGroup(_:)`` (#762): swaps
     /// `episode` with the previous episode in the SAME folder group (which may be
     /// a different podcast), leaving every other folder group untouched. The
@@ -742,6 +768,42 @@ final class QueueRepository {
         _ episode: Episode, resolution: QueueFolderResolution
     ) -> Bool {
         reorderWithinGroup(episode, keyedBy: folderKey(resolution)) { QueueLogic.moveDownWithinGroup($0, id: $1) }
+    }
+
+    @discardableResult
+    func moveToTopWithinFolderGroup(_ episode: Episode, resolution: QueueFolderResolution) -> Bool {
+        reorderWithinGroup(episode, keyedBy: folderKey(resolution)) { QueueLogic.moveToTopWithinGroup($0, id: $1) }
+    }
+
+    @discardableResult
+    func moveToBottomWithinFolderGroup(_ episode: Episode, resolution: QueueFolderResolution) -> Bool {
+        reorderWithinGroup(episode, keyedBy: folderKey(resolution)) { QueueLogic.moveToBottomWithinGroup($0, id: $1) }
+    }
+
+    @discardableResult
+    func move(_ episode: Episode, relativeTo destination: Episode, after: Bool, mode: QueueMoveMode) -> Bool {
+        guard let destinationID = destination.queueItem?.persistentModelID else { return false }
+        switch mode {
+        case .flat:
+            return reorder(episode) { ids, id in
+                guard id != destinationID, let source = ids.firstIndex(of: id),
+                      let target = ids.firstIndex(of: destinationID) else { return ids }
+                var result = ids
+                result.remove(at: source)
+                let insertion = target + (after ? 1 : 0) - (source < target ? 1 : 0)
+                result.insert(id, at: insertion)
+                return result
+            }
+        case .grouped:
+            return reorderWithinGroup(episode, keyedBy: podcastKey) {
+                QueueLogic.moveWithinGroup($0, id: $1, destination: destinationID, after: after)
+            }
+        case let .groupedByFolder(resolution):
+            return reorderWithinGroup(episode, keyedBy: folderKey(resolution)) {
+                QueueLogic.moveWithinGroup($0, id: $1, destination: destinationID, after: after)
+            }
+        case .none: return false
+        }
     }
 
     // MARK: Group actions (#445)
@@ -910,6 +972,16 @@ final class QueueRepository {
         reorderGroup(keyedBy: podcastKey, target: podcast.persistentModelID) { QueueLogic.moveGroupDown($0, key: $1) }
     }
 
+    @discardableResult
+    func moveGroupToTop(_ podcast: Podcast) -> Bool {
+        reorderGroup(keyedBy: podcastKey, target: podcast.persistentModelID) { QueueLogic.moveGroupToTop($0, key: $1) }
+    }
+
+    @discardableResult
+    func moveGroupToBottom(_ podcast: Podcast) -> Bool {
+        reorderGroup(keyedBy: podcastKey, target: podcast.persistentModelID) { QueueLogic.moveGroupToBottom($0, key: $1) }
+    }
+
     /// Folder-grouped analogue of ``moveGroupUp(_:)`` (#762): moves the whole
     /// folder group identified by `key` up one slot, de-interleaving the queue so
     /// each folder group is contiguous (matching the grouped view). No-op if the
@@ -928,6 +1000,31 @@ final class QueueRepository {
         _ key: QueueGroup.Kind, resolution: QueueFolderResolution
     ) -> Bool {
         reorderGroup(keyedBy: folderKey(resolution), target: key) { QueueLogic.moveGroupDown($0, key: $1) }
+    }
+
+    @discardableResult
+    func moveGroupToTop(_ key: QueueGroup.Kind, resolution: QueueFolderResolution) -> Bool {
+        reorderGroup(keyedBy: folderKey(resolution), target: key) { QueueLogic.moveGroupToTop($0, key: $1) }
+    }
+
+    @discardableResult
+    func moveGroupToBottom(_ key: QueueGroup.Kind, resolution: QueueFolderResolution) -> Bool {
+        reorderGroup(keyedBy: folderKey(resolution), target: key) { QueueLogic.moveGroupToBottom($0, key: $1) }
+    }
+
+    @discardableResult
+    func moveGroup(_ source: QueueGroup.Kind, relativeTo destination: QueueGroup.Kind,
+                   resolution: QueueFolderResolution?, after: Bool) -> Bool {
+        if let resolution {
+            return reorderGroup(keyedBy: folderKey(resolution), target: source) {
+                QueueLogic.moveGroup($0, key: $1, destination: destination, after: after)
+            }
+        }
+        guard case let .podcast(sourceID) = source,
+              case let .podcast(destinationID) = destination else { return false }
+        return reorderGroup(keyedBy: podcastKey, target: sourceID) {
+            QueueLogic.moveGroup($0, key: $1, destination: destinationID, after: after)
+        }
     }
 
     /// Shared group-action core: collects the podcast's queued items, lets
