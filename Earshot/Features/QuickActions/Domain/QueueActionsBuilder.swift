@@ -4,9 +4,8 @@ import SwiftData
 /// How a queue row's move actions behave, set by the display mode:
 /// - `.flat`: the full set — Move to top / up / down / to bottom — over absolute
 ///   queue position.
-/// - `.grouped`: only Move up / down, swapping within the row's podcast group
-///   (top/bottom are ambiguous across groups, so they're dropped).
-/// - `.groupedByFolder`: same as `.grouped` but swapping within the row's FOLDER
+/// - `.grouped`: all moves stay within the row's podcast group.
+/// - `.groupedByFolder`: all moves stay within the row's FOLDER
 ///   group (#762), keyed by the episode-first folder resolution so a row can
 ///   move past another show in the same folder without drifting from display.
 /// - `.none`: no move actions at all.

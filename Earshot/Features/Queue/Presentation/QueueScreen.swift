@@ -54,12 +54,10 @@ private enum QueuePickedItem: Equatable {
 }
 
 /// The play queue. Flat, grouped by podcast, or grouped by folder, with drag reorder for sighted
-/// users and a full set of VoiceOver custom actions so reordering never depends
-/// on a drag gesture. Flat mode offers Move to top / up / down / to bottom over
-/// absolute position. Grouped mode offers Move up / down that reorder within the
-/// row's podcast group (top/bottom are ambiguous across groups, so they're
-/// dropped), and the group heading exposes Play Group, Move Group Up / Down,
-/// Sort Newest First, Sort Oldest First, and Shuffle Group in the actions rotor.
+/// users and VoiceOver custom actions so reordering never depends on a drag.
+/// Flat moves use absolute position; grouped row moves stay within the current
+/// podcast or folder. Group headings move entire groups. Pick-up/drop actions
+/// support exact placement while preserving group membership.
 struct QueueScreen: View {
     @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var context
@@ -345,8 +343,7 @@ struct QueueScreen: View {
     }
 
     /// A single heading element per group. It carries the `.isHeader` trait and
-    /// is announced as "[Podcast], N episodes". The six group-level actions
-    /// (Play Group, Move Group Up/Down, Sort Newest/Oldest First, Shuffle Group)
+    /// is announced as "[Podcast], N episodes". The group-level actions
     /// live in the VoiceOver Actions rotor on this one element — no second focusable
     /// button — so reordering and playback never depend on a drag gesture.
     /// The explicit `.accessibilityLabel` overrides the child `Text`, so only
