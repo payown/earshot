@@ -48,6 +48,11 @@ private enum QueueLineupRequest: Identifiable {
     }
 }
 
+private enum QueuePickedItem: Equatable {
+    case episode(PersistentIdentifier, QueueGroup.Kind?)
+    case group(QueueGroup.Kind)
+}
+
 /// The play queue. Flat, grouped by podcast, or grouped by folder, with drag reorder for sighted
 /// users and a full set of VoiceOver custom actions so reordering never depends
 /// on a drag gesture. Flat mode offers Move to top / up / down / to bottom over
@@ -74,6 +79,7 @@ struct QueueScreen: View {
     @State private var lineupRequest: QueueLineupRequest?
     @State private var savedLineupCount = 0
     @State private var isEnrollingDownloads = false
+    @State private var pickedItem: QueuePickedItem?
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusedGroup: QueueGroup.Kind?
     @AccessibilityFocusState private var focusLaunchHeading: Bool
@@ -219,6 +225,7 @@ struct QueueScreen: View {
             .onChange(of: runtime.launchFocusRequest) { _, _ in
                 requestLaunchHeadingFocus()
             }
+            .onChange(of: settings.queueGrouping) { _, _ in pickedItem = nil }
     }
 
     @ViewBuilder
@@ -322,7 +329,8 @@ struct QueueScreen: View {
                             position: nil,
                             total: nil,
                             moveMode: moveMode,
-                            displayedGroups: groups
+                            displayedGroups: groups,
+                            groupKind: group.kind
                         )
                     }
                     .onMove { from, to in
@@ -366,7 +374,7 @@ struct QueueScreen: View {
     private func groupHeaderActions(
         _ group: QueueGroup, folderGrouping: QueueFolderGrouping?
     ) -> [QuickActionItem] {
-        [
+        var actions = [
             QuickActionItem(id: "playGroup", label: "Play Group", isDestructive: false) {
                 if let episode = playGroup(group, folderGrouping: folderGrouping) {
                     // playFromEpisodeList so Play Group honors #562 (Item 1).
@@ -388,6 +396,18 @@ struct QueueScreen: View {
                     focusedGroup = group.kind
                 }
             },
+            QuickActionItem(id: "moveGroupToTop", label: "Move Group to Top", isDestructive: false) {
+                if moveGroupToTop(group, folderGrouping: folderGrouping) {
+                    Announcer.announce("Moved \(group.title) to top")
+                    focusedGroup = group.kind
+                }
+            },
+            QuickActionItem(id: "moveGroupToBottom", label: "Move Group to Bottom", isDestructive: false) {
+                if moveGroupToBottom(group, folderGrouping: folderGrouping) {
+                    Announcer.announce("Moved \(group.title) to bottom")
+                    focusedGroup = group.kind
+                }
+            },
             QuickActionItem(id: "sortNewest", label: "Sort Newest First", isDestructive: false) {
                 sortNewest(group, folderGrouping: folderGrouping)
                 Announcer.announce("Sorted newest first")
@@ -401,6 +421,36 @@ struct QueueScreen: View {
                 Announcer.announce("Shuffled")
             },
         ]
+        if let pickedItem {
+            if case let .group(source) = pickedItem, source != group.kind {
+                actions.append(QuickActionItem(id: "dropGroupBefore", label: "Drop group before", isDestructive: false) {
+                    dropGroup(source, on: group, after: false, folderGrouping: folderGrouping)
+                })
+                actions.append(QuickActionItem(id: "dropGroupAfter", label: "Drop group after", isDestructive: false) {
+                    dropGroup(source, on: group, after: true, folderGrouping: folderGrouping)
+                })
+            }
+            actions.append(QuickActionItem(id: "cancelMove", label: "Cancel move", isDestructive: false) {
+                self.pickedItem = nil
+                Announcer.announce("Move cancelled")
+            })
+        } else {
+            actions.append(QuickActionItem(id: "pickUpGroup", label: "Pick up group", isDestructive: false) {
+                self.pickedItem = .group(group.kind)
+                Announcer.announce("Picked up \(group.title). Find a group and choose Drop group before or after.")
+            })
+        }
+        return actions
+    }
+
+    private func dropGroup(_ source: QueueGroup.Kind, on destination: QueueGroup,
+                           after: Bool, folderGrouping: QueueFolderGrouping?) {
+        if repo.moveGroup(source, relativeTo: destination.kind,
+                          resolution: folderGrouping?.resolution, after: after) {
+            pickedItem = nil
+            focusedGroup = source
+            Announcer.announce("Moved group \(after ? "after" : "before") \(destination.title)")
+        }
     }
 
     private func playGroup(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> Episode? {
@@ -419,6 +469,18 @@ struct QueueScreen: View {
         if let podcast = group.podcast { return repo.moveGroupDown(podcast) }
         guard let folderGrouping else { return false }
         return repo.moveGroupDown(group.kind, resolution: folderGrouping.resolution)
+    }
+
+    private func moveGroupToTop(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> Bool {
+        if let podcast = group.podcast { return repo.moveGroupToTop(podcast) }
+        guard let folderGrouping else { return false }
+        return repo.moveGroupToTop(group.kind, resolution: folderGrouping.resolution)
+    }
+
+    private func moveGroupToBottom(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> Bool {
+        if let podcast = group.podcast { return repo.moveGroupToBottom(podcast) }
+        guard let folderGrouping else { return false }
+        return repo.moveGroupToBottom(group.kind, resolution: folderGrouping.resolution)
     }
 
     private func sortNewest(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) {
@@ -455,14 +517,17 @@ struct QueueScreen: View {
         position: Int?,
         total: Int?,
         moveMode: QueueMoveMode,
-        displayedGroups: [QueueGroup] = []
+        displayedGroups: [QueueGroup] = [],
+        groupKind: QueueGroup.Kind? = nil
     ) -> some View {
         QueueRow(
             episode: episode,
             position: position,
             total: total,
+            moveMode: moveMode,
             focusedEpisode: $focusedEpisode,
             actions: availableQueueActions(order: quickActions.queueActions, moveMode: moveMode),
+            supplementalActions: episodeMoveActions(episode, moveMode: moveMode, groupKind: groupKind),
             performAction: { action in
                 buildQueueActions(
                     episode: episode,
@@ -484,6 +549,50 @@ struct QueueScreen: View {
                 ).first?.run()
             }
         )
+    }
+
+    private func episodeMoveActions(_ episode: Episode, moveMode: QueueMoveMode,
+                                    groupKind: QueueGroup.Kind?) -> [QuickActionItem] {
+        let episodeID = episode.persistentModelID
+        let episodeTitle = episode.title
+        if let pickedItem {
+            var actions: [QuickActionItem] = []
+            if case let .episode(sourceID, sourceGroup) = pickedItem,
+               sourceID != episodeID, sourceGroup == groupKind {
+                actions.append(QuickActionItem(id: "dropBefore", label: "Drop before", isDestructive: false) {
+                    dropEpisode(sourceID, on: episodeID, after: false, mode: moveMode)
+                })
+                actions.append(QuickActionItem(id: "dropAfter", label: "Drop after", isDestructive: false) {
+                    dropEpisode(sourceID, on: episodeID, after: true, mode: moveMode)
+                })
+            }
+            actions.append(QuickActionItem(id: "cancelMove", label: "Cancel move", isDestructive: false) {
+                self.pickedItem = nil
+                Announcer.announce("Move cancelled")
+            })
+            return actions
+        }
+        return [QuickActionItem(id: "pickUp", label: "Pick up for move", isDestructive: false) {
+            guard repo.queue().contains(where: { $0.persistentModelID == episodeID }) else { return }
+            pickedItem = .episode(episodeID, groupKind)
+            Announcer.announce("Picked up \(episodeTitle). Find an episode in this group and choose Drop before or after.")
+        }]
+    }
+
+    private func dropEpisode(_ sourceID: PersistentIdentifier, on destinationID: PersistentIdentifier,
+                             after: Bool, mode: QueueMoveMode) {
+        let current = repo.queue()
+        guard let source = current.first(where: { $0.persistentModelID == sourceID }),
+              let destination = current.first(where: { $0.persistentModelID == destinationID }) else {
+            pickedItem = nil
+            Announcer.announce("Move cancelled because an episode is no longer in Queue")
+            return
+        }
+        if repo.move(source, relativeTo: destination, after: after, mode: mode) {
+            pickedItem = nil
+            focusedEpisode = sourceID
+            Announcer.announce("Moved \(source.title) \(after ? "after" : "before") \(destination.title)")
+        }
     }
 
     // MARK: Toolbar
@@ -675,8 +784,10 @@ private struct QueueRow: View {
     let episode: Episode
     let position: Int?
     let total: Int?
+    let moveMode: QueueMoveMode
     @AccessibilityFocusState.Binding var focusedEpisode: PersistentIdentifier?
     let actions: [QueueItemAction]
+    let supplementalActions: [QuickActionItem]
     let performAction: (QueueItemAction) -> Void
 
     @ViewBuilder
@@ -690,7 +801,7 @@ private struct QueueRow: View {
 
     private var rowContent: some View {
         let episodeID = episode.persistentModelID
-        let presentations = QueueItemAction.presentations(actions, for: episode)
+        let presentations = QueueItemAction.presentations(actions, for: episode, moveMode: moveMode)
         let primary = presentations.first
         // Castro-style "X min left" / total length, the same treatment EpisodeRow
         // gives every other list. The Queue was the original surface this was
@@ -774,7 +885,7 @@ private struct QueueRow: View {
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572). The
         // default double-tap and hint above keep the UN-reversed `actions.first`.
-        .queueActionsRotor(presentations) { action in
+        .queueActionsRotor(presentations, supplementalActions: supplementalActions) { action in
             guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
             performAction(action)
         }

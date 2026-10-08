@@ -45,12 +45,15 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
 extension QueueItemAction {
     static func presentations(
         _ actions: [QueueItemAction],
-        for episode: Episode
+        for episode: Episode,
+        moveMode: QueueMoveMode = .flat
     ) -> [DeferredActionPresentation<QueueItemAction>] {
         actions.map { action in
             DeferredActionPresentation(
                 action: action,
-                label: action.label(for: episode),
+                label: moveMode.isGrouped && action == .moveToTop ? "Move to top of group"
+                    : moveMode.isGrouped && action == .moveToBottom ? "Move to bottom of group"
+                    : action.label(for: episode),
                 isDestructive: action.isDestructive(for: episode)
             )
         }

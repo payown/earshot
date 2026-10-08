@@ -194,6 +194,41 @@ enum QueueLogic {
         return ids
     }
 
+    /// Repositions one row among the slots of its existing group. Other groups
+    /// retain their exact slots and the other rows retain their relative order.
+    static func moveWithinGroup<ID: Hashable, Key: Equatable>(
+        _ items: [(id: ID, key: Key)], id: ID, destination: ID, after: Bool
+    ) -> [ID] {
+        let original = items.map(\.id)
+        guard let source = items.first(where: { $0.id == id }),
+              let target = items.first(where: { $0.id == destination }),
+              source.key == target.key, id != destination else { return original }
+        let slots = items.indices.filter { items[$0].key == source.key }
+        var group = slots.map { items[$0].id }
+        group.removeAll { $0 == id }
+        guard let targetIndex = group.firstIndex(of: destination) else { return original }
+        group.insert(id, at: targetIndex + (after ? 1 : 0))
+        var result = original
+        for (slot, member) in zip(slots, group) { result[slot] = member }
+        return result
+    }
+
+    static func moveToTopWithinGroup<ID: Hashable, Key: Equatable>(
+        _ items: [(id: ID, key: Key)], id: ID
+    ) -> [ID] {
+        guard let source = items.first(where: { $0.id == id }),
+              let first = items.first(where: { $0.key == source.key }) else { return items.map(\.id) }
+        return moveWithinGroup(items, id: id, destination: first.id, after: false)
+    }
+
+    static func moveToBottomWithinGroup<ID: Hashable, Key: Equatable>(
+        _ items: [(id: ID, key: Key)], id: ID
+    ) -> [ID] {
+        guard let source = items.first(where: { $0.id == id }),
+              let last = items.last(where: { $0.key == source.key }) else { return items.map(\.id) }
+        return moveWithinGroup(items, id: id, destination: last.id, after: true)
+    }
+
     // MARK: Whole-group moves
 
     /// Moves the entire group identified by `key` up one slot, swapping it with
@@ -217,6 +252,46 @@ enum QueueLogic {
         key: Key
     ) -> [ID] {
         moveGroup(items, key: key, by: 1)
+    }
+
+    static func moveGroupToTop<ID: Hashable, Key: Hashable>(
+        _ items: [(id: ID, key: Key)], key: Key
+    ) -> [ID] {
+        guard group(items).first?.key != key else { return items.map(\.id) }
+        return moveGroup(items, key: key, to: 0)
+    }
+
+    static func moveGroupToBottom<ID: Hashable, Key: Hashable>(
+        _ items: [(id: ID, key: Key)], key: Key
+    ) -> [ID] {
+        let groups = group(items)
+        guard groups.last?.key != key else { return items.map(\.id) }
+        return moveGroup(items, key: key, to: groups.count)
+    }
+
+    static func moveGroup<ID: Hashable, Key: Hashable>(
+        _ items: [(id: ID, key: Key)], key: Key, destination: Key, after: Bool
+    ) -> [ID] {
+        let groups = group(items)
+        guard let target = groups.firstIndex(where: { $0.key == destination }),
+              key != destination else { return items.map(\.id) }
+        let targetIndex = target + (after ? 1 : 0)
+        if let sourceIndex = groups.firstIndex(where: { $0.key == key }),
+           targetIndex - (sourceIndex < targetIndex ? 1 : 0) == sourceIndex {
+            return items.map(\.id)
+        }
+        return moveGroup(items, key: key, to: targetIndex)
+    }
+
+    private static func moveGroup<ID: Hashable, Key: Hashable>(
+        _ items: [(id: ID, key: Key)], key: Key, to destination: Int
+    ) -> [ID] {
+        var groups = group(items)
+        guard let source = groups.firstIndex(where: { $0.key == key }) else { return items.map(\.id) }
+        let moving = groups.remove(at: source)
+        let adjusted = destination > source ? destination - 1 : destination
+        groups.insert(moving, at: max(0, min(adjusted, groups.count)))
+        return groups.flatMap(\.ids)
     }
 
     private static func moveGroup<ID: Hashable, Key: Hashable>(

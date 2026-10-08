@@ -3112,7 +3112,10 @@ actor CloudProjectionCoordinator: ModelActor {
                     keyByItemID[item.persistentModelID] = entry.key
                     changed = true
                 }
-                if episode.status != .inQueue {
+                // Queue membership and played state are independent when a
+                // completed episode is retained. A remote ordering refresh must
+                // not turn that completed row back into an unheard episode.
+                if !episode.isPlayed && episode.status != .inQueue {
                     episode.status = .inQueue
                     changed = true
                 }

@@ -32,7 +32,7 @@ func availableQueueActions(order: [QueueItemAction], moveMode: QueueMoveMode) ->
     order.filter { action in
         switch action {
         case .moveToTop, .moveToBottom:
-            return moveMode == .flat
+            return moveMode != .none
         case .moveUp, .moveDown:
             return moveMode != .none
         default:
@@ -119,13 +119,33 @@ func buildQueueActions(
                 }
             }
         case .moveToTop:
-            guard moveMode == .flat else { return nil }
-            return QuickActionItem(label: "Move to top", isDestructive: false,
-                                   run: moved(repo.moveToTop, "Moved \(episode.title) to top"))
+            switch moveMode {
+            case .flat:
+                return QuickActionItem(label: "Move to top", isDestructive: false,
+                                       run: moved(repo.moveToTop, "Moved \(episode.title) to top"))
+            case .grouped:
+                return QuickActionItem(label: "Move to top of group", isDestructive: false,
+                                       run: moved(repo.moveToTopWithinGroup, "Moved \(episode.title) to top of group"))
+            case let .groupedByFolder(resolution):
+                return QuickActionItem(label: "Move to top of group", isDestructive: false,
+                                       run: moved({ repo.moveToTopWithinFolderGroup($0, resolution: resolution) },
+                                                  "Moved \(episode.title) to top of group"))
+            case .none: return nil
+            }
         case .moveToBottom:
-            guard moveMode == .flat else { return nil }
-            return QuickActionItem(label: "Move to bottom", isDestructive: false,
-                                   run: moved(repo.moveToBottom, "Moved \(episode.title) to bottom"))
+            switch moveMode {
+            case .flat:
+                return QuickActionItem(label: "Move to bottom", isDestructive: false,
+                                       run: moved(repo.moveToBottom, "Moved \(episode.title) to bottom"))
+            case .grouped:
+                return QuickActionItem(label: "Move to bottom of group", isDestructive: false,
+                                       run: moved(repo.moveToBottomWithinGroup, "Moved \(episode.title) to bottom of group"))
+            case let .groupedByFolder(resolution):
+                return QuickActionItem(label: "Move to bottom of group", isDestructive: false,
+                                       run: moved({ repo.moveToBottomWithinFolderGroup($0, resolution: resolution) },
+                                                  "Moved \(episode.title) to bottom of group"))
+            case .none: return nil
+            }
         case .moveUp:
             switch moveMode {
             case .flat:
