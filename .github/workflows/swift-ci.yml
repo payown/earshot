@@ -1,14 +1,14 @@
 name: Swift CI
 
-# Runs the native SwiftUI/SwiftData test suite (EarshotTests) so PRs into the
-# `swift` branch are gated on it actually passing, not on a human/agent
+# Runs the native SwiftUI/SwiftData test suites so PRs into `main` are
+# gated on them actually passing, not on a human/agent
 # remembering to run `xcodebuild test` locally. See issue #656.
 #
 # Runs on a SELF-HOSTED runner on Michael's Mac (no GitHub-hosted macOS
 # minutes are ever billed). Migrated off `macos-15` after GitHub Actions
 # billing blocked all hosted-runner jobs.
 #
-# No path filters: PRs into `swift` are effectively always SwiftUI-app work,
+# No path filters: PRs into `main` are effectively always SwiftUI-app work,
 # and an unfiltered trigger keeps this safe to mark "Required" in branch
 # protection (a path-filtered required check that never fires on a given PR
 # leaves that PR permanently pending).
@@ -53,6 +53,16 @@ jobs:
             exit 1
           }
 
+      # The simulator belongs exclusively to CI. A fresh boot clears stale
+      # test runners and automation sessions left by earlier jobs.
+      - name: Restart CI simulator
+        run: |
+          simulator_id=23F12FE1-0D77-4B42-B766-ADD9F27A2153
+          if xcrun simctl list devices booted | grep -q "$simulator_id"; then
+            xcrun simctl shutdown "$simulator_id"
+          fi
+          xcrun simctl bootstatus "$simulator_id" -b
+
       # The Earshot.xcodeproj is committed to the repo; local devs regenerate
       # it from project.yml with `xcodegen generate` only when project.yml
       # changes, then commit the result. CI builds the committed project
@@ -65,7 +75,11 @@ jobs:
       # Destination pinned to the dedicated CI simulator by UDID (not
       # `name=iPhone 17`, which matches multiple devices and caused runner
       # contention when several builds ran at once).
-      - name: Run EarshotTests
+      # Retry failed test cases once inside this run to absorb occasional
+      # simulator test-runner exits without rerunning the whole CI job.
+      # Keep this run's result bundle separate from historical local results.
+      - name: Run Earshot tests
+        id: tests
         run: |
           set -o pipefail
           xcodebuild test \
@@ -73,14 +87,28 @@ jobs:
             -scheme Earshot \
             -configuration Debug \
             -destination 'platform=iOS Simulator,id=23F12FE1-0D77-4B42-B766-ADD9F27A2153' \
+            -resultBundlePath "$RUNNER_TEMP/EarshotTests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.xcresult" \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
+      - name: Archive xcresult on failure
+        if: failure() && steps.tests.outcome == 'failure'
+        run: |
+          result="$RUNNER_TEMP/EarshotTests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.xcresult"
+          if [[ -d "$result" ]]; then
+            ditto -c -k --keepParent "$result" "$RUNNER_TEMP/EarshotTests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.zip"
+          else
+            echo "::warning::No test result bundle was created."
+          fi
+
       - name: Upload xcresult on failure
-        if: failure()
+        if: failure() && steps.tests.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: swift-test-results
-          path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+          path: ${{ runner.temp }}/EarshotTests-${{ github.run_id }}-${{ github.run_attempt }}.zip
           retention-days: 14
           if-no-files-found: ignore
+          compression-level: 0
