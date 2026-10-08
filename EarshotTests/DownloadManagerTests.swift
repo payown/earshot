@@ -76,6 +76,27 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertNil(episode.downloadPath)
     }
 
+    func testBBCDownloadStartsWithHTTPSSelector() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(
+            guid: "bbc", title: "BBC episode",
+            audioURL: "http://open.live.bbc.co.uk/mediaselector/6/select/proto/http/vpid/bbc.mp3"
+        )
+        context.insert(episode)
+        try context.save()
+        var transferURL: URL?
+        let manager = DownloadManager { url, _ in transferURL = url }
+        manager.configureForTesting(context: context, isOnWifi: true)
+
+        await manager.download(episode)
+
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+        XCTAssertEqual(
+            transferURL?.absoluteString,
+            "https://open.live.bbc.co.uk/mediaselector/6/select/proto/https/vpid/bbc.mp3"
+        )
+    }
+
     func testCorrectedMediaCleanupRunsAfterSavedRepairInstruction() async throws {
         let context = TestStore.freshContext()
         let podcast = Podcast(feedURL: "https://h/feed.xml", title: "Show")

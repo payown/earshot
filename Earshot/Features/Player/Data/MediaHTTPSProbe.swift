@@ -29,26 +29,43 @@ actor MediaHTTPSProbe: MediaHTTPSProbing {
             return nil
         }
 
-        let candidate = SecureURL.upgradedForNonMedia(cleartextURL)
+        let candidate = SecureURL.preferredMediaHTTPS(cleartextURL)
         var request = URLRequest(url: candidate, timeoutInterval: 4)
         request.httpMethod = "HEAD"
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
         do {
-            let (_, response) = try await session.data(for: request)
+            let (_, response) = try await session.data(
+                for: request, delegate: HTTPSOnlyMediaRedirects()
+            )
             guard let http = response as? HTTPURLResponse,
-                  (200..<400).contains(http.statusCode),
+                  (200..<300).contains(http.statusCode),
                   http.url?.scheme?.lowercased() == "https" else {
                 cache[cleartextURL] = .unavailable
                 return nil
             }
-            let verified = http.url ?? candidate
-            cache[cleartextURL] = .secure(verified)
-            return verified
+            // Return the stable selector rather than a redirected destination:
+            // BBC's final media URLs are signed and can expire after the probe.
+            cache[cleartextURL] = .secure(candidate)
+            return candidate
         } catch {
             cache[cleartextURL] = .unavailable
             return nil
         }
+    }
+}
+
+/// A secure final URL is insufficient if any earlier redirect carried media
+/// over cleartext. Reject the downgrade before following it.
+final class HTTPSOnlyMediaRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(request.url?.scheme?.lowercased() == "https" ? request : nil)
     }
 }
 
