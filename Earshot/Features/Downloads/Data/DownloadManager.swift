@@ -328,9 +328,9 @@ final class DownloadManager {
             return
         }
         // A download is a non-media URLSession fetch (unlike AVFoundation
-        // streaming), so upgrade http→https under the media-only ATS policy
-        // (#387). HTTP-only hosts can still stream; only the download is affected.
-        let url = SecureURL.upgradedForNonMedia(rawURL)
+        // streaming), so require HTTPS under the media-only ATS policy (#387).
+        // BBC's published HTTP selector has a working HTTPS variant (#709).
+        let url = SecureURL.preferredMediaHTTPS(rawURL)
 
         // The ActiveDownload row and the .downloading write land in the SAME save
         // (#701): a row that lagged behind would leave this episode invisible to

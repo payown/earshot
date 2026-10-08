@@ -215,4 +215,31 @@ final class MediaHTTPSProbeTests: XCTestCase {
         XCTAssertNil(second)
         XCTAssertEqual(MockURLProtocol.requestedURLs.count, 1)
     }
+
+    func testProbeUsesBBCSecureSelectorAndKeepsStableURL() async throws {
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: Data())])
+        let probe = MediaHTTPSProbe(session: MockURLProtocol.makeSession())
+        let cleartext = try XCTUnwrap(URL(string:
+            "http://open.live.bbc.co.uk/mediaselector/6/select/proto/http/vpid/sample.mp3"
+        ))
+        let expected = try XCTUnwrap(URL(string:
+            "https://open.live.bbc.co.uk/mediaselector/6/select/proto/https/vpid/sample.mp3"
+        ))
+
+        let alternative = await probe.secureAlternative(for: cleartext)
+        XCTAssertEqual(alternative, expected)
+        XCTAssertEqual(MockURLProtocol.requestedURLs, [expected])
+        XCTAssertEqual(MockURLProtocol.requests.first?.httpMethod, "HEAD")
+    }
+
+    func testProbeDoesNotAcceptUnresolvedRedirectAsSecureMedia() async throws {
+        MockURLProtocol.setOutcomes([.responseWithHeaders(
+            statusCode: 302, data: Data(), headers: ["Location": "http://media.example/audio.mp3"]
+        )])
+        let probe = MediaHTTPSProbe(session: MockURLProtocol.makeSession())
+        let cleartext = try XCTUnwrap(URL(string: "http://legacy.example/audio.mp3"))
+
+        let alternative = await probe.secureAlternative(for: cleartext)
+        XCTAssertNil(alternative)
+    }
 }

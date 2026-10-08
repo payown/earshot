@@ -39,4 +39,28 @@ final class SecureURLTests: XCTestCase {
     func testUppercaseSchemeUpgraded() {
         XCTAssertEqual(upgraded("HTTP://host.example/f"), "https://host.example/f")
     }
+
+    func testBBCMediaSelectorUsesHTTPSVariantWithoutLosingQuery() throws {
+        let source = try XCTUnwrap(URL(string:
+            "http://open.live.bbc.co.uk/mediaselector/6/select/version/2.0/mediaset/audio/proto/http/vpid/p0p9r146.mp3?foo=bar"
+        ))
+        XCTAssertEqual(
+            SecureURL.preferredMediaHTTPS(source).absoluteString,
+            "https://open.live.bbc.co.uk/mediaselector/6/select/version/2.0/mediaset/audio/proto/https/vpid/p0p9r146.mp3?foo=bar"
+        )
+    }
+
+    func testBBCSelectorRewriteIsLimitedToExactHostAndPath() throws {
+        for string in [
+            "http://other.example/audio/proto/http/episode.mp3",
+            "http://open.live.bbc.co.uk.evil.example/audio/proto/http/episode.mp3",
+            "http://open.live.bbc.co.uk/audio/proto/httpish/episode.mp3",
+        ] {
+            let source = try XCTUnwrap(URL(string: string))
+            XCTAssertEqual(
+                SecureURL.preferredMediaHTTPS(source),
+                SecureURL.upgradedForNonMedia(source)
+            )
+        }
+    }
 }
