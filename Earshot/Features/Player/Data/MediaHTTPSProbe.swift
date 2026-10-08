@@ -57,7 +57,7 @@ actor MediaHTTPSProbe: MediaHTTPSProbing {
 
 /// A secure final URL is insufficient if any earlier redirect carried media
 /// over cleartext. Reject the downgrade before following it.
-private final class HTTPSOnlyMediaRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+final class HTTPSOnlyMediaRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,

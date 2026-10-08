@@ -232,7 +232,7 @@ final class MediaHTTPSProbeTests: XCTestCase {
         XCTAssertEqual(MockURLProtocol.requests.first?.httpMethod, "HEAD")
     }
 
-    func testProbeDoesNotAcceptUnresolvedRedirectAsSecureMedia() async throws {
+    func testProbeDoesNotAcceptUnresolved302AsSecureMedia() async throws {
         MockURLProtocol.setOutcomes([.responseWithHeaders(
             statusCode: 302, data: Data(), headers: ["Location": "http://media.example/audio.mp3"]
         )])
@@ -241,5 +241,29 @@ final class MediaHTTPSProbeTests: XCTestCase {
 
         let alternative = await probe.secureAlternative(for: cleartext)
         XCTAssertNil(alternative)
+    }
+
+    func testProbeRedirectDelegateRejectsHTTPAndAllowsHTTPS() throws {
+        let initial = try XCTUnwrap(URL(string: "https://legacy.example/audio.mp3"))
+        let task = URLSession.shared.dataTask(with: initial)
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: initial, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: nil
+        ))
+        let policy = HTTPSOnlyMediaRedirects()
+        let insecure = try XCTUnwrap(URL(string: "http://media.example/audio.mp3"))
+        let secure = try XCTUnwrap(URL(string: "https://media.example/audio.mp3"))
+
+        var accepted: URLRequest?
+        policy.urlSession(
+            .shared, task: task, willPerformHTTPRedirection: response,
+            newRequest: URLRequest(url: insecure)
+        ) { accepted = $0 }
+        XCTAssertNil(accepted)
+
+        policy.urlSession(
+            .shared, task: task, willPerformHTTPRedirection: response,
+            newRequest: URLRequest(url: secure)
+        ) { accepted = $0 }
+        XCTAssertEqual(accepted?.url, secure)
     }
 }
