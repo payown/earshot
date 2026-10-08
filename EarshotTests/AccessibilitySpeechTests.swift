@@ -111,4 +111,37 @@ final class AccessibilitySpeechTests: XCTestCase {
             "A thoughtful show about accessibility."
         )
     }
+
+    func testUnfollowedPreviewEpisodeSpeaksDescriptionUsingEpisodeSetting() {
+        let description = "<p>First &amp; second.</p><p>"
+            + String(repeating: "More detail follows. ", count: 20) + "</p>"
+        let episode = PreviewEpisode(
+            podcastFeedURL: "https://example.com/feed", podcastTitle: "Example",
+            podcastArtworkURL: nil, id: "one", title: "Episode", pubDate: nil,
+            durationSeconds: nil, audioURL: "", episodeDescription: description,
+            searchableDescription: "", artworkURL: nil, episodeNumber: nil,
+            seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+
+        XCTAssertNil(PreviewEpisodeRowSpeech.value(for: episode, mode: .off))
+        let brief = PreviewEpisodeRowSpeech.value(for: episode, mode: .brief)
+        XCTAssertNotNil(brief)
+        XCTAssertTrue(brief?.hasPrefix("First & second.") == true)
+        XCTAssertLessThanOrEqual(brief?.count ?? .max, 140)
+        let full = PreviewEpisodeRowSpeech.value(for: episode, mode: .full)
+        XCTAssertTrue(full?.hasPrefix("First & second.") == true)
+        XCTAssertGreaterThan(full?.count ?? 0, 140)
+        XCTAssertFalse(full?.contains("<p>") == true)
+    }
+
+    func testUnfollowedPreviewEpisodeWithEmptyNotesHasNoSpokenValue() {
+        let episode = PreviewEpisode(
+            podcastFeedURL: "https://example.com/feed", podcastTitle: "Example",
+            podcastArtworkURL: nil, id: "empty", title: "Episode", pubDate: nil,
+            durationSeconds: nil, audioURL: "https://example.com/episode.mp3",
+            episodeDescription: "<p><br></p>", searchableDescription: "", artworkURL: nil,
+            episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+        XCTAssertNil(PreviewEpisodeRowSpeech.value(for: episode, mode: .full))
+    }
 }

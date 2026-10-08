@@ -58,6 +58,21 @@ struct PreviewEpisode: Identifiable, Equatable, Sendable {
     let transcriptURL: String?
 }
 
+/// Unfollowed previews use the same episode-description preference and cached
+/// HTML cleanup as saved episode rows. Keep the value separate from the title
+/// so VoiceOver can read it when the listener focuses either kind of row.
+enum PreviewEpisodeRowSpeech {
+    @MainActor
+    static func value(for episode: PreviewEpisode, mode: SpokenDescriptionMode) -> String? {
+        SpokenDescriptionCache.shared.text(
+            identity: "preview-episode:\(FeedURLIdentity.canonical(episode.podcastFeedURL))\u{1}\(episode.id)",
+            html: episode.episodeDescription,
+            mode: mode,
+            briefLimit: 140
+        )
+    }
+}
+
 /// Chronological presentation order for an unsubscribed podcast preview.
 /// Kept independent from the saved-podcast setting: auditing a feed must not
 /// silently change how followed podcasts are ordered elsewhere in the app.

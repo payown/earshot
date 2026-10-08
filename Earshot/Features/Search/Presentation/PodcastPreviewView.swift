@@ -34,6 +34,7 @@ struct PodcastPreviewView: View {
     /// into VoiceOver's Actions rotor, so the live environment value removes the
     /// menu while VoiceOver is running and prevents duplicate actions.
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(SettingsStore.self) private var settings
 
     /// Subscriptions, so the Follow / Unfollow control reflects live state and the
     /// label flips the moment the toggle completes — without re-entering the view.
@@ -220,11 +221,16 @@ struct PodcastPreviewView: View {
             audioURL: episode.audioURL,
             isQueued: episode.catalogIdentity.map(queuedEpisodeIdentities.contains) ?? false
         )
+        let spokenDescription = voiceOverEnabled ? PreviewEpisodeRowSpeech.value(
+            for: episode,
+            mode: settings.spokenEpisodeDescriptionMode
+        ) : nil
         if actions.isEmpty {
             // No enclosure URL: render a static, non-playable row so a feed missing
             // audio degrades gracefully rather than offering a dead play action.
             episodeRowContent(episode)
                 .accessibilityElement(children: .combine)
+                .modifier(OptionalSpokenValue(value: spokenDescription))
         } else {
             // A Button is already a single VoiceOver element with the button trait,
             // so the one-stop-per-row requirement is preserved without combining.
@@ -235,6 +241,7 @@ struct PodcastPreviewView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .modifier(OptionalSpokenValue(value: spokenDescription))
             .accessibilityHint("Streams this episode")
             .stableActionsRotor(actions) { action in
                 performPreviewAction(action, episode: episode)
