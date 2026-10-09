@@ -81,6 +81,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 - Renata sent Kashe a second soup recording with timing for the recipe
   (Chapter 95).
 
+- Kashe compares Light and Balanced compression on Renata's soup recording and returns to Light (Chapter 97).
+
 - Kashe can set a different playback speed for Renata's recipe recording
   without changing the speed of her other audio (Chapter 94).
 
@@ -3521,3 +3523,31 @@ Kashe came back from a late visit and found the interview she meant to hear had 
 She turned on the new Queue option and tried again the next day. This time the finished episode stayed where she'd put it. She moved a whole folder of shows to the top, then picked up one interview and dropped it just before the next one she wanted.
 
 “That's where I meant you to go,” she told the phone. Renata, on the call, thought Kashe was talking to her. Kashe let her think so.
+
+---
+
+Chapter 97 - Build 276
+
+What to try first:
+
+If you are coming from build 273 or 274, also try the Queue changes from build 275. In Settings, Playback, turn on Keep finished episodes in Queue. Finish an episode, confirm it stays marked played, and check that automatic playback finds the next unheard episode. In Queue, try None, By podcast, and By folder. Use the VoiceOver Actions rotor to move an episode to the top or bottom of its current group, or move a whole group. Pick up an episode or group, drop it before or after another, and cancel a move. Check order, focus, and responsiveness.
+
+In Discover, open a podcast you do not follow. Set Episode description to Off, Brief, then Full in Settings, VoiceOver. Focus its episode rows and check that VoiceOver reads the matching description after the title and details, including for an episode you cannot play. Empty descriptions should add no extra speech.
+
+For a BBC episode that previously showed an insecure-media warning or failed to download, try playback, seeking, and a background download. Its verified media path now stays on HTTPS. Tell us the show and episode if playback or download still fails; other publishers and unverified routes may still show the existing warning.
+
+In Settings, Playback, try Dynamic-range compression at Light, Balanced, and Strong on quiet and loud speech, then turn it Off. Enable Equalizer and adjust Bass, Speech, and Treble with VoiceOver. Compare each band, return it to neutral, then disable EQ. Check that choices persist after relaunch. Try a downloaded episode and Personal Audio, seeking, speed changes, background playback, headphones, Bluetooth, and AirPlay. Report distortion, clipped words, delays, unexpected volume changes, or sluggish VoiceOver. Some streams, including live HLS, may not support these effects.
+
+Behind the scenes, simulator test retries and failure reports were fixed.
+
+Kashe's story:
+
+Kashe had the soup recording on while she put away the last of the dishes. Renata's voice was quiet until a cupboard door closed in the recording. Kashe reached for the phone, found the new compression control, and tried Light. Then Balanced. She went back to Light and replayed the sentence about the garlic.
+
+Renata called as the kettle clicked off.
+
+“Did you make the soup?”
+
+“I found the recipe,” Kashe said. “I'm still deciding what to do with it.”
+
+She left the interview queued for the drive tomorrow. Some choices could wait until she had her coat on.

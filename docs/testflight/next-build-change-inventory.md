@@ -1,52 +1,40 @@
 # Next TestFlight change inventory
 
-Current public TestFlight build: Chapter 94, build 273 (version 1.2.3),
-uploaded on 2026-09-29 and processed as `VALID`. It remains available to
-Internal Testing Group and Public Testers; external beta review is approved.
-See `build-273-change-inventory.md` for its exact change and verification
-record. Michael confirmed the on-phone acceptance test passed.
+As of 2026-10-09, version 1.2.5 build 275 (Chapter 96) is valid and assigned
+to Internal Testing Group and Public Testers. Internal testing is active;
+Apple's external beta review is still in progress. Build 273 is the last
+confirmed externally available build. See `build-275-change-inventory.md`.
 
-Chapter 95, build 274 (version 1.2.4), was uploaded on 2026-10-05 and
-processed as `VALID` for App Store review. Its exact notes are in
-`build-274-notes.txt` and `docs/kashe.md`. Internal Testing Group has access
-through its all-builds setting. Build 274 is not assigned to Public Testers,
-so their approved 1.2.3 build remains available.
+The next upload is version 1.2.5 build 276, Chapter 97. App Store Connect
+reported 276 as the next available build number before preparation. Confirm
+that again immediately before archiving.
 
-Chapter 96, build 275 (version 1.2.5), is processed as valid and assigned to
-both groups. Internal access is active; Public Testers access awaits Apple beta
-review. See `build-275-change-inventory.md` for the exact status and checks.
+## Changes since build 275
 
-Future TestFlight uploads must continue to follow the maintenance contract in
-`docs/kashe.md`:
+- #999: VoiceOver reads sanitized episode descriptions in Discover previews for
+  unfollowed podcasts, respecting Off, Brief, and Full.
+- #1000: BBC playback and background downloads use the verified HTTPS media
+  selector; unverified routes retain the cleartext warning.
+- #1001: The self-hosted simulator CI job restarts its dedicated simulator,
+  retries failed cases once, and archives only the current failed result.
+- #1002: Playback gains device-local compression strengths and a three-band
+  equalizer, both off by default, with safe PCM processing and output limiting.
+- Release follow-up: replace a previous dynamics-settings notification token
+  when the player is rebound after an in-app reset.
 
-- assign the chapter to the build that is actually uploaded;
-- append the full chapter to `docs/kashe.md` in the same shipping change;
-- update “Details established so far” for any new story facts;
-- use that exact chapter as the TestFlight `--notes` payload;
-- keep the complete chapter at or below 2,500 characters before upload.
+Chapter 97 also repeats build 275's Queue tests because Public Testers may
+receive build 276 before build 275 clears Apple beta review. Its exact text is
+`docs/testflight/build-276-notes.txt` and the final chapter in `docs/kashe.md`.
+No persistence schema, entitlement, or signing-setting change is planned.
 
-## Changes represented by build 273
+## Release gates
 
-Chapter 94's “What to try first” and “Kashe's story” sections account for every
-applicable item below. No database migration was added.
-
-- Root activation defers noncritical startup maintenance until after the
-  interface is interactive.
-- Personal Audio playback speed is remembered per imported file without
-  changing the app or podcast default.
-- No SwiftData or CloudKit schema change was added.
-
-## Shipping checklist
-
-- [x] Reconcile this inventory with every change after build 249.
-- [x] Choose the real final build number and the next chapter number.
-- [x] Write one coherent Kashe chapter with plain-language “What changed” and
-  “What to test” sections covering the inventory.
-- [x] Append the chapter to `docs/kashe.md`; note any new durable story
-  facts requiring an established-details update.
-- [x] Save the exact same text as `docs/testflight/build-N-notes.txt`.
-- [x] Verify the payload is at most 2,500 characters with `wc -m`.
-- [x] Obtain Michael’s explicit TestFlight-upload approval.
-- [x] Upload using the checked-in notes file and verify build 273 is available
-  to both tester groups.
-- [x] Confirm on-phone acceptance with Michael before advancing the release.
+- Independent code and release reviews, focused tests, and full CI pass.
+- The archive reports version 1.2.5, build 276, and includes #999-#1002.
+- The processed build is `VALID`; its en-US What to Test text matches the
+  checked-in chapter.
+- Verify both group memberships and each group's beta state separately. Public
+  Testers availability requires Apple's external review. Tester notification
+  configuration is distinct from confirmed individual delivery.
+- Keep the relevant StartTesting features and issues in testing until physical
+  playback, VoiceOver, and provider checks are reported.
