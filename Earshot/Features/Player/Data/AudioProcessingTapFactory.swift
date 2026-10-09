@@ -10,13 +10,176 @@ enum AudioProcessingTapError: Error, Equatable {
 struct AudioProcessingConfiguration: Equatable, Sendable {
     let gainLimiter: AudioGainLimiterConfiguration
     let silenceTrimming: SilenceDetectionConfiguration?
+    let compressor: AudioCompressorConfiguration
+    let equalizer: AudioEqualizerConfiguration
 
     init(
         gainLimiter: AudioGainLimiterConfiguration = .disabled,
-        silenceTrimming: SilenceDetectionConfiguration? = nil
+        silenceTrimming: SilenceDetectionConfiguration? = nil,
+        compressor: AudioCompressorConfiguration = .disabled,
+        equalizer: AudioEqualizerConfiguration = .disabled
     ) {
         self.gainLimiter = gainLimiter
         self.silenceTrimming = silenceTrimming
+        self.compressor = compressor
+        self.equalizer = equalizer
+    }
+}
+
+/// Format and DSP state are prepared before audio rendering. Float32 and
+/// packed signed Int16 PCM are handled without conversion buffers; other
+/// formats pass through the existing unprocessed AVPlayer path.
+final class AudioPCMProcessor {
+    private enum SampleFormat {
+        case float32, int16
+    }
+
+    private let sampleFormat: SampleFormat
+    private let channelCount: Int
+    private let nonInterleaved: Bool
+    private let output: AudioGainLimiterConfiguration
+    private let equalizerActive: Bool
+    private var equalizers: [AudioEqualizerState]
+    private var compressor: AudioCompressorState?
+
+    var supportsSilenceTrimming: Bool {
+        if case .float32 = sampleFormat { return true }
+        return false
+    }
+
+    init?(configuration: AudioProcessingConfiguration, format: AudioStreamBasicDescription) {
+        let channels = Int(format.mChannelsPerFrame)
+        let flags = format.mFormatFlags
+        let planar = flags & kAudioFormatFlagIsNonInterleaved != 0
+        guard format.mFormatID == kAudioFormatLinearPCM,
+              format.mSampleRate.isFinite, format.mSampleRate >= 8_000,
+              channels > 0, channels <= 8,
+              flags & kAudioFormatFlagIsPacked != 0 else { return nil }
+
+        let sampleFormat: SampleFormat
+        let bytesPerSample: UInt32
+        if flags & kAudioFormatFlagIsFloat != 0,
+           format.mBitsPerChannel == 32,
+           flags & kAudioFormatFlagIsBigEndian == 0 {
+            sampleFormat = .float32
+            bytesPerSample = 4
+        } else if flags & kAudioFormatFlagIsSignedInteger != 0,
+                  format.mBitsPerChannel == 16,
+                  flags & kAudioFormatFlagIsBigEndian == 0 {
+            sampleFormat = .int16
+            bytesPerSample = 2
+        } else {
+            return nil
+        }
+        guard format.mBytesPerFrame == bytesPerSample * UInt32(planar ? 1 : channels) else {
+            return nil
+        }
+
+        self.sampleFormat = sampleFormat
+        channelCount = channels
+        nonInterleaved = planar
+        output = configuration.gainLimiter
+        equalizerActive = configuration.equalizer.isActive
+        equalizers = equalizerActive
+            ? (0..<channels).map { _ in
+                AudioEqualizerState(
+                    configuration: configuration.equalizer,
+                    sampleRate: format.mSampleRate
+                )
+            }
+            : []
+        compressor = configuration.compressor.isEnabled
+            ? AudioCompressorState(
+                configuration: configuration.compressor,
+                sampleRate: format.mSampleRate
+            )
+            : nil
+    }
+
+    func reset() {
+        for index in equalizers.indices { equalizers[index].reset() }
+        compressor?.reset()
+    }
+
+    /// Called on the render thread. Its loops and state updates allocate no
+    /// memory. The compressor takes a shared peak across channels per frame.
+    func process(_ bufferList: UnsafeMutablePointer<AudioBufferList>, frames: Int) {
+        guard frames > 0, equalizerActive || compressor != nil || output.isEnabled else { return }
+        let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
+        guard buffers.count == (nonInterleaved ? channelCount : 1) else { return }
+        let bytesPerSample = sampleFormat == .float32 ? 4 : 2
+        for index in buffers.indices {
+            let channelsInBuffer = nonInterleaved ? 1 : channelCount
+            guard buffers[index].mNumberChannels == UInt32(channelsInBuffer),
+                  buffers[index].mData != nil,
+                  Int(buffers[index].mDataByteSize) >= frames * channelsInBuffer * bytesPerSample
+            else { return }
+        }
+
+        // Eight channels fit in a value stored on the stack. Keep EQ's Float
+        // output here until after linked compression and limiting; writing an
+        // intermediate Int16 value would clip before compression could act.
+        var frameSamples = SIMD8<Float>.zero
+        for frame in 0..<frames {
+            var peak: Float = 0
+            for channel in 0..<channelCount {
+                let input = read(buffers, frame: frame, channel: channel)
+                let processed = equalizerActive
+                    ? equalizers[channel].process(input)
+                    : (input.isFinite ? input : 0)
+                frameSamples[channel] = processed
+                peak = max(peak, abs(processed))
+            }
+            let compressionGain = compressor?.gain(for: peak) ?? 1
+            for channel in 0..<channelCount {
+                let processed = frameSamples[channel] * compressionGain
+                let result = output.isEnabled
+                    ? AudioGainLimiter.limit(processed, gain: output.gain, knee: output.kneeStart)
+                    : processed
+                write(result, to: buffers, frame: frame, channel: channel)
+            }
+        }
+    }
+
+    @inline(__always)
+    private func sampleOffset(frame: Int, channel: Int) -> (buffer: Int, sample: Int) {
+        nonInterleaved ? (channel, frame) : (0, frame * channelCount + channel)
+    }
+
+    @inline(__always)
+    private func read(
+        _ buffers: UnsafeMutableAudioBufferListPointer,
+        frame: Int,
+        channel: Int
+    ) -> Float {
+        let offset = sampleOffset(frame: frame, channel: channel)
+        let data = buffers[offset.buffer].mData!
+        switch sampleFormat {
+        case .float32:
+            return data.assumingMemoryBound(to: Float.self)[offset.sample]
+        case .int16:
+            return Float(data.assumingMemoryBound(to: Int16.self)[offset.sample]) / 32_768
+        }
+    }
+
+    @inline(__always)
+    private func write(
+        _ value: Float,
+        to buffers: UnsafeMutableAudioBufferListPointer,
+        frame: Int,
+        channel: Int
+    ) {
+        let offset = sampleOffset(frame: frame, channel: channel)
+        let data = buffers[offset.buffer].mData!
+        switch sampleFormat {
+        case .float32:
+            data.assumingMemoryBound(to: Float.self)[offset.sample] = value
+        case .int16:
+            let scaled = (value * 32_768).rounded()
+            data.assumingMemoryBound(to: Int16.self)[offset.sample] = Int16(
+                min(max(scaled, -32_768), 32_767)
+            )
+        }
     }
 }
 
@@ -49,7 +212,7 @@ final class AudioProcessingMetrics: @unchecked Sendable {
 private final class AudioProcessingTapStorage {
     let configuration: AudioProcessingConfiguration
     let metrics: AudioProcessingMetrics?
-    var processesFloat32 = false
+    var processor: AudioPCMProcessor?
     var sampleRate = 0.0
     var silenceState = SilenceCompactionState()
 
@@ -97,17 +260,17 @@ enum AudioProcessingTapFactory {
             },
             prepare: { tap, _, format in
                 let state = tapStorage(for: tap)
-                let flags = format.pointee.mFormatFlags
-                state.processesFloat32 = format.pointee.mFormatID == kAudioFormatLinearPCM
-                    && flags & kAudioFormatFlagIsFloat != 0
-                    && format.pointee.mBitsPerChannel == 32
+                state.processor = AudioPCMProcessor(
+                    configuration: state.configuration,
+                    format: format.pointee
+                )
                 state.sampleRate = format.pointee.mSampleRate
                 state.silenceState.reset()
                 state.metrics?.prepare(sampleRate: state.sampleRate)
             },
             unprepare: { tap in
                 let state = tapStorage(for: tap)
-                state.processesFloat32 = false
+                state.processor = nil
                 state.sampleRate = 0
                 state.silenceState.reset()
             },
@@ -122,14 +285,20 @@ enum AudioProcessingTapFactory {
                     framesOut
                 )
                 flagsOut.pointee = sourceFlags
-                guard status == noErr, tapStorage(for: tap).processesFloat32 else { return }
+                guard status == noErr else { return }
 
                 let state = tapStorage(for: tap)
+                guard let processor = state.processor else { return }
+                if sourceFlags & kMTAudioProcessingTapFlag_StartOfStream != 0 {
+                    processor.reset()
+                    state.silenceState.reset()
+                }
                 let sourceFrameCount = Int(framesOut.pointee)
                 guard sourceFrameCount > 0 else { return }
 
                 var keptFrameCount = sourceFrameCount
-                if let silenceConfiguration = state.configuration.silenceTrimming {
+                if let silenceConfiguration = state.configuration.silenceTrimming,
+                   processor.supportsSilenceTrimming {
                     var sumOfSquares = 0.0
                     var sampleCount = 0
                     for buffer in UnsafeMutableAudioBufferListPointer(bufferList) {
@@ -165,16 +334,7 @@ enum AudioProcessingTapFactory {
                     state.silenceState.reset()
                 }
 
-                let configuration = state.configuration.gainLimiter
-                for buffer in UnsafeMutableAudioBufferListPointer(bufferList) {
-                    guard let data = buffer.mData else { continue }
-                    let sampleCount = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-                    AudioGainLimiter.process(
-                        data.assumingMemoryBound(to: Float.self),
-                        count: sampleCount,
-                        configuration: configuration
-                    )
-                }
+                processor.process(bufferList, frames: keptFrameCount)
             }
         )
 
