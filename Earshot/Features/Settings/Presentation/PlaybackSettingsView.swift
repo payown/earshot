@@ -26,6 +26,18 @@ struct PlaybackSettingsView: View {
         }
     }
 
+    private var compressionOptions: [AdjustableOptionPicker<DynamicRangeCompressionLevel>.Option] {
+        DynamicRangeCompressionLevel.allCases.map {
+            .init(value: $0, title: $0.title, spoken: $0.title.lowercased())
+        }
+    }
+
+    private var equalizerOptions: [AdjustableOptionPicker<EqualizerBandGain>.Option] {
+        EqualizerBandGain.allCases.map {
+            .init(value: $0, title: $0.title, spoken: $0.spokenValue)
+        }
+    }
+
     var body: some View {
         @Bindable var settings = settings
         Form {
@@ -72,6 +84,47 @@ struct PlaybackSettingsView: View {
                 // heading stop. The distinct Auto-advance and Queue sections keep
                 // their headers.
                 Text("Shows Previous and Next chapter buttons beside the chapter name in the player. Turn off to navigate chapters with the VoiceOver rotor on the artwork.")
+            }
+
+            Section {
+                AdjustableOptionPicker(
+                    "Dynamic-range compression",
+                    options: compressionOptions,
+                    selection: $settings.compressionLevel,
+                    hint: "Flick up for stronger compression, down for less or off"
+                )
+            } header: {
+                Text("Compression")
+            } footer: {
+                Text("Narrows the difference between quiet and loud audio. Light, Balanced, and Strong include modest makeup gain. Volume boost remains a separate control.")
+            }
+
+            Section {
+                Toggle("Enable equalizer", isOn: $settings.equalizerEnabled)
+                if settings.equalizerEnabled {
+                    AdjustableOptionPicker(
+                        "Bass",
+                        options: equalizerOptions,
+                        selection: $settings.equalizerBass,
+                        hint: "Flick up to increase low frequencies, down to decrease"
+                    )
+                    AdjustableOptionPicker(
+                        "Speech",
+                        options: equalizerOptions,
+                        selection: $settings.equalizerSpeech,
+                        hint: "Flick up to increase middle frequencies, down to decrease"
+                    )
+                    AdjustableOptionPicker(
+                        "Treble",
+                        options: equalizerOptions,
+                        selection: $settings.equalizerTreble,
+                        hint: "Flick up to increase high frequencies, down to decrease"
+                    )
+                }
+            } header: {
+                Text("Equalizer")
+            } footer: {
+                Text("Each band ranges from minus 6 to plus 6 decibels; 0 is neutral. Audio processing may be unavailable for some streams, including live HLS playback.")
             }
 
             Section {

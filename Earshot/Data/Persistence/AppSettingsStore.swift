@@ -8,6 +8,9 @@ extension Notification.Name {
     static let earshotSkipSilenceSettingDidChange = Notification.Name(
         "earshotSkipSilenceSettingDidChange"
     )
+    static let earshotAudioDynamicsSettingDidChange = Notification.Name(
+        "earshotAudioDynamicsSettingDidChange"
+    )
 }
 
 /// Setting keys, mirroring the Flutter `app_settings` table keys. Kept as
@@ -34,6 +37,12 @@ enum SettingsKey {
     static let sleepTimerResetsOnInteraction = "sleep_timer_resets_on_interaction"
     /// Device-local default gain. Per-episode overrides are also device-local.
     static let volumeBoost = "volume_boost"
+    /// Device-local global audio processing. Both effects default off.
+    static let compressionLevel = "compression_level"
+    static let equalizerEnabled = "equalizer_enabled"
+    static let equalizerBass = "equalizer_bass"
+    static let equalizerSpeech = "equalizer_speech"
+    static let equalizerTreble = "equalizer_treble"
     static let skipForwardSeconds = "skip_forward_seconds"
     static let skipBackSeconds = "skip_back_seconds"
     // direct_touch_enabled: retained for data compatibility only. Its one
@@ -298,6 +307,9 @@ enum SettingsDefault {
     static let skipSilenceEnabled = false
     static let globalSpeed = 1.0
     static let volumeBoost: VolumeBoostLevel = .off
+    static let compressionLevel: DynamicRangeCompressionLevel = .off
+    static let equalizerEnabled = false
+    static let equalizerBand: EqualizerBandGain = .neutral
     static let skipForwardSeconds = 30
     static let skipBackSeconds = 15
     static let wifiOnlyDownloads = true
@@ -398,15 +410,26 @@ final class AppSettingsStore {
                     object: AppSettingIdentity.canonicalKey(key)
                 )
             }
-            if AppSettingIdentity.canonicalKey(key) == SettingsKey.volumeBoost {
+            let canonicalKey = AppSettingIdentity.canonicalKey(key)
+            if canonicalKey == SettingsKey.volumeBoost {
                 NotificationCenter.default.post(
                     name: .earshotVolumeBoostSettingDidChange,
                     object: nil
                 )
             }
-            if AppSettingIdentity.canonicalKey(key) == SettingsKey.skipSilenceEnabled {
+            if canonicalKey == SettingsKey.skipSilenceEnabled {
                 NotificationCenter.default.post(
                     name: .earshotSkipSilenceSettingDidChange,
+                    object: nil
+                )
+            }
+            if canonicalKey == SettingsKey.compressionLevel
+                || canonicalKey == SettingsKey.equalizerEnabled
+                || canonicalKey == SettingsKey.equalizerBass
+                || canonicalKey == SettingsKey.equalizerSpeech
+                || canonicalKey == SettingsKey.equalizerTreble {
+                NotificationCenter.default.post(
+                    name: .earshotAudioDynamicsSettingDidChange,
                     object: nil
                 )
             }
@@ -456,6 +479,36 @@ final class AppSettingsStore {
 
     func setVolumeBoost(_ level: VolumeBoostLevel) {
         setRawValue(level.rawValue, for: SettingsKey.volumeBoost)
+    }
+
+    func compressionLevel() -> DynamicRangeCompressionLevel {
+        rawValue(SettingsKey.compressionLevel)
+            .flatMap(DynamicRangeCompressionLevel.init(rawValue:))
+            ?? SettingsDefault.compressionLevel
+    }
+
+    func setCompressionLevel(_ level: DynamicRangeCompressionLevel) {
+        setRawValue(level.rawValue, for: SettingsKey.compressionLevel)
+    }
+
+    func equalizerBand(_ key: String) -> EqualizerBandGain {
+        rawValue(key)
+            .flatMap(Int.init)
+            .flatMap(EqualizerBandGain.init(rawValue:))
+            ?? SettingsDefault.equalizerBand
+    }
+
+    func setEqualizerBand(_ gain: EqualizerBandGain, for key: String) {
+        setInt(gain.rawValue, for: key)
+    }
+
+    func equalizerConfiguration() -> AudioEqualizerConfiguration {
+        AudioEqualizerConfiguration(
+            enabled: bool(SettingsKey.equalizerEnabled, default: SettingsDefault.equalizerEnabled),
+            bassDecibels: Float(equalizerBand(SettingsKey.equalizerBass).rawValue),
+            speechDecibels: Float(equalizerBand(SettingsKey.equalizerSpeech).rawValue),
+            trebleDecibels: Float(equalizerBand(SettingsKey.equalizerTreble).rawValue)
+        )
     }
 
     func transcriptExportMetadata(default fallback: TranscriptExportMetadata) -> TranscriptExportMetadata {

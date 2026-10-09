@@ -184,6 +184,7 @@ final class PlayerService {
     @ObservationIgnored private var cloudProjectionObserver: NSObjectProtocol?
     @ObservationIgnored private var volumeBoostSettingObserver: NSObjectProtocol?
     @ObservationIgnored private var skipSilenceSettingObserver: NSObjectProtocol?
+    @ObservationIgnored private var audioDynamicsSettingObserver: NSObjectProtocol?
     @ObservationIgnored private var audioProcessingGeneration = 0
     @ObservationIgnored private var currentAudioProcessingMetrics: AudioProcessingMetrics?
     @ObservationIgnored private var silenceTrimmedSecondsThisSession = 0.0
@@ -359,6 +360,7 @@ final class PlayerService {
         observeStallRecovery()
         observeVolumeBoostSetting()
         observeSkipSilenceSetting()
+        observeAudioDynamicsSetting()
         sleepTimer.resetsOnInteraction = settings?.bool(SettingsKey.sleepTimerResetsOnInteraction, default: false) ?? false
         sleepTimer.onExpired = { [weak self] in self?.handleSleepTimerExpired() }
     }
@@ -3246,6 +3248,19 @@ final class PlayerService {
         }
     }
 
+    private func observeAudioDynamicsSetting() {
+        audioDynamicsSettingObserver = NotificationCenter.default.addObserver(
+            forName: .earshotAudioDynamicsSettingDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let item = self.player.currentItem else { return }
+                self.applyAudioProcessing(to: item)
+            }
+        }
+    }
+
     /// Replaces the item's immutable tap whenever the resolved level changes.
     /// Unsupported streams keep playing through AVPlayer's untouched baseline.
     private func applyAudioProcessing(to item: AVPlayerItem) {
@@ -3253,16 +3268,23 @@ final class PlayerService {
         let generation = audioProcessingGeneration
         let level = effectiveVolumeBoost
         let trimsSilence = effectiveSilenceTrimming
+        let compression = settings?.compressionLevel() ?? SettingsDefault.compressionLevel
+        let equalizer = settings?.equalizerConfiguration() ?? .disabled
         collectAudioProcessingMetrics()
-        guard level != .off || trimsSilence else {
+        guard level != .off || trimsSilence || compression != .off || equalizer.isActive else {
             currentAudioProcessingMetrics = nil
             item.audioMix = nil
             return
         }
         let metrics = trimsSilence ? AudioProcessingMetrics() : nil
         let configuration = AudioProcessingConfiguration(
-            gainLimiter: level.processingConfiguration,
-            silenceTrimming: trimsSilence ? SilenceDetectionConfiguration() : nil
+            gainLimiter: AudioGainLimiterConfiguration(
+                gain: level.gain,
+                limitsUnityGain: compression != .off || equalizer.isActive
+            ),
+            silenceTrimming: trimsSilence ? SilenceDetectionConfiguration() : nil,
+            compressor: compression.configuration,
+            equalizer: equalizer
         )
         Task { @MainActor [weak self, weak item] in
             guard let self, let item else { return }
