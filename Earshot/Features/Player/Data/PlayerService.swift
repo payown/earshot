@@ -3249,6 +3249,9 @@ final class PlayerService {
     }
 
     private func observeAudioDynamicsSetting() {
+        if let audioDynamicsSettingObserver {
+            NotificationCenter.default.removeObserver(audioDynamicsSettingObserver)
+        }
         audioDynamicsSettingObserver = NotificationCenter.default.addObserver(
             forName: .earshotAudioDynamicsSettingDidChange,
             object: nil,
