@@ -13,6 +13,11 @@ final class SettingsStore {
     var keepFinishedEpisodesInQueue = false { didSet { persist { $0.setBool(keepFinishedEpisodesInQueue, for: SettingsKey.keepFinishedEpisodesInQueue) } } }
     var globalSpeed: Double = SettingsDefault.globalSpeed { didSet { persist { $0.setDouble(globalSpeed, for: SettingsKey.globalSpeed) } } }
     var volumeBoost: VolumeBoostLevel = SettingsDefault.volumeBoost { didSet { persist { $0.setVolumeBoost(volumeBoost) } } }
+    var compressionLevel: DynamicRangeCompressionLevel = SettingsDefault.compressionLevel { didSet { persist { $0.setCompressionLevel(compressionLevel) } } }
+    var equalizerEnabled: Bool = SettingsDefault.equalizerEnabled { didSet { persist { $0.setBool(equalizerEnabled, for: SettingsKey.equalizerEnabled) } } }
+    var equalizerBass: EqualizerBandGain = SettingsDefault.equalizerBand { didSet { persist { $0.setEqualizerBand(equalizerBass, for: SettingsKey.equalizerBass) } } }
+    var equalizerSpeech: EqualizerBandGain = SettingsDefault.equalizerBand { didSet { persist { $0.setEqualizerBand(equalizerSpeech, for: SettingsKey.equalizerSpeech) } } }
+    var equalizerTreble: EqualizerBandGain = SettingsDefault.equalizerBand { didSet { persist { $0.setEqualizerBand(equalizerTreble, for: SettingsKey.equalizerTreble) } } }
     var skipSilenceEnabled: Bool = SettingsDefault.skipSilenceEnabled { didSet { persist { $0.setBool(skipSilenceEnabled, for: SettingsKey.skipSilenceEnabled) } } }
     var skipForwardSeconds: Int = SettingsDefault.skipForwardSeconds { didSet { persist { $0.setInt(skipForwardSeconds, for: SettingsKey.skipForwardSeconds) } } }
     var skipBackSeconds: Int = SettingsDefault.skipBackSeconds { didSet { persist { $0.setInt(skipBackSeconds, for: SettingsKey.skipBackSeconds) } } }
@@ -99,6 +104,14 @@ final class SettingsStore {
         )
         assignIfChanged(\.globalSpeed, store.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed))
         assignIfChanged(\.volumeBoost, store.volumeBoost())
+        assignIfChanged(\.compressionLevel, store.compressionLevel())
+        assignIfChanged(\.equalizerEnabled, store.bool(
+            SettingsKey.equalizerEnabled,
+            default: SettingsDefault.equalizerEnabled
+        ))
+        assignIfChanged(\.equalizerBass, store.equalizerBand(SettingsKey.equalizerBass))
+        assignIfChanged(\.equalizerSpeech, store.equalizerBand(SettingsKey.equalizerSpeech))
+        assignIfChanged(\.equalizerTreble, store.equalizerBand(SettingsKey.equalizerTreble))
         assignIfChanged(\.skipSilenceEnabled, store.bool(SettingsKey.skipSilenceEnabled, default: SettingsDefault.skipSilenceEnabled))
         assignIfChanged(\.skipForwardSeconds, store.int(SettingsKey.skipForwardSeconds, default: SettingsDefault.skipForwardSeconds))
         assignIfChanged(\.skipBackSeconds, store.int(SettingsKey.skipBackSeconds, default: SettingsDefault.skipBackSeconds))

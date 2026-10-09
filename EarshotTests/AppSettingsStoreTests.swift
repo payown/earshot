@@ -233,6 +233,35 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.volumeBoost, .medium)
     }
 
+    func testCompressionAndEqualizerPersistLocally() throws {
+        let context = TestStore.freshContext()
+        let settings = SettingsStore()
+        settings.configure(context: context)
+        XCTAssertEqual(settings.compressionLevel, .off)
+        XCTAssertFalse(settings.equalizerEnabled)
+        XCTAssertEqual(settings.equalizerBass, .neutral)
+
+        settings.compressionLevel = .balanced
+        settings.equalizerEnabled = true
+        settings.equalizerBass = .boost6
+        settings.equalizerSpeech = .boost3
+        settings.equalizerTreble = .cut3
+
+        let reloaded = SettingsStore()
+        reloaded.configure(context: context)
+        XCTAssertEqual(reloaded.compressionLevel, .balanced)
+        XCTAssertTrue(reloaded.equalizerEnabled)
+        XCTAssertEqual(reloaded.equalizerBass, .boost6)
+        XCTAssertEqual(reloaded.equalizerSpeech, .boost3)
+        XCTAssertEqual(reloaded.equalizerTreble, .cut3)
+        for key in [
+            SettingsKey.compressionLevel, SettingsKey.equalizerEnabled,
+            SettingsKey.equalizerBass, SettingsKey.equalizerSpeech, SettingsKey.equalizerTreble,
+        ] {
+            XCTAssertTrue(AppSettingScope.isLocal(key), key)
+        }
+    }
+
     func testAccessibilitySpeechPreferencesAreDeviceLocal() {
         for key in [
             SettingsKey.spokenEpisodePodcastName,
