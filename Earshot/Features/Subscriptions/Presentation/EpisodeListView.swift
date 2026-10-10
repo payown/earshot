@@ -4,6 +4,7 @@ import SwiftData
 
 struct EpisodeListView: View {
     let podcast: Podcast
+    private let nonPlayedBatchLimit = 1_000
 
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
@@ -32,6 +33,8 @@ struct EpisodeListView: View {
     // button and the screen-level rotor action so both entry points drive the
     // exact same confirm-then-execute flow instead of duplicating it.
     @State private var confirmingMarkAllPlayed = false
+    @State private var pendingSelectedPlayedChange: Bool?
+    @State private var pendingSelectedPlayedIDs: Set<PersistentIdentifier> = []
     @State private var olderEpisodesState: OlderEpisodesState = .ready
     // Episode multi-select (#758). `selection` is the shared ``MultiSelectState``
     // holder (keyed on persistent identity); `batchRequest` presents the shared
@@ -41,6 +44,9 @@ struct EpisodeListView: View {
     // batch.
     @State private var selection = MultiSelectState()
     @State private var batchRequest: FolderPickRequest?
+    @State private var isUpdatingSelection = false
+    @State private var selectionRevision = 0
+    @State private var selectionUpdateTask: Task<Void, Never>?
     // Podcast-detail search (#457). Applied after the existing played/unheard
     // filter and chronological sort, so it only narrows the list the user is
     // already viewing and never changes either preference.
@@ -253,6 +259,8 @@ struct EpisodeListView: View {
                         id: "add",
                         title: MultiSelectActionLabel.addToFolder(count: selection.count, itemSingular: "episode"),
                         systemImage: "folder",
+                        isEnabled: selection.count <= nonPlayedBatchLimit,
+                        disabledReason: "Choose 1,000 or fewer episodes for a folder action",
                         handler: { presentBatch(.add) }
                     ),
                     secondary: [
@@ -260,17 +268,34 @@ struct EpisodeListView: View {
                             id: "move",
                             title: MultiSelectActionLabel.moveToFolder(count: selection.count, itemSingular: "episode"),
                             systemImage: "folder",
+                            isEnabled: selection.count <= nonPlayedBatchLimit,
+                            disabledReason: "Choose 1,000 or fewer episodes for a folder action",
                             handler: { presentBatch(.move) }
                         ),
                         MultiSelectAction(
                             id: "queue",
                             title: EpisodeBatchLabel.addToQueue(count: selection.count),
                             systemImage: "text.badge.plus",
+                            isEnabled: selection.count <= nonPlayedBatchLimit,
+                            disabledReason: "Choose 1,000 or fewer episodes to add to Queue",
                             handler: { addSelectedToQueue() }
+                        ),
+                        MultiSelectAction(
+                            id: "played",
+                            title: EpisodeBatchLabel.markPlayed(count: selection.count),
+                            systemImage: "checkmark.circle",
+                            handler: { markSelectedPlayed() }
+                        ),
+                        MultiSelectAction(
+                            id: "unplayed",
+                            title: EpisodeBatchLabel.markUnplayed(count: selection.count),
+                            systemImage: "arrow.uturn.backward.circle",
+                            handler: { markSelectedUnplayed() }
                         ),
                     ],
                     announcementNoun: "episode"
                 )
+                .disabled(isUpdatingSelection || isBulkEpisodeMutation)
                 .transition(.move(edge: .bottom))
             }
         }
@@ -325,6 +350,21 @@ struct EpisodeListView: View {
                     }
                 }
             }
+            if selection.isSelecting {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Select all \(matchingCount) matching episodes", systemImage: "checkmark.circle.fill") {
+                            updateSelection(invert: false)
+                        }
+                        Button("Invert selection", systemImage: "arrow.left.arrow.right") {
+                            updateSelection(invert: true)
+                        }
+                    } label: {
+                        Label("Selection options", systemImage: "ellipsis.circle")
+                    }
+                    .disabled(isUpdatingSelection || isBulkEpisodeMutation)
+                }
+            }
         }
         .sheet(isPresented: $showingPodcastSettings) {
             PodcastSettingsView(podcast: podcast)
@@ -377,6 +417,36 @@ struct EpisodeListView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(markAllPlayedConfirmationMessage)
+        }
+        .confirmationDialog(
+            "Mark \(pendingSelectedPlayedIDs.count.formatted()) selected episodes as \(pendingSelectedPlayedChange == true ? "played" : "unplayed")?",
+            isPresented: Binding(
+                get: { pendingSelectedPlayedChange != nil },
+                set: {
+                    if !$0 {
+                        pendingSelectedPlayedChange = nil
+                        pendingSelectedPlayedIDs = []
+                    }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingSelectedPlayedChange
+        ) { played in
+            Button("Mark as \(played ? "played" : "unplayed")") {
+                let ids = pendingSelectedPlayedIDs
+                pendingSelectedPlayedChange = nil
+                pendingSelectedPlayedIDs = []
+                setSelectedPlayed(played, ids: ids)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingSelectedPlayedChange = nil
+                pendingSelectedPlayedIDs = []
+            }
+        } message: { played in
+            Text(played
+                ? "Only the selected unplayed episodes will change. Downloaded audio may be removed if Delete after played is on."
+                : "Only the selected played episodes will change. Episodes already dismissed from Inbox will stay there."
+            )
         }
     }
 
@@ -451,6 +521,7 @@ struct EpisodeListView: View {
     /// focus move is deferred a beat so the selectable rows exist first (mirrors
     /// SubscriptionsView's podcast multi-select).
     private func enterSelection(first: Episode?) {
+        cancelSelectionUpdate()
         withAnimation(Motion.preferred(.easeInOut(duration: 0.2))) {
             selection.enter()
         }
@@ -468,6 +539,7 @@ struct EpisodeListView: View {
     /// never a row that a batch may have removed. `focusDelay` lets a folder batch
     /// push the focus move past the picker's own +0.5s result announcement.
     private func exitSelection(announce: Bool, focusDelay: TimeInterval = 0.5) {
+        cancelSelectionUpdate()
         withAnimation(Motion.preferred(.easeInOut(duration: 0.2))) {
             selection.exit()
         }
@@ -479,9 +551,49 @@ struct EpisodeListView: View {
         }
     }
 
+    /// The data source owns the same store predicate used by the visible page.
+    /// Thus Select all and Invert include matching rows beyond the first 100.
+    private func updateSelection(invert: Bool) {
+        guard !isUpdatingSelection else { return }
+        isUpdatingSelection = true
+        let revision = selectionRevision
+        let currentFilter = filter
+        let currentSearch = searchText
+        selectionUpdateTask = Task { @MainActor in
+            defer {
+                if selectionRevision == revision {
+                    isUpdatingSelection = false
+                    selectionUpdateTask = nil
+                }
+            }
+            do {
+                let ids = try await ensureEpisodeList().matchingEpisodeIDs(
+                    filter: currentFilter, searchText: currentSearch
+                )
+                guard !Task.isCancelled, selectionRevision == revision, selection.isSelecting,
+                      filter == currentFilter, searchText == currentSearch else { return }
+                if invert {
+                    selection.invert(ids)
+                } else {
+                    selection.selectAll(ids)
+                }
+            } catch {
+                if !Task.isCancelled { Announcer.announce("Could not update episode selection") }
+            }
+        }
+    }
+
+    private func cancelSelectionUpdate() {
+        selectionRevision &+= 1
+        selectionUpdateTask?.cancel()
+        selectionUpdateTask = nil
+        isUpdatingSelection = false
+    }
+
     /// Presents the shared picker for the whole selection. No-op with an empty
     /// selection (the bar's buttons are already disabled there).
     private func presentBatch(_ mode: FolderPickMode) {
+        guard selection.count <= nonPlayedBatchLimit else { return }
         let selected = selectedEpisodes()
         guard !selected.isEmpty else { return }
         batchRequest = .episodes(selected, mode: mode)
@@ -495,15 +607,20 @@ struct EpisodeListView: View {
         exitSelection(announce: false, focusDelay: 0.9)
     }
 
-    /// The selected episodes, in the current filtered, sorted, searched display order.
+    /// Resolve selected identities from every matching page, including pages
+    /// not loaded into the visible list. Preserve the current episode order.
     private func selectedEpisodes() -> [Episode] {
-        visibleEpisodes.filter { selection.isSelected($0.persistentModelID) }
+        selection.selectedIDs.compactMap { context.model(for: $0) as? Episode }
+            .filter { !$0.isDeleted && $0.modelContext == context &&
+                $0.podcast?.persistentModelID == podcast.persistentModelID }
+            .sorted(by: sortOrder.precedes)
     }
 
     /// Adds every selected episode to the end of the queue, in list order, then
     /// exits selection mode. Reuses the same ``QueueRepository/add(_:)`` batch the
     /// Inbox bulk-add uses.
     private func addSelectedToQueue() {
+        guard selection.count <= nonPlayedBatchLimit else { return }
         let toAdd = selectedEpisodes()
         guard !toAdd.isEmpty else { return }
         QueueRepository(context: context).add(toAdd)
@@ -511,6 +628,40 @@ struct EpisodeListView: View {
         // batch announcement's phrasing.
         Announcer.announce("Added \(EpisodeBatchLabel.episodePhrase(toAdd.count)) to queue", assertive: true)
         exitSelection(announce: false)
+    }
+
+    private func markSelectedPlayed() {
+        requestSelectedPlayedChange(true)
+    }
+
+    private func markSelectedUnplayed() {
+        requestSelectedPlayedChange(false)
+    }
+
+    private func requestSelectedPlayedChange(_ played: Bool) {
+        guard !selection.selectedIDs.isEmpty else { return }
+        pendingSelectedPlayedIDs = selection.selectedIDs
+        pendingSelectedPlayedChange = played
+    }
+
+    private func setSelectedPlayed(_ played: Bool, ids: Set<PersistentIdentifier>) {
+        guard !ids.isEmpty else { return }
+        Task { @MainActor in
+            isBulkEpisodeMutation = true
+            let repo = EpisodeRepository(context: context)
+            let count = if played {
+                await repo.markSelectedPlayed(in: podcast, ids: ids)
+            } else {
+                await repo.markSelectedUnplayed(in: podcast, ids: ids)
+            }
+            isBulkEpisodeMutation = false
+            reloadEpisodePage()
+            Announcer.announce(
+                "Marked \(EpisodeBatchLabel.episodePhrase(count)) as \(played ? "played" : "unplayed")",
+                assertive: true
+            )
+            exitSelection(announce: false)
+        }
     }
 
     /// Unfollows the shown podcast via the centralized repository path shared
@@ -752,6 +903,8 @@ struct EpisodeListView: View {
 
     private func resetEpisodePage(moveFocusToResults: Bool) {
         guard !podcast.isDeleted else { return }
+        cancelSelectionUpdate()
+        if selection.isSelecting { selection.clear() }
         ensureEpisodeList().resetAndLoad(
             filter: filter,
             sort: sortOrder,
@@ -819,7 +972,7 @@ enum MarkAllPlayedConfirmationCopy {
 
     static func message(unplayedCount: Int, podcastTitle: String) -> String {
         let noun = unplayedCount == 1 ? "episode" : "episodes"
-        return "This marks all \(unplayedCount.formatted()) unplayed \(noun) in \(podcastTitle) as played. This can't be undone."
+        return "This marks all \(unplayedCount.formatted()) unplayed \(noun) in \(podcastTitle) as played. You can mark them unplayed again from All. If Delete after played is on, downloaded audio will be removed and may need to be downloaded again."
     }
 }
 

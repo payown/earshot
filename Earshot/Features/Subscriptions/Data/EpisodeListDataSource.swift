@@ -82,6 +82,33 @@ final class EpisodeListDataSource {
         }
     }
 
+    /// Collects identities for the complete current result without expanding
+    /// the on-screen page. SwiftData fetches identifiers directly instead of
+    /// registering every matching episode model with the UI context.
+    func matchingEpisodeIDs(filter: EpisodeListFilter, searchText: String) async throws -> Set<PersistentIdentifier> {
+        // SwiftData cannot sort fetchIdentifiers while it tracks pending model
+        // changes, even in a fresh context over the in-memory test store. The
+        // selection is a set, so no sort or offset is needed here.
+        let readContext = ModelContext(context.container)
+        try Task.checkCancellation()
+        var request = descriptor(filter: filter, searchText: searchText)
+        request.includePendingChanges = false
+        let results = try readContext.fetchIdentifiers(
+            request, batchSize: Self.pageSize
+        )
+        var ids: Set<PersistentIdentifier> = []
+        var scanned = 0
+        for id in results {
+            ids.insert(id)
+            scanned += 1
+            if scanned.isMultiple(of: Self.pageSize) {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+        }
+        return ids
+    }
+
     private func initialIntervalName(_ searchText: String) -> StaticString {
         EpisodeSearchFilter.isActive(searchText) ? "EpisodeListSearch" : "EpisodeListInitialPage"
     }

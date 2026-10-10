@@ -65,7 +65,26 @@ final class EpisodeListDataSourceTests: XCTestCase {
         XCTAssertTrue(data.hasMore)
     }
 
-    func testStressPodcastPublishesOnlyFirstHundredModels() throws {
+    func testSelectAllIdentitiesIncludeUnloadedPagesAndHonorFilter() async throws {
+        let (context, podcast) = try fixture(count: 225)
+        let data = source(context, podcast)
+        data.resetAndLoad(filter: .all, sort: .latestFirst, searchText: "")
+        XCTAssertEqual(data.episodes.count, 100)
+
+        let all = try await data.matchingEpisodeIDs(filter: .all, searchText: "")
+        XCTAssertEqual(all.count, 225)
+        XCTAssertEqual(data.episodes.count, 100, "selection must not expand the rendered page")
+
+        let searched = try await data.matchingEpisodeIDs(filter: .all, searchText: "Episode 000224")
+        XCTAssertEqual(searched.count, 1)
+        let played = try context.fetch(FetchDescriptor<Episode>()).first { $0.guid == "000224" }!
+        played.isPlayed = true
+        try context.save()
+        let unheard = try await data.matchingEpisodeIDs(filter: .unheard, searchText: "Episode 000224")
+        XCTAssertTrue(unheard.isEmpty)
+    }
+
+    func testStressPodcastPublishesOnlyFirstHundredModels() async throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["RUN_EPISODE_LIST_SCALE_DIAG"] != nil,
             "Set RUN_EPISODE_LIST_SCALE_DIAG=1 for the 45,436-row memory diagnostic."
@@ -78,6 +97,11 @@ final class EpisodeListDataSourceTests: XCTestCase {
         XCTAssertEqual(data.matchingCount, 45_436)
         XCTAssertEqual(data.episodes.count, EpisodeListDataSource.pageSize)
         XCTAssertEqual(data.episodes.first?.guid, "045435")
+        let started = Date()
+        let ids = try await data.matchingEpisodeIDs(filter: .all, searchText: "")
+        XCTAssertEqual(ids.count, 45_436)
+        XCTAssertEqual(data.episodes.count, EpisodeListDataSource.pageSize)
+        print("Episode selection ID fetch, 45,436 rows: \(Date().timeIntervalSince(started)) seconds")
     }
 
     func testUnheardPredicateAndWholeScopeCounts() throws {
