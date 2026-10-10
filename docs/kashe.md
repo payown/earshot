@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe keeps a few interviews unplayed as reminders and uses episode selection
+  to clear the rest of a show's backlog (Chapter 98).
+
 - Kashe keeps finished Queue episodes so she can return to the end she missed, and uses group and episode moves to set her next listening order (Chapter 96).
 
 - Renata sent Kashe a second soup recording with timing for the recipe
@@ -3551,3 +3554,23 @@ Renata called as the kettle clicked off.
 “I found the recipe,” Kashe said. “I'm still deciding what to do with it.”
 
 She left the interview queued for the drive tomorrow. Some choices could wait until she had her coat on.
+
+---
+
+Chapter 98 - Build 277
+
+What to try first:
+
+Open a podcast with more than 100 episodes, switch to All, and choose Select episodes. In Selection options, choose Select all matching episodes. Check that the count includes episodes beyond the first page. Deselect a few you want to keep unplayed, then try Invert selection to select just those exceptions. Invert again before choosing Mark selected episodes as played. Read the confirmation, especially if Delete after played is on. Confirm the exceptions stay unplayed and previously played episodes keep their state.
+
+To undo a played mark, stay on the All filter, select one or more played episodes, and choose Mark selected episodes as unplayed. Confirm they become unplayed without returning to Inbox if you had already cleared them. The existing per-episode VoiceOver Actions rotor also says Mark as unplayed for a played episode when that Quick Action is enabled. Try a search or the Unheard filter and check that Select all and Invert selection use only matching episodes. In Inbox selection mode, try the same commands on a filtered list. Please report count, focus, or responsiveness problems, especially on a large podcast.
+
+Kashe's story:
+
+Kashe had saved three interviews from a show she meant to revisit. The rest of the season had turned into a long list of things she'd already heard while driving between visits.
+
+She selected the whole list, unchecked the three, and marked the others played. Later, she changed her mind about one interview. She found it under All and marked it unplayed again.
+
+Renata asked if the list was finally tidy.
+
+“Tidy enough,” Kashe said. “I left myself something to listen to.”
