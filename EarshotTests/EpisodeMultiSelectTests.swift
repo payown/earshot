@@ -59,6 +59,12 @@ final class EpisodeMultiSelectTests: XCTestCase {
         XCTAssertEqual(EpisodeBatchLabel.markPlayed(count: 0), "Mark as played")
     }
 
+    func testMarkUnplayedLabelCarriesLiveCount() {
+        XCTAssertEqual(EpisodeBatchLabel.markUnplayed(count: 4), "Mark 4 episodes as unplayed")
+        XCTAssertEqual(EpisodeBatchLabel.markUnplayed(count: 1), "Mark 1 episode as unplayed")
+        XCTAssertEqual(EpisodeBatchLabel.markUnplayed(count: 0), "Mark as unplayed")
+    }
+
     // MARK: The shared selection holder, driven with episode identities
 
     func testSelectionHoldsEpisodeIdentitiesAndFiltersDisplayOrder() {

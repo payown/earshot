@@ -75,6 +75,29 @@ final class MultiSelectStateTests: XCTestCase {
         XCTAssertFalse(state.isSelected(a))
     }
 
+    func testSelectAllAndInvertStayWithinCurrentScope() {
+        let ctx = TestStore.freshContext()
+        let a = makePodcast(ctx, "A").persistentModelID
+        let b = makePodcast(ctx, "B").persistentModelID
+        let c = makePodcast(ctx, "C").persistentModelID
+        let state = MultiSelectState()
+        state.enter()
+        state.selectAll([a, b, c])
+        XCTAssertEqual(state.count, 3)
+
+        state.toggle(b)
+        XCTAssertEqual(state.count, 2)
+        XCTAssertFalse(state.isSelected(b))
+        state.invert([a, b, c])
+        XCTAssertEqual(state.selectedIDs, [b])
+
+        state.selectAll([a, c])
+        XCTAssertEqual(state.selectedIDs, [a, c])
+        state.invert([c])
+        XCTAssertTrue(state.isEmpty, "a previous filter's rows must not remain selected")
+        XCTAssertTrue(state.isSelecting)
+    }
+
     // MARK: Batch button labels (the count's accessibility source of truth)
 
     func testAddToFolderLabelCarriesLiveCount() {

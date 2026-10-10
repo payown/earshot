@@ -71,6 +71,19 @@ final class MultiSelectState {
     func clear() {
         selectedIDs.removeAll()
     }
+
+    /// Replaces the selection with exactly the rows in the current scope.
+    /// Hidden rows from a previous search must not silently enter a batch.
+    func selectAll<S: Sequence>(_ ids: S) where S.Element == PersistentIdentifier {
+        selectedIDs = Set(ids)
+    }
+
+    /// Complements the selection within the current scope. This also removes
+    /// stale selections from another filter or search result.
+    func invert<S: Sequence>(_ ids: S) where S.Element == PersistentIdentifier {
+        let scope = Set(ids)
+        selectedIDs = scope.subtracting(selectedIDs)
+    }
 }
 
 /// Pure, testable copy for the count-carrying batch action labels. Shared by

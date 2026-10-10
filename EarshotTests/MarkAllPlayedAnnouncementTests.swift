@@ -69,7 +69,7 @@ final class MarkAllPlayedConfirmationCopyTests: XCTestCase {
     func testMessageSingularNamesThePodcast() {
         XCTAssertEqual(
             MarkAllPlayedConfirmationCopy.message(unplayedCount: 1, podcastTitle: "Radiolab"),
-            "This marks all 1 unplayed episode in Radiolab as played. This can't be undone."
+            "This marks all 1 unplayed episode in Radiolab as played. You can mark them unplayed again from All. If Delete after played is on, downloaded audio will be removed and may need to be downloaded again."
         )
     }
 
@@ -77,7 +77,7 @@ final class MarkAllPlayedConfirmationCopyTests: XCTestCase {
     func testMessagePluralNamesThePodcast() {
         XCTAssertEqual(
             MarkAllPlayedConfirmationCopy.message(unplayedCount: 2, podcastTitle: "Radiolab"),
-            "This marks all 2 unplayed episodes in Radiolab as played. This can't be undone."
+            "This marks all 2 unplayed episodes in Radiolab as played. You can mark them unplayed again from All. If Delete after played is on, downloaded audio will be removed and may need to be downloaded again."
         )
     }
 
@@ -85,7 +85,7 @@ final class MarkAllPlayedConfirmationCopyTests: XCTestCase {
     func testMessageLargeCountIsCommaGrouped() {
         XCTAssertEqual(
             MarkAllPlayedConfirmationCopy.message(unplayedCount: 1204, podcastTitle: "Radiolab"),
-            "This marks all 1,204 unplayed episodes in Radiolab as played. This can't be undone."
+            "This marks all 1,204 unplayed episodes in Radiolab as played. You can mark them unplayed again from All. If Delete after played is on, downloaded audio will be removed and may need to be downloaded again."
         )
     }
 }

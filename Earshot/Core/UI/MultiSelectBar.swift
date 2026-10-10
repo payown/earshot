@@ -22,6 +22,8 @@ struct MultiSelectAction: Identifiable {
     /// Destructive actions (e.g. Remove from folder) tint red and carry the
     /// `.isButton` + destructive affordance; the leading icon is mandatory.
     var isDestructive: Bool = false
+    var isEnabled: Bool = true
+    var disabledReason: String? = nil
     let handler: () -> Void
 }
 
@@ -85,7 +87,7 @@ struct MultiSelectBar: View {
             Label(action.title, systemImage: action.systemImage)
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
-        .disabled(!hasSelection)
+        .disabled(!hasSelection || !action.isEnabled)
 
         // Style, then add the "select something first" hint ONLY while disabled —
         // no empty hint in the enabled state.
@@ -98,8 +100,10 @@ struct MultiSelectBar: View {
                 button.buttonStyle(.bordered)
             }
         }
-        if hasSelection {
+        if hasSelection && action.isEnabled {
             styled
+        } else if let reason = action.disabledReason, hasSelection {
+            styled.accessibilityHint(reason)
         } else {
             styled.accessibilityHint("Select at least one item first")
         }

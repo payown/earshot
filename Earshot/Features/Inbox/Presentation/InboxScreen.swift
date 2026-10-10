@@ -295,7 +295,10 @@ struct InboxScreen: View {
         .onChange(of: runtime.tabFocusRevision) { _, _ in
             requestTabEntryFocus()
         }
-        .onChange(of: searchText) { _, _ in displayedEpisodeLimit = InboxLogic.displayBatchSize }
+        .onChange(of: searchText) { _, _ in
+            displayedEpisodeLimit = InboxLogic.displayBatchSize
+            if selection.isSelecting { selection.clear() }
+        }
         .onSubmit(of: .search) { announceMatches(count: visible.count) }
         .toolbar {
             // Deliberately `inbox.count`, not `visible.count`: the title states
@@ -359,6 +362,21 @@ struct InboxScreen: View {
                         )
                     }
                     .disabled(isEnrollingDownloads)
+                }
+            }
+            if selection.isSelecting {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Select all \(visible.count) matching episodes", systemImage: "checkmark.circle.fill") {
+                            selection.selectAll(visible.map(\.persistentModelID))
+                        }
+                        Button("Invert selection", systemImage: "arrow.left.arrow.right") {
+                            selection.invert(visible.map(\.persistentModelID))
+                        }
+                    } label: {
+                        Label("Selection options", systemImage: "ellipsis.circle")
+                    }
+                    .disabled(visible.isEmpty)
                 }
             }
         }

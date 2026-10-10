@@ -92,6 +92,58 @@ final class EpisodeRepository {
         return changedCount
     }
 
+    /// Marks only the selected episodes from this podcast. The caller can
+    /// select identities from unloaded pages, then exempt individual episodes
+    /// before confirming. Already-played rows keep their original timestamps.
+    @discardableResult
+    func markSelectedPlayed(in podcast: Podcast, ids: Set<PersistentIdentifier>) async -> Int {
+        await setSelectedPlayed(in: podcast, ids: ids, played: true)
+    }
+
+    /// Restores selected played episodes to unplayed without returning them to
+    /// the Inbox after they were already dismissed there.
+    @discardableResult
+    func markSelectedUnplayed(in podcast: Podcast, ids: Set<PersistentIdentifier>) async -> Int {
+        await setSelectedPlayed(in: podcast, ids: ids, played: false)
+    }
+
+    private func setSelectedPlayed(
+        in podcast: Podcast, ids: Set<PersistentIdentifier>, played: Bool
+    ) async -> Int {
+        let podcastID = podcast.persistentModelID
+        let deleteAfterPlayed = played && DownloadCleanup.deleteAfterPlayedEnabled(context)
+        let identifiers = Array(ids)
+        var changedCount = 0
+
+        for start in stride(from: 0, to: identifiers.count, by: Self.batchSize) {
+            let end = min(start + Self.batchSize, identifiers.count)
+            let selected = identifiers[start..<end].compactMap { context.model(for: $0) as? Episode }
+                .filter { !$0.isDeleted && $0.modelContext == context &&
+                    $0.podcast?.persistentModelID == podcastID && $0.isPlayed != played }
+            guard !selected.isEmpty else {
+                await Task.yield()
+                continue
+            }
+            for episode in selected {
+                episode.isPlayed = played
+                episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
+                    nowPlayed: played, wasDismissed: episode.inboxDismissed
+                )
+                if deleteAfterPlayed {
+                    DownloadCleanup.removeDownloadFileAndState(episode, in: context)
+                }
+            }
+            guard save(changedEpisodes: selected, notifyInbox: false) else { break }
+            changedCount += selected.count
+            await Task.yield()
+        }
+
+        if changedCount > 0 {
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        }
+        return changedCount
+    }
+
     @discardableResult
     private func save(changedEpisodes: [Episode], notifyInbox: Bool = true) -> Bool {
         guard context.hasChanges else { return false }

@@ -66,6 +66,72 @@ final class EpisodeRepositoryTests: XCTestCase {
         XCTAssertTrue((unplayed + alreadyPlayed).allSatisfy(\.isPlayed), "the whole podcast ends up fully played")
     }
 
+    func testSelectedPlayedLeavesExceptionsAndOtherPodcastUntouched() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Selected")
+        let otherPodcast = makePodcast(ctx, "Other")
+        let episodes = (0..<225).map { makeEpisode(ctx, "e\($0)", podcast: podcast) }
+        let unrelated = makeEpisode(ctx, "unrelated", podcast: otherPodcast)
+        let fixedDate = Date(timeIntervalSince1970: 1_000_000)
+        episodes[2].isPlayed = true
+        episodes[2].playedAt = fixedDate
+        try ctx.save()
+
+        let source = EpisodeListDataSource(
+            context: ctx, podcastID: podcast.persistentModelID, podcastTitle: podcast.title
+        )
+        let state = MultiSelectState()
+        state.enter()
+        state.selectAll(try await source.matchingEpisodeIDs(filter: .all, searchText: ""))
+        state.toggle(episodes[0].persistentModelID)
+        state.toggle(episodes[224].persistentModelID)
+        // Even an accidentally supplied identifier from another podcast must
+        // never change that podcast's played state.
+        var selected = state.selectedIDs
+        selected.insert(unrelated.persistentModelID)
+
+        var saves = 0
+        let changed = await EpisodeRepository(context: ctx, onSave: { saves += 1 })
+            .markSelectedPlayed(in: podcast, ids: selected)
+
+        XCTAssertEqual(changed, 222)
+        XCTAssertEqual(saves, 3)
+        XCTAssertFalse(episodes[0].isPlayed)
+        XCTAssertFalse(episodes[224].isPlayed)
+        XCTAssertFalse(unrelated.isPlayed)
+        XCTAssertEqual(episodes[2].playedAt, fixedDate)
+        XCTAssertTrue(episodes[100].inboxDismissed)
+        XCTAssertTrue(episodes[223].isPlayed)
+    }
+
+    func testSelectedUnplayedRestoresOnlySelectedAndKeepsInboxDismissal() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Selected")
+        let a = makeEpisode(ctx, "a", podcast: podcast)
+        let b = makeEpisode(ctx, "b", podcast: podcast)
+        let c = makeEpisode(ctx, "c", podcast: podcast)
+        for episode in [a, b, c] {
+            episode.isPlayed = true
+            episode.inboxDismissed = true
+        }
+        let oldPlayedAt = c.playedAt
+        try ctx.save()
+
+        let changed = await EpisodeRepository(context: ctx).markSelectedUnplayed(
+            in: podcast, ids: [a.persistentModelID, b.persistentModelID]
+        )
+
+        XCTAssertEqual(changed, 2)
+        XCTAssertFalse(a.isPlayed)
+        XCTAssertFalse(b.isPlayed)
+        XCTAssertNil(a.playedAt)
+        XCTAssertNil(b.playedAt)
+        XCTAssertTrue(a.inboxDismissed)
+        XCTAssertTrue(b.inboxDismissed)
+        XCTAssertTrue(c.isPlayed)
+        XCTAssertEqual(c.playedAt, oldPlayedAt)
+    }
+
     // MARK: No-op cases -- must not dirty the context
 
     func testMarkAllPlayedOnFullyPlayedPodcastReturnsZeroAndSkipsSave() async {

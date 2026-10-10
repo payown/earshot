@@ -90,4 +90,8 @@ enum EpisodeBatchLabel {
     static func markPlayed(count: Int) -> String {
         count == 0 ? "Mark as played" : "Mark \(episodePhrase(count)) as played"
     }
+
+    static func markUnplayed(count: Int) -> String {
+        count == 0 ? "Mark as unplayed" : "Mark \(episodePhrase(count)) as unplayed"
+    }
 }
