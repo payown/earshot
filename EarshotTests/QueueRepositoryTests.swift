@@ -293,6 +293,67 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(repo.queue().count, 3, "must move, not duplicate")
     }
 
+    func testAddToTopPinsPlayingItemAndPlacesEpisodeFirstUpcoming() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let eps = ["a", "b", "c"].map { makeEpisode(ctx, $0, podcast: p) }
+        let repo = QueueRepository(context: ctx)
+        eps.forEach(repo.add)
+        let d = makeEpisode(ctx, "d", podcast: p)
+
+        repo.addToTop(d, keepingCurrent: eps[1])
+        XCTAssertEqual(titles(repo), ["Ep b", "Ep d", "Ep a", "Ep c"])
+        repo.addToTop(eps[2], keepingCurrent: eps[1])
+        XCTAssertEqual(titles(repo), ["Ep b", "Ep c", "Ep d", "Ep a"])
+        XCTAssertEqual(repo.queue().count, 4)
+        XCTAssertEqual(repo.queue().compactMap { $0.queueItem?.position }, [0, 1, 2, 3])
+    }
+
+    func testAddToTopUsesAbsoluteFrontWithoutQueuedCurrent() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let eps = ["a", "b"].map { makeEpisode(ctx, $0, podcast: p) }
+        let outside = makeEpisode(ctx, "outside", podcast: p)
+        let repo = QueueRepository(context: ctx)
+        eps.forEach(repo.add)
+
+        repo.addToTop(eps[1], keepingCurrent: outside)
+        XCTAssertEqual(titles(repo), ["Ep b", "Ep a"])
+    }
+
+    func testSortOldestFirstPinsPlayingEpisodeAndStabilizesEqualOrMissingDates() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let eps = ["new", "playing", "undated", "old", "old-tie"]
+            .map { makeEpisode(ctx, $0, podcast: p) }
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        eps[0].pubDate = base.addingTimeInterval(100)
+        eps[1].pubDate = base.addingTimeInterval(50)
+        eps[3].pubDate = base
+        eps[4].pubDate = base
+        let repo = QueueRepository(context: ctx)
+        eps.forEach(repo.add)
+
+        XCTAssertTrue(repo.sortOldestFirst(keepingCurrent: eps[1]))
+        XCTAssertEqual(titles(repo), ["Ep playing", "Ep old", "Ep old-tie", "Ep new", "Ep undated"])
+        XCTAssertFalse(repo.sortOldestFirst(keepingCurrent: eps[1]))
+        XCTAssertEqual(repo.queue().compactMap { $0.queueItem?.position }, [0, 1, 2, 3, 4])
+    }
+
+    func testSortOldestFirstSortsAllItemsWhenCurrentIsNotQueued() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let eps = ["new", "old"].map { makeEpisode(ctx, $0, podcast: p) }
+        eps[0].pubDate = Date(timeIntervalSince1970: 200)
+        eps[1].pubDate = Date(timeIntervalSince1970: 100)
+        let outside = makeEpisode(ctx, "outside", podcast: p)
+        let repo = QueueRepository(context: ctx)
+        eps.forEach(repo.add)
+
+        XCTAssertTrue(repo.sortOldestFirst(keepingCurrent: outside))
+        XCTAssertEqual(titles(repo), ["Ep old", "Ep new"])
+    }
+
     func testCancelFromQueueRemovesAndRevertsToNewEpisode() {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx, "A")
