@@ -10,6 +10,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     case playNow
     case addToQueueTop
     case addToQueueBottom
+    case addToQueueFront
     case download
     case removeFromInbox
     case markPlayed
@@ -37,6 +38,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         case .playNow: return "Play now"
         case .addToQueueTop: return "Play next"
         case .addToQueueBottom: return "Add to end of queue"
+        case .addToQueueFront: return "Add to top of Queue"
         case .download: return "Download"
         case .removeFromInbox: return "Remove from Inbox"
         case .markPlayed: return "Mark as played"
@@ -110,6 +112,7 @@ let defaultEpisodeActions: [EpisodeAction] = [
     .playNow,
     .addToQueueBottom,
     .addToQueueTop,
+    .addToQueueFront,
     .download,
     .removeFromInbox,
     .markPlayed,

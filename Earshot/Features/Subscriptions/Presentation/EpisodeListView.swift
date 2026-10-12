@@ -488,6 +488,7 @@ struct EpisodeListView: View {
             player: player,
             downloads: downloads,
             context: context,
+            settings: settings,
             onShowNotes: { showNotesEpisode = episode },
             onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode },

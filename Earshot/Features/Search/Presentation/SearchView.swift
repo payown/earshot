@@ -416,7 +416,7 @@ struct SearchView<HeaderContent: View>: View {
         // rotor — the user subscribes first, then files from Inbox/Library.
         buildEpisodeActions(
             episode: episode, order: [action], player: player,
-            downloads: downloads, context: context,
+            downloads: downloads, context: context, settings: settings,
             onShowNotes: { showNotesEpisode = episode }, onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode }
         ).first?.run()

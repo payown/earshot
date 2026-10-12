@@ -184,7 +184,7 @@ final class QuickActionBuildersTests: XCTestCase {
         var calls = 0
         let items = buildEpisodeActions(
             episode: episode,
-            order: [.playNow, .addToQueueTop, .addToQueueBottom, .markPlayed],
+            order: [.playNow, .addToQueueTop, .addToQueueFront, .addToQueueBottom, .markPlayed],
             player: PlayerService(),
             downloads: DownloadManager(),
             context: ctx,
@@ -196,7 +196,29 @@ final class QuickActionBuildersTests: XCTestCase {
 
         items.forEach { $0.run() }
 
-        XCTAssertEqual(calls, 3, "Only the three actions that queue an episode invoke the focus hook")
+        XCTAssertEqual(calls, 4, "Only the four actions that queue an episode invoke the focus hook")
+    }
+
+    func testAddToTopEpisodeActionEnqueuesAtFront() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let previous = Episode(guid: "previous", title: "Previous", audioURL: "https://x/previous.mp3")
+        previous.podcast = episode.podcast
+        ctx.insert(previous)
+        let repo = QueueRepository(context: ctx)
+        repo.add(previous)
+        let settings = SettingsStore()
+        settings.queueGrouping = .podcast
+
+        let actions = buildEpisodeActions(
+            episode: episode, order: [.addToQueueFront], player: PlayerService(),
+            downloads: DownloadManager(), context: ctx, settings: settings,
+            onShowNotes: {}, onShare: {}, onBookmarks: {}
+        )
+        XCTAssertEqual(actions.map(\.label), ["Add to top of Queue"])
+        actions.first?.run()
+        XCTAssertEqual(repo.queue().map(\.title), ["Ep", "Previous"])
+        XCTAssertEqual(settings.queueGrouping, .none)
     }
 
     func testQueueActionsDropAllMovesInNoneMode() {
@@ -304,7 +326,7 @@ final class QuickActionBuildersTests: XCTestCase {
             context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}
         )
         XCTAssertEqual(items.map(\.label), [
-            "Play now", "Add to end of queue", "Play next", "Download",
+            "Play now", "Add to end of queue", "Play next", "Add to top of Queue", "Download",
             "Mark as played", "Bookmarks", "Open show notes", "Share",
             "Refresh episode audio",
         ])

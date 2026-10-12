@@ -78,7 +78,7 @@ func availableEpisodeActions(
 /// stays put (the search preview, or Downloads under the All filter).
 ///
 /// `onWillQueue` is the queueing analogue for Inbox-like surfaces (#763): Play
-/// now, Play next, and Add to end invoke it before changing status so the caller
+/// now, Play next, Add to top, and Add to end invoke it before changing status so the caller
 /// can capture the still-visible row's neighbor and restore VoiceOver focus.
 @MainActor
 func buildEpisodeActions(
@@ -87,6 +87,7 @@ func buildEpisodeActions(
     player: PlayerService,
     downloads: DownloadManager,
     context: ModelContext,
+    settings: SettingsStore? = nil,
     onShowNotes: @escaping () -> Void,
     onShare: @escaping () -> Void,
     onBookmarks: @escaping () -> Void,
@@ -130,6 +131,21 @@ func buildEpisodeActions(
                 QueueRepository(context: context).playNext(episode, after: player.nowPlayingEpisode)
                 player.registerPlayNext(episode)
                 Announcer.announce("\(episode.title) will play next")
+            }
+        case .addToQueueFront:
+            return QuickActionItem(label: "Add to top of Queue", isDestructive: false) {
+                onWillQueue?()
+                QueueRepository(context: context).addToTop(
+                    episode, keepingCurrent: player.nowPlayingEpisode
+                )
+                player.registerPlayNext(episode)
+                let wasGrouped = settings.map { $0.queueGrouping != QueueGrouping.none } ?? false
+                if wasGrouped { settings?.queueGrouping = .none }
+                Announcer.announce(
+                    wasGrouped
+                        ? "Added \(episode.title) to the top of the upcoming Queue. Grouping off."
+                        : "Added \(episode.title) to the top of the upcoming Queue"
+                )
             }
         case .addToQueueBottom:
             return QuickActionItem(label: "Add to end of queue", isDestructive: false) {

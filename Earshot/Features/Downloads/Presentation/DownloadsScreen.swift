@@ -23,6 +23,7 @@ struct DownloadsScreen: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
+    @Environment(SettingsStore.self) private var settings
 
     // A TabView creates this screen even when Downloads is not selected, so an
     // unfiltered @Query here is launch-path work. On the 242k-episode library it
@@ -485,6 +486,7 @@ struct DownloadsScreen: View {
             player: player,
             downloads: downloads,
             context: context,
+            settings: settings,
             onShowNotes: { showNotesEpisode = episode },
             onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode },
