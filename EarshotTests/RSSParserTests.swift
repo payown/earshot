@@ -452,7 +452,7 @@ final class RSSParserTests: XCTestCase {
         // destructive `.unfollow`.
         XCTAssertEqual(
             defaultEpisodeActions,
-            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .removeFromInbox, .markPlayed, .viewBookmarks, .openShowNotes, .share, .exportTranscript, .exportAudio, .refreshAudio, .addToFolder, .moveToFolder, .unfollow]
+            [.playNow, .addToQueueBottom, .addToQueueTop, .addToQueueFront, .download, .removeFromInbox, .markPlayed, .viewBookmarks, .openShowNotes, .share, .exportTranscript, .exportAudio, .refreshAudio, .addToFolder, .moveToFolder, .unfollow]
         )
     }
 }

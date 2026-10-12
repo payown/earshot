@@ -619,6 +619,26 @@ struct QueueScreen: View {
                             Text(mode.optionLabel).tag(mode)
                         }
                     }
+                    if episodes.count > 1 && !searchActive {
+                        Button {
+                            let changed = repo.sortOldestFirst(
+                                keepingCurrent: player.nowPlayingEpisode
+                            )
+                            let wasGrouped = settings.queueGrouping != .none
+                            if wasGrouped { settings.queueGrouping = .none }
+                            if changed || wasGrouped {
+                                Announcer.announce(
+                                    wasGrouped
+                                        ? "Upcoming Queue sorted oldest first. Grouping off."
+                                        : "Upcoming Queue sorted oldest first."
+                                )
+                            } else {
+                                Announcer.announce("Upcoming Queue is already oldest first")
+                            }
+                        } label: {
+                            Label("Sort upcoming Queue oldest first", systemImage: "calendar")
+                        }
+                    }
                 }
                 if !episodes.isEmpty {
                     Section("Downloads") {
