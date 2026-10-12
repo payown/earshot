@@ -514,6 +514,30 @@ final class QueueRepository {
         compact(items)
     }
 
+    /// Places an episode first among upcoming items, including when it was
+    /// already queued. A queued playing episode is pinned at position zero so
+    /// auto-advance sees the new item next even if playback began mid-Queue.
+    /// The caller registers the same grouped-playback override as Play Next.
+    func addToTop(_ episode: Episode, keepingCurrent current: Episode?) {
+        var items = orderedItems()
+        let item = episode.queueItem ?? enqueue(episode)
+        let currentID = current?.queueItem?.persistentModelID
+        let pinned = items.first { $0.persistentModelID == currentID }
+        let originalIDs = items.map(\.persistentModelID)
+        items.removeAll { $0.persistentModelID == item.persistentModelID }
+        if let pinned, pinned.persistentModelID != item.persistentModelID {
+            items.removeAll { $0.persistentModelID == pinned.persistentModelID }
+            items.insert(contentsOf: [pinned, item], at: 0)
+        } else {
+            items.insert(item, at: 0)
+        }
+        if items.map(\.persistentModelID) == originalIDs { return }
+        if items.contains(where: { $0.episode?.podcast?.isFollowed == true }) {
+            PendingCloudQueueMutation.stageOrdering(in: context)
+        }
+        compact(items)
+    }
+
     /// Appends `episodes` to the end in the given order, in a single fetch +
     /// compact rather than one per episode (backs Inbox multi-select bulk add,
     /// #595). Idempotent per-episode: any already queued is left untouched,
@@ -587,6 +611,21 @@ final class QueueRepository {
             PendingCloudQueueMutation.stageOrdering(in: context)
         }
         compact(items)
+    }
+
+    /// Sorts the entire raw Queue by publish date. A currently playing episode
+    /// stays first when it is queued, so auto-advance traverses the sorted
+    /// remainder rather than skipping everything that would precede it.
+    @discardableResult
+    func sortOldestFirst(keepingCurrent current: Episode?) -> Bool {
+        let items = orderedItems()
+        guard items.count > 1 else { return false }
+        let currentID = current?.queueItem?.persistentModelID
+        let pinned = items.first { $0.persistentModelID == currentID }
+        let sortable = items.filter { $0.persistentModelID != pinned?.persistentModelID }
+        let orderedIDs = (pinned.map { [$0.persistentModelID] } ?? [])
+            + dateOrder(newestFirst: false)(sortable)
+        return applyOrder(orderedIDs, items: items)
     }
 
     // MARK: Removing
