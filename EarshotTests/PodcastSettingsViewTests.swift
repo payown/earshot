@@ -8,6 +8,28 @@ import SwiftData
 @MainActor
 final class PodcastSettingsViewTests: XCTestCase {
 
+    func testOutroSkipPersistsAsMirroredPerPodcastSetting() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx)
+        try ctx.save()
+        let feed = podcast.feedURL
+        let key = SettingsKey.podcastOutroSkip(feedURL: feed)
+        let settings = AppSettingsStore(context: ctx)
+        XCTAssertTrue(AppSettingScope.isMirrored(key))
+        XCTAssertNil(settings.podcastOutroSkip(forFeedURL: feed))
+        XCTAssertEqual(PodcastSettingsView.outroSkipOptionsForTesting.map(\.value),
+                       PodcastSettingsView.introSkipOptionsForTesting.map(\.value))
+
+        settings.setPodcastOutroSkip(60, forFeedURL: feed)
+        let reopened = AppSettingsStore(context: ModelContext(ctx.container))
+        XCTAssertEqual(reopened.podcastOutroSkip(forFeedURL: feed), 60)
+        XCTAssertNil(reopened.podcastOutroSkip(forFeedURL: "https://other.example/feed"))
+
+        reopened.setPodcastOutroSkip(nil, forFeedURL: feed)
+        XCTAssertNil(AppSettingsStore(context: ModelContext(ctx.container))
+            .podcastOutroSkip(forFeedURL: feed))
+    }
+
     func testInboxCapSavePublishesOnlyTheEditedPodcastAfterDurableSave() throws {
         let ctx = TestStore.freshContext()
         let podcast = makePodcast(ctx)

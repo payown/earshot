@@ -87,6 +87,7 @@ struct PodcastSettingsView: View {
 
     /// Test-visible accessor for intro-skip options. Only use in tests.
     static var introSkipOptionsForTesting: [(label: String, value: Int?)] { introSkipOptions }
+    static var outroSkipOptionsForTesting: [(label: String, value: Int?)] { outroSkipOptions }
 
     private var silenceTrimOptions: [AdjustableOptionPicker<Bool?>.Option] {
         let inherited = settings.skipSilenceEnabled ? "on" : "off"
@@ -109,6 +110,8 @@ struct PodcastSettingsView: View {
         ("1 minute", 60),
         ("1.5 minutes", 90),
     ]
+
+    private static let outroSkipOptions: [(label: String, value: Int?)] = introSkipOptions
 
     // MARK: Queue age limit options
 
@@ -248,6 +251,7 @@ struct PodcastSettingsView: View {
             speedPicker
             silenceTrimPicker
             introSkipPicker
+            outroSkipPicker
         } header: {
             Text("Playback")
                 .accessibilityAddTraits(.isHeader)
@@ -521,6 +525,10 @@ struct PodcastSettingsView: View {
         Self.introSkipOptions.map { .init(value: $0.value, title: $0.label, spoken: $0.label) }
     }
 
+    private var outroSkipAdjustableOptions: [AdjustableOptionPicker<Int?>.Option] {
+        Self.outroSkipOptions.map { .init(value: $0.value, title: $0.label, spoken: $0.label) }
+    }
+
     private var queueAgeAdjustableOptions: [AdjustableOptionPicker<Int?>.Option] {
         Self.queueAgeLimitOptions.map { .init(value: $0.value, title: $0.label, spoken: $0.label) }
     }
@@ -549,6 +557,15 @@ struct PodcastSettingsView: View {
             options: introSkipAdjustableOptions,
             selection: introSkipBinding,
             hint: "Automatically skips this much time the first time you play a new episode of this podcast. Resuming an episode you already started never skips again."
+        )
+    }
+
+    private var outroSkipPicker: some View {
+        AdjustableOptionPicker(
+            "Skip outro",
+            options: outroSkipAdjustableOptions,
+            selection: outroSkipBinding,
+            hint: "Finishes episodes of this podcast this much time before the end during normal playback. Seeking or resuming near the end does not skip it."
         )
     }
 
@@ -622,6 +639,19 @@ struct PodcastSettingsView: View {
             set: {
                 podcast.introSkipSeconds = $0
                 persistPodcastProjectionChange()
+            }
+        )
+    }
+
+    private var outroSkipBinding: Binding<Int?> {
+        Binding(
+            get: {
+                AppSettingsStore(context: modelContext)
+                    .podcastOutroSkip(forFeedURL: podcast.feedURL)
+            },
+            set: {
+                AppSettingsStore(context: modelContext)
+                    .setPodcastOutroSkip($0, forFeedURL: podcast.feedURL)
             }
         )
     }
