@@ -76,7 +76,9 @@ jobs:
       # `name=iPhone 17`, which matches multiple devices and caused runner
       # contention when several builds ran at once).
       # Retry failed test cases once inside this run to absorb occasional
-      # simulator test-runner exits without rerunning the whole CI job.
+      # simulator test-runner exits without rerunning the whole CI job. Avoid
+      # -test-iterations here: it runs the entire UI suite twice and records
+      # transient first-pass runner kills as failures even after a later pass.
       # Keep this run's result bundle separate from historical local results.
       - name: Run Earshot tests
         id: tests
@@ -89,7 +91,6 @@ jobs:
             -destination 'platform=iOS Simulator,id=23F12FE1-0D77-4B42-B766-ADD9F27A2153' \
             -resultBundlePath "$RUNNER_TEMP/EarshotTests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.xcresult" \
             -retry-tests-on-failure \
-            -test-iterations 2 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
