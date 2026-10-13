@@ -530,6 +530,7 @@ struct RootView: View {
         ) { _ in
             settings.configure(context: modelContext)
             player.refreshPodcastDisplayName()
+            player.refreshPodcastOutroSkip()
         }
         .onReceive(NotificationCenter.default.publisher(for: .earshotPodcastNamesDidChange)) { _ in
             player.refreshPodcastDisplayName()
