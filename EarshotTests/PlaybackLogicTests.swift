@@ -264,6 +264,30 @@ final class PlaybackLogicTests: XCTestCase {
 
     // MARK: Intro skip (#456)
 
+    func testOutroSkipRequiresNaturalBoundaryCrossingAndLoadedDuration() {
+        XCTAssertTrue(PlaybackLogic.crossedOutroSkipBoundary(
+            previous: 1_739, current: 1_740, loadedDuration: 1_800, skipSeconds: 60
+        ))
+        XCTAssertFalse(PlaybackLogic.crossedOutroSkipBoundary(
+            previous: 1_740, current: 1_741, loadedDuration: 1_800, skipSeconds: 60
+        ), "Resuming or seeking inside the outro must not finish it")
+        XCTAssertFalse(PlaybackLogic.crossedOutroSkipBoundary(
+            previous: 1_739, current: 1_740, loadedDuration: .nan, skipSeconds: 60
+        ))
+        XCTAssertFalse(PlaybackLogic.crossedOutroSkipBoundary(
+            previous: 10, current: 11, loadedDuration: 60, skipSeconds: 90
+        ), "Short episodes must remain playable")
+        XCTAssertFalse(PlaybackLogic.crossedOutroSkipBoundary(
+            previous: 1_739, current: 1_740, loadedDuration: 1_800, skipSeconds: 0
+        ))
+        XCTAssertFalse(PlaybackLogic.crossedOutroSkipBoundary(
+            previous: 1_739, current: 1_800, loadedDuration: 1_800, skipSeconds: 60
+        ), "The actual-end notification owns exact-end completion")
+        XCTAssertFalse(PlaybackLogic.crossedOutroSkipBoundary(
+            previous: 100, current: 1_740, loadedDuration: 1_800, skipSeconds: 60
+        ), "An asynchronous seek jump must not masquerade as listening")
+    }
+
     func testFreshStart_withIntroSkip_resumesPastIntro() {
         let position = PlaybackLogic.playbackStartPosition(
             position: 0, duration: 1800, introSkipSeconds: 45

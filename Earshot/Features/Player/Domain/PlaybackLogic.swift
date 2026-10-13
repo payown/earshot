@@ -430,6 +430,23 @@ enum PlaybackLogic {
         return startPosition
     }
 
+    /// Only continuous playback crossing a known ending boundary may finish an
+    /// episode early. A seek or resume starts a new observation at its landing
+    /// position, so neither can mark the episode played by itself.
+    static func crossedOutroSkipBoundary(
+        previous: Double,
+        current: Double,
+        loadedDuration: Double,
+        skipSeconds: Int
+    ) -> Bool {
+        guard previous.isFinite, current.isFinite, loadedDuration.isFinite,
+              previous >= 0, current > previous,
+              current - previous <= 10, skipSeconds > 0,
+              loadedDuration > Double(skipSeconds) + 2 else { return false }
+        let boundary = loadedDuration - Double(skipSeconds)
+        return previous < boundary && current >= boundary && current < loadedDuration
+    }
+
     // MARK: Scrubber VoiceOver step (#610)
 
     /// The scrubber's minimum VoiceOver flick step. Also the flat step used for
