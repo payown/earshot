@@ -3574,3 +3574,25 @@ She selected the whole list, unchecked the three, and marked the others played. 
 Renata asked if the list was finally tidy.
 
 “Tidy enough,” Kashe said. “I left myself something to listen to.”
+
+---
+
+Chapter 99 - Build 278
+
+What to try first:
+
+In Queue options, choose Sort upcoming Queue oldest first. Try a Queue with episodes from several podcasts and different publish dates. The current playing episode should stay first; the upcoming episodes should play oldest to newest. The Queue switches to the ungrouped view so its displayed order matches playback. Check episodes with the same date and episodes without a date: equal dates keep their previous relative order, and undated episodes go last. Try this with VoiceOver and tell us if focus, spoken order, or playback order differs from what you see.
+
+From Inbox, Library, Search, Downloads, or a folder, use an episode's Add to top of Queue Quick Action. If something is already playing, it should remain first and the newly added episode should be next. Later Queue items should stay in order. Check that the Queue switches to ungrouped view and playback continues through the new order. Existing Play next should still work as before. If you customize Quick Actions, look for Add to top of Queue under Available actions; a new Quick Actions setup includes it by default. Please report delays or unexpected focus changes on a large Queue.
+
+If you have not tried build 277 yet, also test Select all matching episodes, Invert selection, and Mark selected episodes as unplayed from a podcast's All view. The description, Queue reordering, finished-episode retention, and audio compression/EQ checks from Chapters 96-98 still need feedback on physical devices.
+
+Kashe's story:
+
+Kashe had queued a week of interviews, but the oldest one was buried near the end. She opened Queue options and sorted the upcoming list by date. The interview already playing stayed put; the others lined up from oldest to newest.
+
+Then Renata sent a short recording she wanted Kashe to hear on the drive home. Kashe added it to the top of the upcoming Queue. When the interview ended, Renata's recording played next.
+
+“You moved me ahead of everyone?” Renata asked later.
+
+“Just for one episode,” Kashe said. “The rest are still waiting their turn.”
