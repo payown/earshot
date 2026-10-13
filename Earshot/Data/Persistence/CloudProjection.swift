@@ -2673,6 +2673,7 @@ actor CloudProjectionCoordinator: ModelActor {
         for prefix in [
             SettingsKey.podcastFilterPrefix,
             SettingsKey.podcastInboxCapPrefix,
+            SettingsKey.podcastOutroSkipPrefix,
             SettingsKey.episodeFilterConfigurationPrefix,
             SettingsKey.podcastDisplayNamePrefix,
         ] where key.hasPrefix(prefix) {
@@ -2691,6 +2692,7 @@ actor CloudProjectionCoordinator: ModelActor {
         for prefix in [
             SettingsKey.podcastFilterPrefix,
             SettingsKey.podcastInboxCapPrefix,
+            SettingsKey.podcastOutroSkipPrefix,
             SettingsKey.episodeFilterConfigurationPrefix,
             SettingsKey.podcastDisplayNamePrefix,
         ] where key.hasPrefix(prefix) {

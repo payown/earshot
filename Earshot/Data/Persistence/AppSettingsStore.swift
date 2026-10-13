@@ -187,6 +187,14 @@ enum SettingsKey {
         podcastInboxCapPrefix + FeedURLIdentity.canonical(feedURL)
     }
 
+    /// Per-podcast fixed ending to skip during natural playback. Stored as a
+    /// mirrored setting to avoid changing the podcast schema for this option.
+    static let podcastOutroSkipPrefix = "podcast_outro_skip_"
+
+    static func podcastOutroSkip(feedURL: String) -> String {
+        podcastOutroSkipPrefix + FeedURLIdentity.canonical(feedURL)
+    }
+
     /// Versioned per-podcast ingest-filter JSON. Mirrored through the existing
     /// AppSetting projection; no SwiftData schema change is involved.
     static let episodeFilterConfigurationPrefix = "episode_filter_configuration_"
@@ -289,6 +297,7 @@ enum AppSettingScope {
         if canonical.hasPrefix(SettingsKey.podcastFilterPrefix)
             || canonical.hasPrefix(SettingsKey.podcastInboxCapPrefix)
             || canonical.hasPrefix(SettingsKey.podcastDisplayNamePrefix)
+            || canonical.hasPrefix(SettingsKey.podcastOutroSkipPrefix)
             || canonical.hasPrefix(SettingsKey.episodeFilterConfigurationPrefix) {
             return false
         }
@@ -724,6 +733,16 @@ final class AppSettingsStore {
     /// shadowed by an older saved cap on a future re-subscribe.
     func setPodcastInboxCap(_ cap: Int?, forFeedURL feedURL: String) {
         setOptionalInt(cap, for: SettingsKey.podcastInboxCap(feedURL: feedURL))
+    }
+
+    func podcastOutroSkip(forFeedURL feedURL: String) -> Int? {
+        guard let seconds = optionalInt(SettingsKey.podcastOutroSkip(feedURL: feedURL)),
+              seconds > 0 else { return nil }
+        return seconds
+    }
+
+    func setPodcastOutroSkip(_ seconds: Int?, forFeedURL feedURL: String) {
+        setOptionalInt(seconds, for: SettingsKey.podcastOutroSkip(feedURL: feedURL))
     }
 
     func episodeFilterConfiguration(forFeedURL feedURL: String) -> EpisodeFilterConfiguration {
