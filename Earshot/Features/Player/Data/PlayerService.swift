@@ -149,6 +149,13 @@ final class PlayerService {
     /// accumulate from the optimistic target shown to the listener.
     @ObservationIgnored private var userSeekGeneration = 0
     @ObservationIgnored private var pendingUserSeekTarget: Double?
+    /// A seek or a new player item begins a fresh outro observation. Only a
+    /// subsequent clock crossing can trigger early completion.
+    @ObservationIgnored private weak var outroObservedItem: AVPlayerItem?
+    @ObservationIgnored private var outroLastPosition: Double?
+    @ObservationIgnored private weak var completedItem: AVPlayerItem?
+    @ObservationIgnored private var currentOutroSkipSeconds: Int?
+    @ObservationIgnored private var outroSettingObserver: NSObjectProtocol?
     /// Session-only exact rate received with a handoff. It takes precedence for
     /// the loaded episode without rewriting the user's global/per-show settings;
     /// any deliberate local speed change clears it.
@@ -361,6 +368,7 @@ final class PlayerService {
         observeVolumeBoostSetting()
         observeSkipSilenceSetting()
         observeAudioDynamicsSetting()
+        observeOutroSkipSetting()
         sleepTimer.resetsOnInteraction = settings?.bool(SettingsKey.sleepTimerResetsOnInteraction, default: false) ?? false
         sleepTimer.onExpired = { [weak self] in self?.handleSleepTimerExpired() }
     }
@@ -373,6 +381,7 @@ final class PlayerService {
         cancelHandoffOperation()
         context = nil
         settings = nil
+        currentOutroSkipSeconds = nil
     }
 
     func playFolderRunEpisode(_ episode: Episode, origin: PlaybackOrigin?, autoplay: Bool) {
@@ -546,6 +555,11 @@ final class PlayerService {
             effectiveRateRevision &+= 1
         }
         currentEpisode = episode
+        if !currentEpisodeIsTransient, let feedURL = episode?.podcast?.feedURL {
+            currentOutroSkipSeconds = settings?.podcastOutroSkip(forFeedURL: feedURL)
+        } else {
+            currentOutroSkipSeconds = nil
+        }
         if episode != nil {
             currentPersonalAudio = nil
             nowPlayingPersonalAudioID = nil
@@ -1010,6 +1024,7 @@ final class PlayerService {
         } else {
             currentPositionSeconds = 0
         }
+        resetOutroObservation(to: currentPositionSeconds)
         resetListeningTracking()
 
         applyRate()
@@ -1150,6 +1165,7 @@ final class PlayerService {
             player.seek(to: CMTime(seconds: Double(resume), preferredTimescale: 1))
         }
         currentPositionSeconds = Double(resume)
+        resetOutroObservation(to: Double(resume))
         isPlaying = false
         // Force the first tick after play to persist this episode's position.
         lastPersistedSecond = nil
@@ -1259,6 +1275,7 @@ final class PlayerService {
         if currentPositionSeconds > 0 {
             player.seek(to: CMTime(seconds: currentPositionSeconds, preferredTimescale: 1))
         }
+        resetOutroObservation(to: currentPositionSeconds)
         currentPlaybackURL = url
         currentMediaResolutionComplete = true
     }
@@ -1489,6 +1506,7 @@ final class PlayerService {
         // skip starts from this optimistic target rather than the old AVPlayer
         // clock. Periodic ticks are held until AVPlayer confirms the request.
         currentPositionSeconds = clamped
+        resetOutroObservation(to: clamped)
         persistCurrentPosition()
         publishCurrentPlaybackHandoff()
         updateNowPlayingInfo()
@@ -1544,6 +1562,7 @@ final class PlayerService {
         } else {
             settledPosition = requestedTarget
         }
+        resetOutroObservation(to: settledPosition)
 
         // AVPlayer promises the completion callback even for an interrupted
         // request. On success, use its actual landing point (which may differ
@@ -2557,6 +2576,37 @@ final class PlayerService {
         updateCurrentChapter()
 
         guard !episodeWasDeleted else { return }
+        evaluateOutroSkip(at: currentSeconds)
+    }
+
+    private func resetOutroObservation(to position: Double) {
+        outroObservedItem = player.currentItem
+        outroLastPosition = position
+    }
+
+    private func evaluateOutroSkip(at currentSeconds: Double) {
+        guard let item = player.currentItem else { return }
+        guard outroObservedItem === item, let previous = outroLastPosition else {
+            outroObservedItem = item
+            outroLastPosition = currentSeconds
+            return
+        }
+        // A newly loaded item can briefly report zero before its asynchronous
+        // resume seek lands. Keep the saved landing position as the baseline.
+        guard currentSeconds >= previous else { return }
+        outroLastPosition = currentSeconds
+        guard isPlaying, !currentEpisodeIsTransient,
+              let skip = currentOutroSkipSeconds,
+              PlaybackLogic.crossedOutroSkipBoundary(
+                previous: previous,
+                current: currentSeconds,
+                loadedDuration: item.duration.seconds,
+                skipSeconds: skip
+              ) else { return }
+        // AVPlayer has not reached its natural end yet. Stop the remaining
+        // audio before reusing the same completion path as the end notification.
+        player.pause()
+        handlePlaybackEnded()
     }
 
     /// Logs the deleted-instance guard once per loaded episode (#574) so the
@@ -2750,6 +2800,7 @@ final class PlayerService {
         handoffRateOverride = snapshot.playbackRate
         player.seek(to: CMTime(seconds: Double(position), preferredTimescale: 1))
         currentPositionSeconds = Double(position)
+        resetOutroObservation(to: Double(position))
         lastPersistedSecond = position
         lastProjectedSecond = position
         lastNowPlayingSyncSecond = nil
@@ -3035,6 +3086,10 @@ final class PlayerService {
 
     private func handlePlaybackEnded() {
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
+        if let item = player.currentItem {
+            guard completedItem !== item else { return }
+            completedItem = item
+        }
         if let item = currentPersonalAudio {
             guard !automaticPlaybackStoppedByTimer else { return }
             isPlaying = false
@@ -3248,6 +3303,25 @@ final class PlayerService {
         }
     }
 
+    private func observeOutroSkipSetting() {
+        if let outroSettingObserver {
+            NotificationCenter.default.removeObserver(outroSettingObserver)
+        }
+        outroSettingObserver = NotificationCenter.default.addObserver(
+            forName: .earshotMirroredSettingDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let changedKey = notification.object as? String
+            Task { @MainActor [weak self] in
+                guard let self, let feedURL = self.currentEpisode?.podcast?.feedURL,
+                      changedKey == SettingsKey.podcastOutroSkip(feedURL: feedURL)
+                else { return }
+                self.currentOutroSkipSeconds = self.settings?.podcastOutroSkip(forFeedURL: feedURL)
+            }
+        }
+    }
+
     private func observeAudioDynamicsSetting() {
         if let audioDynamicsSettingObserver {
             NotificationCenter.default.removeObserver(audioDynamicsSettingObserver)
@@ -3428,6 +3502,7 @@ final class PlayerService {
         guard target != currentPositionSeconds else { return }
         player.seek(to: CMTime(seconds: target, preferredTimescale: 1))
         currentPositionSeconds = target
+        resetOutroObservation(to: target)
         lastPersistedSecond = Int(target)
         lastNowPlayingSyncSecond = nil
         writeLivePosition(episode, second: Int(target))
