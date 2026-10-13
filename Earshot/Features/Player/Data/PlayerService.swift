@@ -3317,9 +3317,19 @@ final class PlayerService {
                 guard let self, let feedURL = self.currentEpisode?.podcast?.feedURL,
                       changedKey == SettingsKey.podcastOutroSkip(feedURL: feedURL)
                 else { return }
-                self.currentOutroSkipSeconds = self.settings?.podcastOutroSkip(forFeedURL: feedURL)
+                self.refreshPodcastOutroSkip()
             }
         }
+    }
+
+    /// Called after CloudKit reconciliation reconfigures the main settings
+    /// context, so a remote change applies to the episode already playing.
+    func refreshPodcastOutroSkip() {
+        guard !currentEpisodeIsTransient, let feedURL = currentEpisode?.podcast?.feedURL else {
+            currentOutroSkipSeconds = nil
+            return
+        }
+        currentOutroSkipSeconds = settings?.podcastOutroSkip(forFeedURL: feedURL)
     }
 
     private func observeAudioDynamicsSetting() {
