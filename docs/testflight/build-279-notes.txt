@@ -1,0 +1,17 @@
+Chapter 100 - Build 279
+
+What to try first:
+
+Open a followed podcast's settings and find Skip outro under Playback. It starts Off. Set 30 or 60 seconds, then play an episode long enough to leave more than two seconds before that ending. Let it play naturally into the final interval. Earshot should finish the episode once, mark it played, and follow your existing Queue, folder-run, sleep-timer, or stop-after-current choice. Check that the next episode starts when it should and that a finished episode stays in the Queue if you enabled that option.
+
+Seek into the final interval yourself, or resume an episode saved near its end. You should still be able to hear the rest through the real ending. Turn Skip outro Off and confirm playback again reaches the real end. Try a short episode, a download, speed changes, background playback, and relaunch. With VoiceOver, adjust the setting and check its spoken value and focus. Please report the podcast, chosen interval, and episode duration if it finishes too early or fails to finish. This setting skips a fixed ending; it does not recognize ads elsewhere in the episode.
+
+If you have not tried build 278, also check Sort upcoming Queue oldest first and Add to top of Queue. The selection, description, Queue reorder, finished-episode retention, and audio compression/EQ checks from recent chapters still welcome phone feedback.
+
+Kashe's story:
+
+Kashe liked the interview, but the last minute always broke into an ad she did not want to hear again. In the show's settings, she chose Skip outro and set one minute.
+
+On her next walk, the interview ended, the ad stayed unheard, and the next episode began where she expected. Later she moved the playhead back toward the end to catch a line she had missed. Earshot let her listen all the way through.
+
+“Better,” she said, slipping the phone back into her pocket.
