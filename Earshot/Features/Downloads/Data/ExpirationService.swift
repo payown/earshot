@@ -86,13 +86,35 @@ private enum ExpirationWork {
             PendingCloudQueueMutation.stageOrdering(eventDate: now, in: context)
         }
 
-        let rows = (try? context.fetch(FetchDescriptor<RecentlyExpired>())) ?? []
+        var rows = ((try? context.fetch(FetchDescriptor<RecentlyExpired>())) ?? [])
+            .filter { ExpirationLogic.shouldPurge(expiredAt: $0.expiredAt, now: now) }
         executedOnMain = executedOnMain || Thread.isMainThread
-        for row in rows where ExpirationLogic.shouldPurge(expiredAt: row.expiredAt, now: now) {
-            if let episode = row.episode {
-                if let url = episode.localAudioURL {
-                    try? FileManager.default.removeItem(at: url)
+        // Episode download values are transient and may not be hydrated on a
+        // refaulted model. Read the device-local rows once, before modifying
+        // anything, so candidate files and rollback use the durable state.
+        var localRows: [EpisodeLocalKey: [LocalEpisodeState]] = [:]
+        if !rows.isEmpty {
+            do {
+                localRows = Dictionary(grouping: try context.fetch(FetchDescriptor<LocalEpisodeState>())) {
+                    EpisodeLocalKey(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID)
                 }
+            } catch {
+                AppLog.data.error("Expiration download ownership fetch failed: \(error.localizedDescription, privacy: .public)")
+                rows = []
+            }
+        }
+        let downloadSnapshots = rows.compactMap(\.episode).map { episode in
+            let stored = LocalStateStore.key(for: episode).flatMap { localRows[$0]?.first }
+            return (episode: episode, status: stored?.downloadStatus ?? episode.downloadStatus,
+                    path: stored?.downloadPath ?? episode.downloadPath)
+        }
+        let purgedKeys = Set(downloadSnapshots.compactMap { LocalStateStore.key(for: $0.episode) })
+        let storedFiles = purgedKeys.flatMap { localRows[$0] ?? [] }.compactMap {
+            DownloadPaths.storedFileName($0.downloadPath)
+        }
+        let candidateFiles = Set(storedFiles + downloadSnapshots.compactMap { DownloadPaths.storedFileName($0.path) })
+        for row in rows {
+            if let episode = row.episode {
                 episode.downloadPath = nil
                 ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
             }
@@ -109,6 +131,12 @@ private enum ExpirationWork {
         }
         do {
             try saveOperation(context)
+            if !candidateFiles.isEmpty,
+               let retainedFiles = try? DownloadPaths.referencedFileNames(excluding: [], in: context) {
+                for name in candidateFiles where !retainedFiles.contains(name) {
+                    try? DownloadPaths.removeFile(named: name)
+                }
+            }
             return ExpirationMaintenanceReport(
                 expired: expired,
                 purged: purged,
@@ -116,6 +144,13 @@ private enum ExpirationWork {
             )
         } catch {
             context.rollback()
+            // Download state has a process-local projection as well as its
+            // persisted row. Restore that projection after rollback so the UI
+            // continues to show the saved download and its intact file.
+            for snapshot in downloadSnapshots {
+                snapshot.episode.downloadPath = snapshot.path
+                snapshot.episode.downloadStatus = snapshot.status
+            }
             AppLog.data.error("Expiration save failed: \(error.localizedDescription, privacy: .public)")
             return ExpirationMaintenanceReport(
                 expired: 0,

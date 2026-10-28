@@ -43,10 +43,16 @@ enum DownloadTaskKey {
     /// guid alone, preserving pre-#576 behavior. Synchronous; runs on whatever
     /// context the caller owns (main or a ModelActor's).
     static func episode(matching key: String, in context: ModelContext) -> Episode? {
+        try? findEpisode(matching: key, in: context)
+    }
+
+    /// A missing row and a failed fetch require different handling for a
+    /// durable download event: only a confirmed missing row is an orphan.
+    static func findEpisode(matching key: String, in context: ModelContext) throws -> Episode? {
         let identityKey = DownloadTransferKey.parse(key)?.identityKey ?? key
         let (feedURL, guid) = parse(identityKey)
         let byGUID = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == guid })
-        let candidates = (try? context.fetch(byGUID)) ?? []
+        let candidates = try context.fetch(byGUID)
         guard let feedURL else { return candidates.first }
         let canonicalFeedURL = FeedURLIdentity.canonical(feedURL)
         if let match = candidates.first(where: {
@@ -59,7 +65,7 @@ enum DownloadTaskKey {
             predicate: #Predicate { $0.guid == identityKey }
         )
         wholeKeyAsGUID.fetchLimit = 1
-        return (try? context.fetch(wholeKeyAsGUID))?.first
+        return try context.fetch(wholeKeyAsGUID).first
     }
 }
 
@@ -103,10 +109,7 @@ enum DownloadTransferKey {
     }
 }
 
-/// Pure filesystem-path logic for downloaded episode audio. Kept separate from
-/// ``DownloadManager`` so the destination naming is unit-testable and so the
-/// off-main ``DownloadSessionDelegate`` can compute the same destination the
-/// manager would (both key off the episode guid + source extension).
+/// Filesystem-path logic shared by downloaded-audio storage and its readers.
 enum DownloadPaths {
     private struct ExistingCandidate<Value> {
         let value: Value
@@ -138,13 +141,50 @@ enum DownloadPaths {
         try mutableDirectory.setResourceValues(values)
     }
 
-    /// The stable on-disk destination for an episode's audio inside `directory`,
-    /// derived from its `guid` and the source URL's extension. Pure given
-    /// `directory`, so it can be exercised in tests without touching Documents.
-    static func destination(inDirectory directory: URL, guid: String, sourceURL: URL) -> URL {
-        let ext = sourceURL.pathExtension.isEmpty ? "mp3" : sourceURL.pathExtension
-        let safeName = guid.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? UUID().uuidString
-        return directory.appendingPathComponent(safeName).appendingPathExtension(ext)
+    /// Each completed transfer owns a distinct file. Existing stored names are
+    /// still resolved normally, but new transfers never overwrite another
+    /// episode or a newer attempt that happens to share its GUID.
+    static func uniqueDestination(inDirectory directory: URL, sourceURL: URL, id: UUID = UUID()) -> URL {
+        let candidate = sourceURL.pathExtension.lowercased()
+        let safeExtension = !candidate.isEmpty && candidate.utf8.count <= 12
+            && candidate.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) }
+            ? candidate : "mp3"
+        return directory.appendingPathComponent(id.uuidString).appendingPathExtension(safeExtension)
+    }
+
+    /// Older releases could assign the same file to episodes from different
+    /// podcasts. Delete only when no other episode still references that name.
+    /// Failed ownership checks leave the file intact.
+    static func removeIfUnshared(
+        storedValue: String?, excluding owners: Set<EpisodeLocalKey>, in context: ModelContext
+    ) throws {
+        guard let name = storedFileName(storedValue) else { return }
+        guard try !referencedFileNames(excluding: owners, in: context).contains(name) else { return }
+        try removeFile(named: name)
+    }
+
+    static func referencedFileNames(excluding owners: Set<EpisodeLocalKey>, in context: ModelContext) throws -> Set<String> {
+        let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>(
+            predicate: #Predicate { $0.downloadPath != nil }
+        ))
+        return Set(rows.compactMap { row in
+            guard !owners.contains(EpisodeLocalKey(feedURL: row.podcastFeedURL, guid: row.episodeGUID)) else { return nil }
+            return storedFileName(row.downloadPath)
+        })
+    }
+
+    static func removeFile(named name: String) throws {
+        // Corrupt legacy values such as "/" or ".." must never target the
+        // downloads directory itself or a path outside it.
+        guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else { return }
+        let url = try downloadsDirectory().appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
+    }
+
+    static func removeIfUnshared(storedValue: String?, for episode: Episode, in context: ModelContext) throws {
+        let owners = Set(LocalStateStore.key(for: episode).map { [$0] } ?? [])
+        try removeIfUnshared(storedValue: storedValue, excluding: owners, in: context)
     }
 
     // MARK: Stored-value resolution (#575)
@@ -154,7 +194,7 @@ enum DownloadPaths {
     /// New writes store only the file name, but rows written before #575 hold an
     /// ABSOLUTE container path — and iOS relocates the app container on every
     /// app update, so those absolute paths all go stale. Because the name itself
-    /// is deterministic (guid-derived, see ``destination(inDirectory:guid:sourceURL:)``),
+    /// is retained when the container moves,
     /// the last path component of a legacy value is still the right file name.
     /// Pure, so it's unit-testable. Returns `nil` for nil/empty values.
     static func storedFileName(_ storedValue: String?) -> String? {
