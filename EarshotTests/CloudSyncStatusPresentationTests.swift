@@ -95,6 +95,17 @@ final class CloudSyncStatusPresentationTests: XCTestCase {
         XCTAssertNil(CloudSyncAnnouncement.eventFailure(previous: failed, current: failed))
     }
 
+    func testInFlightEventAnnouncesWhenSameEventFinishesWithFailure() {
+        let identifier = UUID()
+        let inFlight = event(identifier: identifier, endDate: nil, succeeded: false)
+        let failed = event(identifier: identifier, endDate: Date(), succeeded: false)
+        let nextFailure = event(endDate: Date(), succeeded: false)
+
+        XCTAssertNotNil(CloudSyncAnnouncement.eventFailure(previous: inFlight, current: failed))
+        XCTAssertNil(CloudSyncAnnouncement.eventFailure(previous: failed, current: failed))
+        XCTAssertNotNil(CloudSyncAnnouncement.eventFailure(previous: failed, current: nextFailure))
+    }
+
     func testEveryPersistentAvailabilityFailureHasOneTimeMessage() {
         let failures: [(CloudSyncAvailability, String)] = [
             (.signedOut, "iCloud is signed out. Your local library remains available."),
@@ -129,9 +140,9 @@ final class CloudSyncStatusPresentationTests: XCTestCase {
         )
     }
 
-    private func event(endDate: Date?, succeeded: Bool) -> CloudKitEventSnapshot {
+    private func event(identifier: UUID = UUID(), endDate: Date?, succeeded: Bool) -> CloudKitEventSnapshot {
         CloudKitEventSnapshot(
-            identifier: UUID(),
+            identifier: identifier,
             storeIdentifier: "store",
             kind: .import,
             startDate: Date(),

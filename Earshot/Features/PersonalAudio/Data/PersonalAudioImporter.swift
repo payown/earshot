@@ -34,20 +34,31 @@ enum PersonalAudioImportOutcome {
 /// confirmation for an exact duplicate, then call `addAnyway` or `cancel`.
 @MainActor
 final class PersonalAudioImporter {
+    struct MetadataLoader {
+        let load: @Sendable (URL, String) async throws -> PersonalAudioMetadata
+    }
+
     private let storage: PersonalAudioStorage
-    private let metadataExtractor: PersonalAudioMetadataExtractor
+    private let extractMetadata: @Sendable (URL, String) async throws -> PersonalAudioMetadata
     private let saveItem: (PersonalAudioItem, ModelContext) throws -> Void
 
     init(
         storage: PersonalAudioStorage = PersonalAudioStorage(),
         metadataExtractor: PersonalAudioMetadataExtractor = PersonalAudioMetadataExtractor(),
+        metadataLoader: MetadataLoader? = nil,
         saveItem: @escaping (PersonalAudioItem, ModelContext) throws -> Void = { item, context in
             context.insert(item)
             try context.save()
         }
     ) {
         self.storage = storage
-        self.metadataExtractor = metadataExtractor
+        if let metadataLoader {
+            self.extractMetadata = metadataLoader.load
+        } else {
+            self.extractMetadata = { url, filename in
+                try await metadataExtractor.extract(from: url, originalFilename: filename)
+            }
+        }
         self.saveItem = saveItem
     }
 
@@ -77,20 +88,20 @@ final class PersonalAudioImporter {
                 copyTask.cancel()
             }
             guard let stagedCopy else { return .failed(.processingFailure) }
+            try Task.checkCancellation()
             progress?(.inspecting)
 
             guard let copiedURL = storage.resolve(stagedCopy.stagingFilename) else {
                 throw PersonalAudioImportFailure.processingFailure
             }
-            let metadata = try await metadataExtractor.extract(
-                from: copiedURL,
-                originalFilename: fileURL.lastPathComponent
-            )
+            let metadata = try await extractMetadata(copiedURL, fileURL.lastPathComponent)
+            try Task.checkCancellation()
             if let artwork = metadata.artworkJPEG {
                 artworkStagingFilename = try await Task.detached(priority: .utility) {
                     try storage.writeStagedArtwork(artwork, id: id)
                 }.value
             }
+            try Task.checkCancellation()
             let prepared = PreparedPersonalAudioImport(
                 stagedCopy: stagedCopy,
                 originalFilename: fileURL.lastPathComponent,
@@ -104,6 +115,7 @@ final class PersonalAudioImporter {
             let duplicate = try context.fetch(FetchDescriptor<PersonalAudioItem>(
                 predicate: #Predicate { $0.contentHash == fingerprint }
             )).first
+            try Task.checkCancellation()
             if duplicate != nil {
                 return .duplicateNeedsConfirmation(prepared)
             }
@@ -112,6 +124,7 @@ final class PersonalAudioImporter {
             if let stagedCopy {
                 storage.discardStaged(stagedCopy, artworkFilename: artworkStagingFilename)
             }
+            if Task.isCancelled { return .failed(.cancelled) }
             return .failed(Self.failure(for: error))
         }
     }

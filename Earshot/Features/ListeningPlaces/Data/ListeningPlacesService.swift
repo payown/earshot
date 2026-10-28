@@ -73,9 +73,30 @@ actor ListeningPlacesSnapshotLoader {
         var signatures = previousSignatures
         var updatedAtByID = previousUpdatedAtByID
         var recordsByID: [String: ListeningPlaceRecord] = [:]
-        for record in previousRecords
-        where (record.positionMilliseconds ?? 0) == 0 && record.played == false {
-            recordsByID[record.id] = record
+        // Preserve historical records until a known local state replaces them.
+        // A missing record might be a reset made while sharing was off; its
+        // event time is unknown and must not be fabricated at export time.
+        for record in previousRecords where record.deleted != true {
+            if record.feed != nil || (!includeLabels && record.label != nil) {
+                let updatedAt = record.updatedAt
+                let label = includeLabels ? record.label : nil
+                let sanitized = ListeningPlaceRecord(
+                    id: record.id, kind: record.kind,
+                    positionMilliseconds: record.positionMilliseconds,
+                    durationMilliseconds: record.durationMilliseconds,
+                    played: record.played, updatedAt: updatedAt,
+                    label: label, feed: nil, deleted: record.deleted
+                )
+                recordsByID[record.id] = sanitized
+                updatedAtByID[record.id] = updatedAt
+                signatures[record.id] = ListeningPlaceRecordSignature(
+                    positionMilliseconds: record.positionMilliseconds ?? 0,
+                    durationMilliseconds: record.durationMilliseconds ?? 0,
+                    played: record.played ?? false, label: label
+                )
+            } else {
+                recordsByID[record.id] = record
+            }
         }
 
         var processedEpisodeIDs = Set<PersistentIdentifier>()
@@ -172,7 +193,9 @@ actor ListeningPlacesSnapshotLoader {
             label: label
         )
         let updatedAt: Date
-        if signatures[id] == candidate {
+        if let previous = signatures[id],
+           previous.positionMilliseconds == candidate.positionMilliseconds,
+           previous.played == candidate.played {
             updatedAt = updatedAtByID[id] ?? now
         } else if let previous = updatedAtByID[id] {
             updatedAt = max(now, previous.addingTimeInterval(1))
@@ -214,7 +237,13 @@ final class ListeningPlacesService {
     private(set) var folderName: String?
     private(set) var status: Status = .notConfigured
 
-    @ObservationIgnored private let transport = ListeningPlacesFileTransport()
+    @ObservationIgnored private let transport: ListeningPlacesFileTransport
+    @ObservationIgnored private let writeDeviceFile: @Sendable (Data, String, Data) async throws -> Void
+    @ObservationIgnored private let removeDeviceFile: @Sendable (Data, String) async throws -> Void
+    @ObservationIgnored private var inFlightFileWrite: Task<Void, Error>?
+    @ObservationIgnored private var inFlightFileWriteID: UUID?
+    @ObservationIgnored private var diskMayDifferFromKnownSnapshot = false
+    @ObservationIgnored private var removingDeviceFile = false
     @ObservationIgnored private var context: ModelContext?
     @ObservationIgnored private var store: AppSettingsStore?
     @ObservationIgnored private var bookmarkData: Data?
@@ -226,6 +255,21 @@ final class ListeningPlacesService {
     @ObservationIgnored private var pendingWriteTask: Task<Void, Never>?
     @ObservationIgnored private var pendingZeroSnapshots: [String: EpisodeUserStateSnapshot] = [:]
     @ObservationIgnored private var writeGeneration = 0
+    @ObservationIgnored private var hasRestoredExisting = false
+
+    init(
+        removeDeviceFile: (@Sendable (Data, String) async throws -> Void)? = nil,
+        writeDeviceFile: (@Sendable (Data, String, Data) async throws -> Void)? = nil
+    ) {
+        let transport = ListeningPlacesFileTransport()
+        self.transport = transport
+        self.removeDeviceFile = removeDeviceFile ?? { bookmark, deviceID in
+            try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+        }
+        self.writeDeviceFile = writeDeviceFile ?? { bookmark, deviceID, data in
+            try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: deviceID, data: data)
+        }
+    }
 
     func configure(context: ModelContext) {
         guard self.context == nil else { return }
@@ -278,6 +322,7 @@ final class ListeningPlacesService {
         signatures = [:]
         updatedAtByID = [:]
         lastWrittenRecords = nil
+        hasRestoredExisting = false
         pendingWriteTask?.cancel()
         pendingWriteTask = nil
         pendingZeroSnapshots = [:]
@@ -307,6 +352,7 @@ final class ListeningPlacesService {
             signatures = [:]
             updatedAtByID = [:]
             lastWrittenRecords = nil
+            hasRestoredExisting = false
             pendingZeroSnapshots = [:]
             await restoreExistingAndWrite()
         } catch {
@@ -321,10 +367,14 @@ final class ListeningPlacesService {
             return
         }
         enabled = value
-        if !value { writeGeneration += 1 }
+        // Both directions supersede a pending write or removal. In particular,
+        // enabling sharing while removal is in flight must preserve the folder.
+        writeGeneration += 1
         store?.setBool(value, for: SettingsKey.listeningPlacesEnabled)
         status = value ? .ready : .off
-        if value { await writeSnapshot() }
+        if value {
+            await writeSnapshot()
+        }
     }
 
     func setIncludeLabels(_ value: Bool) async {
@@ -341,15 +391,29 @@ final class ListeningPlacesService {
     }
 
     func stopSharingAndRemoveDeviceFile() async {
-        guard let bookmarkData else { return }
+        guard let bookmarkData, !removingDeviceFile else { return }
+        removingDeviceFile = true
+        defer { removingDeviceFile = false }
         writeGeneration += 1
         let generation = writeGeneration
         do {
             pendingWriteTask?.cancel()
             pendingWriteTask = nil
-            try await transport.removeDeviceFile(bookmarkData: bookmarkData, deviceID: deviceID)
+            await waitForInFlightFileWrites()
             guard generation == writeGeneration,
-                  self.bookmarkData == bookmarkData else { return }
+                  self.bookmarkData == bookmarkData else {
+                Task { @MainActor [weak self] in await self?.writeSnapshot() }
+                return
+            }
+            try await removeDeviceFile(bookmarkData, deviceID)
+            // The file may have disappeared even if a concurrent settings
+            // change superseded this operation; a replacement must be written.
+            diskMayDifferFromKnownSnapshot = true
+            guard generation == writeGeneration,
+                  self.bookmarkData == bookmarkData else {
+                Task { @MainActor [weak self] in await self?.writeSnapshot() }
+                return
+            }
             enabled = false
             includeLabels = false
             folderName = nil
@@ -361,6 +425,8 @@ final class ListeningPlacesService {
             signatures = [:]
             updatedAtByID = [:]
             lastWrittenRecords = nil
+            hasRestoredExisting = false
+            diskMayDifferFromKnownSnapshot = false
             pendingZeroSnapshots = [:]
             status = .notConfigured
         } catch {
@@ -399,6 +465,7 @@ final class ListeningPlacesService {
             guard generation == writeGeneration,
                   enabled,
                   self.bookmarkData == bookmarkData else { return }
+            hasRestoredExisting = true
             await writeSnapshot()
         } catch {
             guard generation == writeGeneration,
@@ -409,7 +476,16 @@ final class ListeningPlacesService {
     }
 
     private func writeSnapshot() async {
-        guard enabled, let context, let bookmarkData else { return }
+        guard enabled, !removingDeviceFile else { return }
+        // Wait for an older file write before deciding whether this snapshot
+        // matches the file. A stale write can still complete after its owner
+        // was superseded by a privacy setting change.
+        await waitForInFlightFileWrites()
+        guard enabled, !removingDeviceFile, let context, let bookmarkData else { return }
+        if !hasRestoredExisting {
+            await restoreExistingAndWrite()
+            return
+        }
         writeGeneration += 1
         let generation = writeGeneration
         let capturedPendingZeroSnapshots = pendingZeroSnapshots
@@ -432,26 +508,45 @@ final class ListeningPlacesService {
                 deviceID: capturedDeviceID,
                 appVersion: "earshot/\(AppInfo.version)"
             )
+            // Another waiter may have started a write while this snapshot was
+            // being prepared. Recheck before comparing or replacing the file.
+            await waitForInFlightFileWrites()
             try Task.checkCancellation()
             guard generation == writeGeneration, enabled, self.bookmarkData == bookmarkData else {
                 return
             }
             signatures = prepared.signatures
             updatedAtByID = prepared.updatedAtByID
-            guard let data = prepared.data else {
+            let data = try prepared.data ?? (diskMayDifferFromKnownSnapshot
+                ? ListeningPlacesFormat.encodedDeviceFile(
+                    deviceID: capturedDeviceID,
+                    appVersion: "earshot/\(AppInfo.version)",
+                    writtenAt: prepared.writtenAt,
+                    records: prepared.records
+                ) : nil)
+            guard let data else {
                 removeConsumedPendingZeros(capturedPendingZeroSnapshots)
                 status = .ready
                 return
             }
-            try await transport.writeDeviceFile(
-                bookmarkData: bookmarkData,
-                deviceID: capturedDeviceID,
-                data: data
-            )
+            diskMayDifferFromKnownSnapshot = true
+            let writeID = UUID()
+            let writer = writeDeviceFile
+            let write = Task { try await writer(bookmarkData, capturedDeviceID, data) }
+            inFlightFileWrite = write
+            inFlightFileWriteID = writeID
+            defer {
+                if inFlightFileWriteID == writeID {
+                    inFlightFileWrite = nil
+                    inFlightFileWriteID = nil
+                }
+            }
+            try await write.value
             guard generation == writeGeneration, enabled, self.bookmarkData == bookmarkData else {
                 return
             }
             lastWrittenRecords = prepared.records
+            diskMayDifferFromKnownSnapshot = false
             removeConsumedPendingZeros(capturedPendingZeroSnapshots)
             status = .lastWritten(prepared.writtenAt)
         } catch {
@@ -472,6 +567,17 @@ final class ListeningPlacesService {
         AppLog.data.error(
             "Listening Places write failed [\(cocoaError.domain, privacy: .public) \(cocoaError.code, privacy: .public)]: \(error.localizedDescription, privacy: .public)"
         )
+    }
+
+    private func waitForInFlightFileWrites() async {
+        while let write = inFlightFileWrite {
+            let writeID = inFlightFileWriteID
+            _ = try? await write.value
+            if inFlightFileWriteID == writeID {
+                inFlightFileWrite = nil
+                inFlightFileWriteID = nil
+            }
+        }
     }
 
     private func removeConsumedPendingZeros(
@@ -504,4 +610,8 @@ final class ListeningPlacesService {
     private static func snapshotKey(_ snapshot: EpisodeUserStateSnapshot) -> String {
         snapshot.feedURL + "\u{0}" + snapshot.guid
     }
+
+#if DEBUG
+    var isRemovingDeviceFileForTesting: Bool { removingDeviceFile }
+#endif
 }
