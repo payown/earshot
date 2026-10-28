@@ -45,23 +45,35 @@ enum OPMLFileImporter {
         context: ModelContext,
         progress: OPMLImportProgress? = nil,
         downloader: EpisodeDownloading? = nil,
-        isEntitled: Bool
+        isEntitled: Bool,
+        importOperation: (@MainActor (String) async -> OPMLImportOutcome)? = nil
     ) async -> ContinuationResult {
-        guard let staged = try? await coordinator.beginContinuation(),
-              let opml = String(data: staged.data, encoding: .utf8) else {
+        guard let staged = try? await coordinator.beginContinuation() else {
             await announceSettled("Couldn't read the saved OPML file")
             return .unreadable
         }
         defer { progress?.finish() }
-        let outcome = await OPMLImportService(
-            context: context,
-            downloader: downloader,
-            isEntitled: isEntitled
-        ).importOPML(
-            opml,
-            onResolveTotal: { progress?.start(total: $0) },
-            onProgress: { progress?.advance(completed: $0, total: $1, title: $2) }
-        )
+        guard let opml = String(data: staged.data, encoding: .utf8) else {
+            guard await recordPending(.zero, reason: .failed, coordinator: coordinator) else {
+                return .storageFailure
+            }
+            await announceSettled("Couldn't read the saved OPML file")
+            return .unreadable
+        }
+        let outcome: OPMLImportOutcome
+        if let importOperation {
+            outcome = await importOperation(opml)
+        } else {
+            outcome = await OPMLImportService(
+                context: context,
+                downloader: downloader,
+                isEntitled: isEntitled
+            ).importOPML(
+                opml,
+                onResolveTotal: { progress?.start(total: $0) },
+                onProgress: { progress?.advance(completed: $0, total: $1, title: $2) }
+            )
+        }
         let counts = OPMLImportResultCounts(
             added: outcome.addedCount,
             alreadyPresent: outcome.alreadyPresentCount,
@@ -69,6 +81,13 @@ enum OPMLFileImporter {
             skippedForCap: outcome.skippedForCapCount
         )
         let summary = resultSummary(counts)
+        if outcome.invalidDocument {
+            guard await recordPending(counts, reason: .failed, coordinator: coordinator) else {
+                return .storageFailure
+            }
+            await announceSettled(summary)
+            return .pending(counts, .failed)
+        }
         if outcome.cancelled {
             guard await recordPending(counts, reason: .cancelled, coordinator: coordinator) else {
                 return .storageFailure
@@ -90,6 +109,14 @@ enum OPMLFileImporter {
             }
             let failed = String(localized: "^[\(outcome.failedCount) podcast](inflect: true)")
             await announceSettled("\(summary) \(failed) could not be imported. You can retry in Settings, Data.")
+            return .pending(counts, .failed)
+        }
+        if outcome.folderPersistenceFailed || outcome.unresolvedCount > 0 {
+            guard await recordPending(counts, reason: .failed, coordinator: coordinator) else {
+                return .storageFailure
+            }
+            // Keep the staged document available for another attempt.
+            await announceSettled(summary)
             return .pending(counts, .failed)
         }
         do {

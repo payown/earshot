@@ -13,18 +13,28 @@ struct OPMLImportOutcome {
     let skippedForCapCount: Int
     let failedCount: Int
     let cancelled: Bool
+    /// Podcast subscriptions may already be durable even if folder assignments failed.
+    let folderPersistenceFailed: Bool
+    let invalidDocument: Bool
+    let unresolvedCount: Int
 
     init(
         importedCount: Int,
         skippedForCapCount: Int,
         failedCount: Int = 0,
-        cancelled: Bool = false
+        cancelled: Bool = false,
+        folderPersistenceFailed: Bool = false,
+        invalidDocument: Bool = false,
+        unresolvedCount: Int = 0
     ) {
         self.addedCount = importedCount
         self.alreadyPresentCount = 0
         self.skippedForCapCount = skippedForCapCount
         self.failedCount = failedCount
         self.cancelled = cancelled
+        self.folderPersistenceFailed = folderPersistenceFailed
+        self.invalidDocument = invalidDocument
+        self.unresolvedCount = unresolvedCount
     }
 
     init(
@@ -32,13 +42,19 @@ struct OPMLImportOutcome {
         alreadyPresentCount: Int,
         skippedForCapCount: Int,
         failedCount: Int,
-        cancelled: Bool
+        cancelled: Bool,
+        folderPersistenceFailed: Bool = false,
+        invalidDocument: Bool = false,
+        unresolvedCount: Int = 0
     ) {
         self.addedCount = addedCount
         self.alreadyPresentCount = alreadyPresentCount
         self.skippedForCapCount = skippedForCapCount
         self.failedCount = failedCount
         self.cancelled = cancelled
+        self.folderPersistenceFailed = folderPersistenceFailed
+        self.invalidDocument = invalidDocument
+        self.unresolvedCount = unresolvedCount
     }
 }
 
@@ -49,10 +65,18 @@ struct OPMLImportOutcome {
 /// because of the free-tier podcast cap (#635).
 @MainActor
 final class OPMLImportService {
+    enum FolderPersistenceOperation: CaseIterable, Equatable {
+        case fetchFolders, fetchMemberships, save
+    }
     private let context: ModelContext
     private let subscriptions: SubscriptionRepository
+    private let beforeFolderOperation: ((FolderPersistenceOperation) throws -> Void)?
     private var folderCache: [String: PodcastFolder] = [:]
-    private var membershipCache: Set<String> = []
+    private struct MembershipKey: Hashable {
+        let folderID: PersistentIdentifier
+        let feedURL: String
+    }
+    private var membershipCache: Set<MembershipKey> = []
 
     /// `downloader` is threaded through to the underlying ``SubscriptionRepository``
     /// so the end-of-import auto-download pass below (`autoDownloadRecent`) actually
@@ -63,14 +87,20 @@ final class OPMLImportService {
     init(context: ModelContext, downloader: EpisodeDownloading? = nil, isEntitled: Bool? = nil) {
         self.context = context
         self.subscriptions = SubscriptionRepository(context: context, downloader: downloader, isEntitled: isEntitled)
+        self.beforeFolderOperation = nil
     }
 
     /// Test seam: inject a pre-built ``SubscriptionRepository`` (e.g. one with an
     /// `onMerge` spy) so tests can assert the bulk path reconciles the main context
     /// ONCE per import. The `context` is still used for folder/membership writes.
-    init(context: ModelContext, subscriptions: SubscriptionRepository) {
+    init(
+        context: ModelContext,
+        subscriptions: SubscriptionRepository,
+        beforeFolderOperation: ((FolderPersistenceOperation) throws -> Void)? = nil
+    ) {
         self.context = context
         self.subscriptions = subscriptions
+        self.beforeFolderOperation = beforeFolderOperation
     }
 
     /// Imports an OPML document. Subscribes to ALL feeds in one bulk pass on the
@@ -112,25 +142,17 @@ final class OPMLImportService {
             PerformanceSignposts.signposter.endInterval("WholeOPMLImport", wholeImport)
         }
         let parseInterval = PerformanceSignposts.signposter.beginInterval("OPMLParse")
-        let groups = await Task.detached(priority: .userInitiated) {
-            OPMLDocument.groups(from: opml)
+        let parsedGroups = await Task.detached(priority: .userInitiated) {
+            OPMLDocument.validatedGroups(from: opml)
         }.value
         PerformanceSignposts.signposter.endInterval(
             "OPMLParse",
             parseInterval,
-            "groupCount=\(groups.count)"
+            "groupCount=\(parsedGroups?.count ?? 0)"
         )
-        folderCache = Dictionary(
-            uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<PodcastFolder>())) ?? [])
-                .map { ($0.name, $0) }
-        )
-        membershipCache = Set(
-            ((try? context.fetch(FetchDescriptor<FolderMembership>())) ?? []).compactMap {
-                guard let folder = $0.folder, let podcast = $0.podcast else { return nil }
-                return membershipKey(folder: folder.name, feedURL: podcast.feedURL)
-            }
-        )
-
+        guard let groups = parsedGroups else {
+            return OPMLImportOutcome(importedCount: 0, skippedForCapCount: 0, invalidDocument: true)
+        }
         // Flatten to an ordered list of feed URLs and a trimmed-URL -> folder-name
         // map. A URL keeps its FIRST folder if it somehow appears twice (mirrors the
         // old loop, which created the membership on first encounter).
@@ -159,18 +181,17 @@ final class OPMLImportService {
         // trim the requested URLs before the pass even starts.
         let result = await subscriptions.subscribeAll(feedURLs: orderedURLs, onProgress: onProgress)
 
+        var folderPersistenceFailed = false
         let folderInterval = PerformanceSignposts.signposter.beginInterval(
             "OPMLFolderPass",
             "outcomeCount=\(result.outcomes.count)"
         )
-        // Create folders + memberships on the main context from the resolved
-        // main-context podcasts. findOrCreateFolder/addMembership are unchanged.
-        for outcome in result.outcomes {
-            guard let folderName = folderForURL[outcome.feedURL] else { continue }
-            let folder = findOrCreateFolder(named: folderName)
-            addMembership(outcome.podcast, to: folder)
+        do {
+            try applyFolderAssignments(result.outcomes, folderForURL: folderForURL)
+        } catch {
+            folderPersistenceFailed = true
+            AppLog.subscriptions.error("OPML folder assignments failed: \(error.localizedDescription, privacy: .public)")
         }
-        save()
         PerformanceSignposts.signposter.endInterval("OPMLFolderPass", folderInterval)
 
         // Auto-download once at the end (no-op unless a downloader was injected,
@@ -182,34 +203,82 @@ final class OPMLImportService {
             alreadyPresentCount: result.outcomes.count { $0.alreadySubscribed },
             skippedForCapCount: result.skippedForCap,
             failedCount: result.failed,
-            cancelled: result.cancelled
+            cancelled: result.cancelled,
+            folderPersistenceFailed: folderPersistenceFailed,
+            unresolvedCount: result.unresolved
         )
     }
 
-    private func findOrCreateFolder(named name: String) -> PodcastFolder {
+    private func applyFolderAssignments(
+        _ outcomes: [SubscriptionRepository.BulkSubscribeOutcome],
+        folderForURL: [String: String]
+    ) throws {
+        guard outcomes.contains(where: { folderForURL[FeedURLIdentity.canonical($0.feedURL)] != nil }) else { return }
+        // Users can edit folders while feeds are being fetched. Build these
+        // caches only after that suspension, immediately before the folder pass.
+        folderCache = [:]
+        try beforeFolderOperation?(.fetchFolders)
+        let folders = try context.fetch(FetchDescriptor<PodcastFolder>()).sorted {
+            if ($0.parent == nil) != ($1.parent == nil) { return $0.parent == nil }
+            if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+            return String(describing: $0.persistentModelID) < String(describing: $1.persistentModelID)
+        }
+        for folder in folders where folderCache[folder.name] == nil {
+            folderCache[folder.name] = folder
+        }
+        try beforeFolderOperation?(.fetchMemberships)
+        membershipCache = Set(
+            try context.fetch(FetchDescriptor<FolderMembership>()).compactMap {
+                guard let folder = $0.folder, let podcast = $0.podcast else { return nil }
+                return membershipKey(folder: folder, feedURL: podcast.feedURL)
+            }
+        )
+
+        var insertedFolders: [PodcastFolder] = []
+        var insertedMemberships: [FolderMembership] = []
+        // No suspension or save occurs during this pass, so temporary identifiers
+        // remain stable while the caches are used. The next import rebuilds them.
+        for outcome in outcomes {
+            guard let folderName = folderForURL[FeedURLIdentity.canonical(outcome.feedURL)] else { continue }
+            let folder = findOrCreateFolder(named: folderName, inserted: &insertedFolders)
+            addMembership(outcome.podcast, to: folder, inserted: &insertedMemberships)
+        }
+        do {
+            if context.hasChanges {
+                try beforeFolderOperation?(.save)
+                try context.save()
+            }
+        } catch {
+            // Remove only objects created by this pass; never roll back unrelated
+            // user edits or already committed background subscriptions.
+            for membership in insertedMemberships { context.delete(membership) }
+            for folder in insertedFolders { context.delete(folder) }
+            folderCache = [:]
+            membershipCache = []
+            throw error
+        }
+    }
+
+    private func findOrCreateFolder(named name: String, inserted: inout [PodcastFolder]) -> PodcastFolder {
         if let existing = folderCache[name] { return existing }
         let folder = PodcastFolder(name: name)
         context.insert(folder)
+        inserted.append(folder)
         folderCache[name] = folder
         return folder
     }
 
-    private func addMembership(_ podcast: Podcast, to folder: PodcastFolder) {
-        let key = membershipKey(folder: folder.name, feedURL: podcast.feedURL)
+    private func addMembership(_ podcast: Podcast, to folder: PodcastFolder, inserted: inout [FolderMembership]) {
+        let key = membershipKey(folder: folder, feedURL: podcast.feedURL)
         guard membershipCache.insert(key).inserted else { return }
-        context.insert(FolderMembership(folder: folder, podcast: podcast))
+        let membership = FolderMembership(folder: folder, podcast: podcast)
+        context.insert(membership)
+        inserted.append(membership)
     }
 
-    private func membershipKey(folder: String, feedURL: String) -> String {
-        "\(folder)\u{1F}\(FeedURLIdentity.canonical(feedURL))"
+    private func membershipKey(folder: PodcastFolder, feedURL: String) -> MembershipKey {
+        MembershipKey(folderID: folder.persistentModelID, feedURL: FeedURLIdentity.canonical(feedURL))
     }
 
-    private func save() {
-        guard context.hasChanges else { return }
-        do {
-            try context.save()
-        } catch {
-            AppLog.subscriptions.error("OPML import save failed: \(error.localizedDescription, privacy: .public)")
-        }
-    }
 }

@@ -229,6 +229,52 @@ final class FeedRefreshStatusTests: XCTestCase {
         )
     }
 
+    func testSubscriptionLoadFailureRetainsPriorActionableFailuresAcrossRestart() {
+        let context = TestStore.freshContext()
+        let monitor = FeedRefreshStatusMonitor()
+        monitor.configure(context: context)
+        let failure = FeedRefreshFailure(feedURL: "https://example.com/feed", podcastTitle: "Show", reason: "Failed")
+        monitor.start(trigger: .backgroundTask, total: 1)
+        monitor.finish(SubscriptionRefreshReport(
+            notifications: [], attempted: 1, total: 1, succeeded: 0, failed: 1,
+            cancelled: false, intendedInsertions: 0, durableInsertions: 0, failures: [failure]
+        ))
+        monitor.start(trigger: .backgroundTask, total: 1)
+        let loadFailure = SubscriptionRefreshReport(
+            notifications: [], attempted: 0, total: 0, succeeded: 0, failed: 0,
+            cancelled: false, intendedInsertions: 0, durableInsertions: 0, loadFailed: true
+        )
+        monitor.finish(loadFailure)
+        let explanation = "Earshot couldn't load your followed podcasts. No feeds were checked. Try refreshing again."
+        XCTAssertEqual(loadFailure.announcement, explanation)
+        XCTAssertEqual(FeedRefreshInlineStatus(snapshot: monitor.snapshot).spokenText, explanation)
+        XCTAssertEqual(FeedRefreshStatusPresentation.summary(monitor.snapshot) { _ in "today" }, explanation)
+        XCTAssertEqual(monitor.snapshot.state, .failed)
+        XCTAssertEqual(monitor.snapshot.failureDetails, [failure])
+        XCTAssertTrue(monitor.snapshot.loadFailed)
+        let restored = FeedRefreshStatusMonitor()
+        restored.configure(context: context)
+        XCTAssertEqual(restored.snapshot.failureDetails, [failure])
+        XCTAssertTrue(restored.snapshot.loadFailed)
+        restored.recordRetry(.success(RefreshOutcome(added: 0, wasBackfill: false, newestNewEpisodeGUID: nil)), failure: failure)
+        XCTAssertTrue(restored.snapshot.failureDetails.isEmpty)
+        XCTAssertEqual(restored.snapshot.state, .failed, "A single-feed retry cannot make an unstarted library refresh complete")
+        restored.start(trigger: .backgroundTask, total: 0)
+        let emptyLibrary = SubscriptionRefreshReport(
+            notifications: [], attempted: 0, total: 0, succeeded: 0, failed: 0,
+            cancelled: false, intendedInsertions: 0, durableInsertions: 0
+        )
+        restored.finish(emptyLibrary)
+        XCTAssertEqual(emptyLibrary.announcement, "Library refreshed")
+        XCTAssertEqual(restored.snapshot.state, .completed)
+        XCTAssertFalse(restored.snapshot.loadFailed)
+        XCTAssertFalse(FeedRefreshInlineStatus.shouldShow(restored.snapshot))
+        XCTAssertEqual(
+            FeedRefreshStatusPresentation.summary(restored.snapshot) { _ in "today" },
+            "Last automatic refresh completed today. Checked 0 of 0 podcasts. Found 0 new episodes. 0 feeds were unchanged."
+        )
+    }
+
     func testCheckpointStaysLiveWithoutAddingASecondSwiftDataSave() {
         let context = TestStore.freshContext()
         let monitor = FeedRefreshStatusMonitor()

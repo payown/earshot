@@ -91,6 +91,152 @@ final class FeedRefreshActorTests: XCTestCase {
     }
 
 
+    func testRefreshDiagnosticErrorDetailsNeverIncludeDomainsDescriptionsOrTokens() {
+        let secret = "subscriber-secret-token"
+        let sensitiveURL = "https://private.example/feed?token=\(secret)"
+        let nested = NSError(domain: NSURLErrorDomain, code: -1001,
+                             userInfo: [NSLocalizedDescriptionKey: sensitiveURL])
+        let error = NSError(domain: "custom-\(secret)", code: 17, userInfo: [
+            NSLocalizedDescriptionKey: "failure \(secret) at \(sensitiveURL)",
+            NSUnderlyingErrorKey: nested,
+            "NSDetailedErrors": [NSError(domain: "detail-\(secret)", code: 42,
+                                           userInfo: [NSLocalizedDescriptionKey: sensitiveURL])]
+        ])
+        let message = FeedRefreshActor.diagnosticErrorDetailForTesting(error)
+        XCTAssertEqual(message, "other(17) | underlying=url(-1001) | detail=other(42)")
+        XCTAssertFalse(message.contains(secret))
+        XCTAssertFalse(message.contains(sensitiveURL))
+        XCTAssertEqual(FeedRefreshActor.diagnosticErrorDetailForTesting(FeedError.network(secret)), "feed-network")
+        XCTAssertEqual(FeedRefreshActor.diagnosticErrorDetailForTesting(HTTPError.transport(secret)), "http-transport")
+    }
+
+    func testProcessingFailureDiscardsEveryPendingFeedBeforeLaterCheckpoint() async throws {
+        let container = cleanContainer()
+        let context = ModelContext(container)
+        let names = ["a-unchanged", "b-modified", "c-fails", "d-later"]
+        for name in names {
+            let podcast = Podcast(feedURL: "https://example.com/\(name)", title: name, lastSeenPubDate: d1)
+            let old = Episode(guid: "old", title: "Old", audioURL: "https://example.com/old.mp3", pubDate: d1)
+            old.podcast = podcast
+            context.insert(podcast)
+            context.insert(old)
+        }
+        try context.save()
+        let actor = FeedRefreshActor(modelContainer: container)
+        await actor.forceFeedProcessingFailureForTesting(feedURL: "https://example.com/c-fails")
+        let checkpoints = FeedCheckpointBox()
+        let report = await actor.refreshAllReport(
+            feed: MixedNotModifiedFeed(modified: parsedFeed([parsedEpisode("old", d1)])),
+            autoQueueEnabled: false, trigger: .foreground, isCancelled: { false },
+            onProgress: { _, _ in }, onCheckpoint: { values in checkpoints.values.append(contentsOf: values) }
+        )
+
+        XCTAssertEqual(report.failed, 3)
+        XCTAssertEqual(Set(report.failures.map(\.podcastTitle)), Set(names.prefix(3)))
+        XCTAssertEqual(report.results.map(\.podcastTitle), ["d-later"])
+        XCTAssertEqual(checkpoints.values.map(\.podcastTitle), ["d-later"])
+        let localRows = try ModelContext(container).fetch(FetchDescriptor<LocalPodcastState>())
+        XCTAssertEqual(localRows.map(\.feedURL), ["https://example.com/d-later"])
+        let hasPendingChanges = await actor.hasPendingChangesForTesting()
+        XCTAssertFalse(hasPendingChanges)
+    }
+
+    func testIdentityRepairCheckpointsEarlierPendingFeedsBeforeLaterRollback() async throws {
+        let container = cleanContainer()
+        let context = ModelContext(container)
+        for name in ["a-unchanged", "b-modified", "c-fails"] {
+            let podcast = Podcast(feedURL: "https://example.com/\(name)", title: name, lastSeenPubDate: d1)
+            context.insert(podcast)
+            if name == "b-modified" {
+                for _ in 0..<2 {
+                    let duplicate = Episode(guid: "new", title: "Duplicate", audioURL: "https://example.com/audio", pubDate: d2)
+                    duplicate.podcast = podcast
+                    context.insert(duplicate)
+                }
+            }
+        }
+        try context.save()
+        let actor = FeedRefreshActor(modelContainer: container)
+        await actor.forceFeedProcessingFailureForTesting(feedURL: "https://example.com/c-fails")
+        let checkpoints = FeedCheckpointBox()
+        let report = await actor.refreshAllReport(
+            feed: MixedNotModifiedFeed(modified: parsedFeed([parsedEpisode("new", d2)])),
+            autoQueueEnabled: false, trigger: .foreground, isCancelled: { false },
+            onProgress: { _, _ in }, onCheckpoint: { values in checkpoints.values.append(contentsOf: values) }
+        )
+        XCTAssertEqual(report.results.map(\.podcastTitle), ["a-unchanged"])
+        XCTAssertEqual(checkpoints.values.map(\.podcastTitle), ["a-unchanged"])
+        XCTAssertEqual(Set(report.failures.map(\.podcastTitle)), ["b-modified", "c-fails"])
+        let localRows = try ModelContext(container).fetch(FetchDescriptor<LocalPodcastState>())
+        XCTAssertEqual(localRows.map(\.feedURL), ["https://example.com/a-unchanged"])
+        let episodes = try ModelContext(container).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(episodes.filter { $0.guid == "new" }.count, 1)
+    }
+
+    func testFailedIdentityRepairCheckpointDoesNotPublishOrCommitAndCanRetry() async throws {
+        let container = cleanContainer()
+        let context = ModelContext(container)
+        for name in ["a-unchanged", "b-modified"] {
+            let podcast = Podcast(feedURL: "https://example.com/\(name)", title: name, lastSeenPubDate: d1)
+            context.insert(podcast)
+            if name == "b-modified" {
+                for _ in 0..<2 {
+                    let duplicate = Episode(guid: "new", title: "Duplicate", audioURL: "https://example.com/audio", pubDate: d2)
+                    duplicate.podcast = podcast
+                    context.insert(duplicate)
+                }
+            }
+        }
+        try context.save()
+        let actor = FeedRefreshActor(modelContainer: container)
+        await actor.forceNextSaveFailureForTesting()
+        let feed = MixedNotModifiedFeed(modified: parsedFeed([parsedEpisode("new", d2)]))
+        let checkpoints = FeedCheckpointBox()
+        let failed = await actor.refreshAllReport(
+            feed: feed, autoQueueEnabled: false, trigger: .foreground, isCancelled: { false },
+            onProgress: { _, _ in }, onCheckpoint: { values in checkpoints.values.append(contentsOf: values) }
+        )
+        XCTAssertTrue(failed.results.isEmpty)
+        XCTAssertEqual(failed.failed, 2)
+        XCTAssertEqual(failed.failures.count, 2)
+        XCTAssertEqual(Set(failed.failures.map(\.podcastTitle)), ["a-unchanged", "b-modified"])
+        XCTAssertTrue(checkpoints.values.isEmpty)
+        let afterFailure = ModelContext(container)
+        XCTAssertTrue(try afterFailure.fetch(FetchDescriptor<LocalPodcastState>()).isEmpty)
+        XCTAssertEqual(try afterFailure.fetch(FetchDescriptor<Episode>()).filter { $0.guid == "new" }.count, 2)
+        let hasPendingChanges = await actor.hasPendingChangesForTesting()
+        XCTAssertFalse(hasPendingChanges)
+
+        let retried = await actor.refreshAllReport(
+            feed: feed, autoQueueEnabled: false, trigger: .foreground, isCancelled: { false },
+            onProgress: { _, _ in }, onCheckpoint: { values in checkpoints.values.append(contentsOf: values) }
+        )
+        XCTAssertEqual(retried.failed, 0)
+        XCTAssertEqual(retried.results.count, 2)
+        XCTAssertEqual(checkpoints.values.count, 2)
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<Episode>()).filter { $0.guid == "new" }.count, 1)
+    }
+
+    func testUnchangedFeedsAreAllReportedWhenBatchSaveFails() async throws {
+        let container = cleanContainer()
+        let context = ModelContext(container)
+        for name in ["first", "second", "third"] {
+            context.insert(Podcast(feedURL: "https://example.com/\(name)", title: name, lastSeenPubDate: d1))
+        }
+        try context.save()
+        let actor = FeedRefreshActor(modelContainer: container)
+        await actor.forceNextSaveFailureForTesting()
+        let report = await actor.refreshAllReport(
+            feed: NotModifiedFeed(validators: FeedHTTPValidators(etag: nil, lastModified: nil, representationURL: nil)),
+            autoQueueEnabled: false, trigger: .foreground, isCancelled: { false }, onProgress: { _, _ in }
+        )
+        XCTAssertEqual(report.failed, 3)
+        XCTAssertTrue(report.results.isEmpty)
+        XCTAssertEqual(Set(report.failures.map(\.podcastTitle)), ["first", "second", "third"])
+        XCTAssertTrue(report.failures.allSatisfy { $0.reason == "Could not save refresh changes." })
+        XCTAssertTrue(try ModelContext(container).fetch(FetchDescriptor<LocalPodcastState>()).isEmpty)
+    }
+
     func testSwiftDataContextStateAfterRealSaveDisabledFailure() throws {
         let schema = Schema([SaveFailureProbe.self])
         let directory = FileManager.default.temporaryDirectory
@@ -2205,6 +2351,20 @@ private actor RollingWindowProbeFeed: FeedFetching {
         let continuations = blocked
         blocked.removeAll()
         continuations.forEach { $0.resume() }
+    }
+}
+
+@MainActor
+private final class FeedCheckpointBox {
+    var values: [FeedRefreshActor.RefreshProgress] = []
+}
+
+private struct MixedNotModifiedFeed: FeedFetching {
+    let modified: ParsedFeed
+    func fetch(_ urlString: String) async throws -> ParsedFeed { modified }
+    func refresh(_ request: FeedRefreshRequest) async throws -> FeedRefreshFetchResult {
+        if request.urlString.contains("b-modified") { return .modified(modified, validators: nil) }
+        return .notModified(validators: nil)
     }
 }
 

@@ -149,6 +149,22 @@ final class ApplePodcastCategoryTests: XCTestCase {
         XCTAssertEqual(networkOutcome, .failure)
     }
 
+    func testCategoryDiagnosticOmitsTransportErrorText() async {
+        let capture = NetworkLogCapture()
+        let error = URLError(.timedOut, userInfo: [NSLocalizedDescriptionKey: "category-secret https://private.example/?token=secret"])
+        MockURLProtocol.setOutcomes([.failure(error)])
+        let service = ApplePodcastCategoryService(session: MockURLProtocol.makeSession(),
+                                                  cache: ApplePodcastCategoryCache(),
+                                                  log: { _, message in capture.append(message) })
+        let outcome = await service.topPodcasts(categoryID: "1483", storefront: "us")
+        XCTAssertEqual(outcome, .failure)
+        XCTAssertEqual(capture.messages, ["Apple podcast category load failed for genre 1483: URL error -1001"])
+        let log = capture.messages.joined(separator: " ")
+        for secret in ["category-secret", "private.example", "token=secret"] {
+            XCTAssertFalse(log.contains(secret))
+        }
+    }
+
     func testInvalidCategoryShortCircuitsWithoutNetwork() async {
         let outcome = await ApplePodcastCategoryService(
             session: MockURLProtocol.makeSession(), cache: ApplePodcastCategoryCache()

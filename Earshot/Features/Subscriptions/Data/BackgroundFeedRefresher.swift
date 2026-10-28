@@ -73,9 +73,10 @@ enum BackgroundFeedRefresher {
     /// quarantine move.
     @MainActor
     static func cancelAndWait() async {
-        guard let task = activeRefreshTask else { return }
+        guard let task = activeRefreshTask, let id = activeRefreshID else { return }
         task.cancel()
         _ = await task.value
+        finish(id: id)
     }
 
     // MARK: Scheduling
@@ -116,7 +117,10 @@ enum BackgroundFeedRefresher {
         force: Bool = false,
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         notifier: NotificationService = NotificationService(),
-        feed: FeedFetching = FeedService()
+        feed: FeedFetching = FeedService(),
+        refreshActorFactory: @escaping @Sendable (ModelContainer) async -> FeedRefreshActor = {
+            await FeedRefreshActor.makeBackground(modelContainer: $0)
+        }
     ) async -> Bool {
         guard activeRefreshTask == nil else {
             AppLog.networking.info("Feed refresh already in progress; skipping overlap")
@@ -131,11 +135,18 @@ enum BackgroundFeedRefresher {
                 force: force,
                 isCancelled: isCancelled,
                 notifier: notifier,
-                feed: feed
+                feed: feed,
+                refreshActorFactory: refreshActorFactory
             ))
         }
         begin(task: task, id: refreshID, trigger: trigger)
-        let result = await task.value
+        // This call created the task, so its caller owns cancellation. An
+        // overlapping caller returns above and cannot cancel the active task.
+        let result = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
         finish(id: refreshID)
         guard case .automatic(let didRun) = result else { return false }
         return didRun
@@ -161,18 +172,21 @@ enum BackgroundFeedRefresher {
         let refreshID = UUID()
         FeedRefreshStatusMonitor.shared.start(trigger: trigger, total: total)
         let task = Task { @MainActor in
-            ActiveRefreshResult.userInitiated(await operation())
+            let report = await operation()
+            // Finalize status before the owned task completes so cancelAndWait
+            // cannot release the gate ahead of an old refresh's final update.
+            FeedRefreshStatusMonitor.shared.finish(report)
+            RefreshCompletionHaptics.playIfNeeded(
+                trigger: trigger,
+                succeeded: report.completion == .full,
+                enabled: hapticFeedbackEnabled
+            )
+            return ActiveRefreshResult.userInitiated(report)
         }
         begin(task: task, id: refreshID, trigger: trigger)
         let result = await task.value
         finish(id: refreshID)
         guard case .userInitiated(let report) = result else { return nil }
-        FeedRefreshStatusMonitor.shared.finish(report)
-        RefreshCompletionHaptics.playIfNeeded(
-            trigger: trigger,
-            succeeded: report.completion == .full,
-            enabled: hapticFeedbackEnabled
-        )
         return report
     }
 
@@ -241,7 +255,8 @@ enum BackgroundFeedRefresher {
         force: Bool,
         isCancelled: @escaping @Sendable () -> Bool,
         notifier: NotificationService,
-        feed: FeedFetching
+        feed: FeedFetching,
+        refreshActorFactory: @escaping @Sendable (ModelContainer) async -> FeedRefreshActor
     ) async -> Bool {
 
         let context = container.mainContext
@@ -256,7 +271,7 @@ enum BackgroundFeedRefresher {
             return false
         }
 
-        guard !isCancelled() else {
+        guard !Task.isCancelled, !isCancelled() else {
             AppLog.networking.info("Background feed refresh cancelled before start")
             return false
         }
@@ -273,7 +288,8 @@ enum BackgroundFeedRefresher {
             context: context,
             feed: feed,
             downloader: downloads,
-            queue: queue
+            queue: queue,
+            refreshActorFactory: refreshActorFactory
         )
 
         // refreshAll already logs+continues past individual feed failures and
@@ -283,7 +299,7 @@ enum BackgroundFeedRefresher {
         // genuinely-new episodes (#72).
         let report = await repo.refreshAllReport(
             trigger: trigger,
-            isCancelled: isCancelled,
+            isCancelled: { Task.isCancelled || isCancelled() },
             onDurableNotifications: { notifications in
                 guard !notifications.isEmpty else { return }
                 await notifier.deliver(notifications)

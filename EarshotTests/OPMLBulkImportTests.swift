@@ -79,6 +79,31 @@ final class OPMLBulkImportTests: XCTestCase {
         XCTAssertEqual(InboxRepository(context: ctx).inboxEpisodes().count, 15)
     }
 
+    func testImportIgnoresOutlinesOutsideTheBodyAndInsideExtensions() async throws {
+        let ctx = TestStore.freshContext()
+        let document = """
+        <opml>
+          <head><outline xmlUrl="https://head.example/feed"/></head>
+          <extension><outline xmlUrl="https://outside.example/feed"/></extension>
+          <body>
+            <extension><outline xmlUrl="https://extension.example/feed"/></extension>
+            <outline text="News"><outline xmlUrl="https://body.example/feed"/></outline>
+          </body>
+        </opml>
+        """
+        let service = OPMLImportService(context: ctx, subscriptions: SubscriptionRepository(context: ctx, feed: fetcher()))
+
+        let outcome = await service.importOPML(document)
+
+        XCTAssertFalse(outcome.invalidDocument)
+        XCTAssertEqual(outcome.addedCount, 1)
+        let podcasts = try ctx.fetch(FetchDescriptor<Podcast>())
+        XCTAssertEqual(podcasts.map(\.feedURL), ["https://body.example/feed"])
+        let membership = try XCTUnwrap(ctx.fetch(FetchDescriptor<FolderMembership>()).first)
+        XCTAssertEqual(membership.folder?.name, "News")
+        XCTAssertEqual(membership.podcast?.feedURL, "https://body.example/feed")
+    }
+
     // MARK: Folders + memberships
 
     func testBulkImportCreatesFoldersAndMemberships() async throws {
@@ -104,9 +129,151 @@ final class OPMLBulkImportTests: XCTestCase {
         XCTAssertEqual(memberships.count, 2, "A and B are in News; C is ungrouped")
         let memberFeedURLs = Set(memberships.compactMap { $0.podcast?.feedURL })
         XCTAssertEqual(memberFeedURLs, ["https://a.com/feed", "https://b.com/feed"])
+
+        _ = await service.importOPML(opml)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 1)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 2,
+                       "Rebuilding the cache after the new folder is saved must retain both memberships")
+    }
+
+    func testExistingPodcastWithEquivalentFeedURLIsAssignedToFolder() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://EXAMPLE.com:443/feed#fragment", title: "Existing")
+        ctx.insert(podcast)
+        try ctx.save()
+        let document = """
+        <opml><body><outline text="News">
+          <outline xmlUrl="https://example.com/feed"/>
+        </outline></body></opml>
+        """
+        let service = OPMLImportService(context: ctx, subscriptions: SubscriptionRepository(context: ctx, feed: fetcher()))
+
+        let result = await service.importOPML(document)
+
+        XCTAssertFalse(result.folderPersistenceFailed)
+        XCTAssertEqual(result.alreadyPresentCount, 1)
+        let membership = try XCTUnwrap(ctx.fetch(FetchDescriptor<FolderMembership>()).first)
+        XCTAssertEqual(membership.folder?.name, "News")
+        XCTAssertEqual(membership.podcast?.persistentModelID, podcast.persistentModelID)
+    }
+
+    func testMissingResolvedPodcastIsReportedAsFailed() async throws {
+        let ctx = TestStore.freshContext()
+        let first = Podcast(feedURL: "https://a.com/feed", title: "A")
+        let second = Podcast(feedURL: "https://b.com/feed", title: "B")
+        ctx.insert(first)
+        ctx.insert(second)
+        try ctx.save()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher(), onMerge: {
+            ctx.delete(second)
+            try? ctx.save()
+        })
+
+        let result = await repo.subscribeAll(feedURLs: [first.feedURL, second.feedURL])
+
+        XCTAssertEqual(result.outcomes.count, 1)
+        XCTAssertEqual(result.failed, 0)
+        XCTAssertEqual(result.unresolved, 1)
     }
 
     // MARK: Idempotency
+
+    func testDuplicateFolderNamesReuseTopLevelFolderAndKeepNestedMembership() async throws {
+        let ctx = TestStore.freshContext()
+        let parent = PodcastFolder(name: "Parent")
+        let nested = PodcastFolder(name: "News", createdAt: Date(timeIntervalSince1970: 1))
+        nested.parent = parent
+        let root = PodcastFolder(name: "News", createdAt: Date(timeIntervalSince1970: 2))
+        let duplicateRoot = PodcastFolder(name: "News", createdAt: Date(timeIntervalSince1970: 3))
+        let show = Podcast(feedURL: "https://a.com/feed", title: "A")
+        ctx.insert(parent)
+        ctx.insert(nested)
+        ctx.insert(root)
+        ctx.insert(duplicateRoot)
+        ctx.insert(show)
+        ctx.insert(FolderMembership(folder: nested, podcast: show))
+        try ctx.save()
+        let document = """
+        <opml><body><outline text="News">
+            <outline type="rss" text="A" xmlUrl="https://a.com/feed"/>
+        </outline></body></opml>
+        """
+        let service = OPMLImportService(
+            context: ctx, subscriptions: SubscriptionRepository(context: ctx, feed: fetcher())
+        )
+
+        _ = await service.importOPML(document)
+        _ = await service.importOPML(document)
+
+        let folders = try ctx.fetch(FetchDescriptor<PodcastFolder>())
+        XCTAssertEqual(folders.count, 4)
+        let memberships = try ctx.fetch(FetchDescriptor<FolderMembership>())
+        XCTAssertEqual(memberships.count, 2)
+        XCTAssertEqual(Set(memberships.compactMap { $0.folder?.persistentModelID }),
+                       Set([nested.persistentModelID, root.persistentModelID]))
+    }
+
+    func testFolderAndMembershipAddedDuringFetchAreReused() async throws {
+        let ctx = TestStore.freshContext()
+        let show = Podcast(feedURL: "https://a.com/feed", title: "A")
+        ctx.insert(show)
+        try ctx.save()
+        let service = OPMLImportService(
+            context: ctx, subscriptions: SubscriptionRepository(context: ctx, feed: fetcher())
+        )
+        let document = """
+        <opml><body><outline text="News">
+            <outline type="rss" text="A" xmlUrl="https://a.com/feed"/>
+            <outline type="rss" text="B" xmlUrl="https://b.com/feed"/>
+        </outline></body></opml>
+        """
+
+        _ = await service.importOPML(document, onProgress: { completed, _, _ in
+            guard completed == 1 else { return }
+            let folder = PodcastFolder(name: "News")
+            ctx.insert(folder)
+            ctx.insert(FolderMembership(folder: folder, podcast: show))
+            try? ctx.save()
+        })
+
+        let folders = try ctx.fetch(FetchDescriptor<PodcastFolder>())
+        let memberships = try ctx.fetch(FetchDescriptor<FolderMembership>())
+        XCTAssertEqual(folders.count, 1)
+        XCTAssertEqual(memberships.count, 2)
+        XCTAssertEqual(Set(memberships.compactMap { $0.podcast?.feedURL }),
+                       ["https://a.com/feed", "https://b.com/feed"])
+        XCTAssertTrue(memberships.allSatisfy { $0.folder?.persistentModelID == folders.first?.persistentModelID })
+    }
+
+    func testFolderPersistenceFailureIsRetryableWithoutLosingSubscription() async throws {
+        enum InjectedFailure: Error { case storage }
+        let document = """
+        <opml><body><outline text="News">
+            <outline type="rss" text="A" xmlUrl="https://a.com/feed"/>
+        </outline></body></opml>
+        """
+        for operation in OPMLImportService.FolderPersistenceOperation.allCases {
+            let ctx = TestStore.freshContext()
+            let repo = SubscriptionRepository(context: ctx, feed: fetcher())
+            let failing = OPMLImportService(context: ctx, subscriptions: repo) { actual in
+                if actual == operation { throw InjectedFailure.storage }
+            }
+            let outcome = await failing.importOPML(document)
+            XCTAssertTrue(outcome.folderPersistenceFailed, "Failure at \(operation) must be reported")
+            XCTAssertEqual(outcome.addedCount, 1)
+            XCTAssertEqual(outcome.failedCount, 0, "The subscription was successfully imported")
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 1)
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 0)
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 0)
+
+            let retry = await OPMLImportService(context: ctx, subscriptions: repo).importOPML(document)
+            XCTAssertFalse(retry.folderPersistenceFailed)
+            XCTAssertEqual(retry.alreadyPresentCount, 1)
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 1)
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 1)
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 1)
+        }
+    }
 
     func testBulkImportIsIdempotent() async throws {
         let ctx = TestStore.freshContext()

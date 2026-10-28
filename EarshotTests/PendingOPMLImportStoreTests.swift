@@ -50,6 +50,26 @@ final class PendingOPMLImportStoreTests: XCTestCase {
         XCTAssertEqual(names, [second.contentFileName])
     }
 
+    func testPostCommitBackupAttributeFailureDoesNotReportAStageFailure() async throws {
+        enum InjectedFailure: Error { case attribute }
+        let root = try temporaryRoot()
+        let initialStore = PendingOPMLImportStore(rootURL: root)
+        _ = try await initialStore.stage(Data("old".utf8), displayName: "old.opml")
+        let failingAttributeStore = PendingOPMLImportStore(rootURL: root) { _ in
+            throw InjectedFailure.attribute
+        }
+        let newData = Data("new".utf8)
+
+        let committed = try await failingAttributeStore.stage(newData, displayName: "new.opml")
+
+        let restored = try await PendingOPMLImportStore(rootURL: root).load()
+        XCTAssertEqual(restored?.metadata, committed)
+        XCTAssertEqual(restored?.data, newData)
+        let documents = root.appending(path: "Documents", directoryHint: .isDirectory)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: documents.path),
+                       [committed.contentFileName])
+    }
+
     func testRestagingSameBytesDoesNotDuplicateContent() async throws {
         let root = try temporaryRoot()
         let store = PendingOPMLImportStore(rootURL: root)

@@ -23,9 +23,11 @@ actor PendingOPMLImportStore {
     private let rootURL: URL
     private let documentsURL: URL
     private let manifestURL: URL
+    private let afterManifestCommit: (@Sendable (URL) throws -> Void)?
 
-    init(rootURL: URL) {
+    init(rootURL: URL, afterManifestCommit: (@Sendable (URL) throws -> Void)? = nil) {
         self.rootURL = rootURL
+        self.afterManifestCommit = afterManifestCommit
         documentsURL = rootURL.appending(path: Self.documentsDirectoryName, directoryHint: .isDirectory)
         manifestURL = rootURL.appending(path: Self.manifestName, directoryHint: .notDirectory)
     }
@@ -154,7 +156,18 @@ actor PendingOPMLImportStore {
             to: manifestURL,
             options: [.atomic, .completeFileProtection]
         )
-        try excludeFromBackup(manifestURL)
+        // The atomic write is the commit point. The root directory was already
+        // excluded before staging, so a failure to repeat the attribute on the
+        // manifest cannot turn a successful commit into a reported failure.
+        do {
+            if let afterManifestCommit {
+                try afterManifestCommit(manifestURL)
+            } else {
+                try excludeFromBackup(manifestURL)
+            }
+        } catch {
+            AppLog.data.error("OPML manifest backup attribute failed after commit: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func readManifest() throws -> PendingOPMLImport {
