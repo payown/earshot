@@ -584,7 +584,7 @@ final class PlayerService {
     }
 
     private func setCurrentPersonalAudio(_ item: PersonalAudioItem?) {
-        if currentPersonalAudio?.id != item?.id {
+        if nowPlayingPersonalAudioID != item?.id {
             invalidatePendingUserSeek()
             effectiveRateRevision &+= 1
         }
@@ -694,11 +694,12 @@ final class PlayerService {
         loadChapters(for: item, audioURL: url)
     }
 
-    /// Clears a matching restored/current item before deleting its model/file.
-    func unloadPersonalAudioIfCurrent(id: String) {
+    /// Clears a matching restored/current item. After a committed deletion,
+    /// skip persisting position into a model that another context removed.
+    func unloadPersonalAudioIfCurrent(id: String, persistPosition: Bool = true) {
         let restorationID = PlaybackContentIdentity.personalAudioPrefix + id
         if nowPlayingPersonalAudioID == id {
-            _ = persistCurrentPosition()
+            if persistPosition { _ = persistCurrentPosition() }
             settings?.setRawValue("", for: SettingsKey.lastPlayingEpisodeID)
             unloadWithoutPersisting()
         } else if settings?.rawValue(SettingsKey.lastPlayingEpisodeID) == restorationID {

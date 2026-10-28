@@ -10,17 +10,30 @@ enum PersonalAudioLibraryPresentation {
     static func itemCountValue(_ count: Int) -> String {
         count == 1 ? "1 item" : "\(count) items"
     }
+
+    static func deletionFailureMessage(_ failure: PersonalAudioDeletionFailure) -> String {
+        switch failure {
+        case .itemNotFound:
+            "Earshot couldn’t find this item. Check Personal Audio and try again."
+        case .persistenceFailed:
+            "Earshot couldn’t confirm that this item was removed. Check Personal Audio and try again."
+        case .cleanupFailed:
+            "The item was removed, but Earshot couldn’t delete its stored copy. Earshot may try cleanup again later."
+        }
+    }
 }
 
 private enum PersonalAudioAlert: Identifiable {
     case duplicate(PreparedPersonalAudioImport)
     case failure(String)
+    case deletionFailure(String)
     case delete(PersonalAudioItem)
 
     var id: String {
         switch self {
         case .duplicate(let prepared): "duplicate-\(prepared.stagedCopy.id)"
         case .failure(let message): "failure-\(message)"
+        case .deletionFailure(let message): "deletion-failure-\(message)"
         case .delete(let item): "delete-\(item.id)"
         }
     }
@@ -132,6 +145,8 @@ struct PersonalAudioLibraryScreen: View {
                 Alert(title: Text("Couldn’t Add Audio"), message: Text(message), dismissButton: .default(Text("OK")) {
                     addButtonFocused = true
                 })
+            case .deletionFailure(let message):
+                Alert(title: Text("Personal Audio"), message: Text(message), dismissButton: .default(Text("OK")))
             case .delete(let item):
                 Alert(
                     title: Text("Delete \(item.title)?"),
@@ -205,19 +220,29 @@ struct PersonalAudioLibraryScreen: View {
     }
 
     private func delete(_ item: PersonalAudioItem) {
-        player.removePersonalAudioSpeedOverride(for: item.id)
-        player.unloadPersonalAudioIfCurrent(id: item.id)
+        let id = item.id
+        let title = item.title
+        let nextID = items.first(where: { $0.id != id })?.id
         do {
-            try importer.delete(itemID: item.id, in: context.container)
+            try importer.delete(itemID: id, in: context.container)
+            player.removePersonalAudioSpeedOverride(for: id)
+            player.unloadPersonalAudioIfCurrent(id: id, persistPosition: false)
             NotificationCenter.default.post(name: .earshotPersonalAudioDidChange, object: nil)
-            Announcer.announce("Deleted \(item.title) from Personal Audio")
-            if let nextID = items.first(where: { $0.id != item.id })?.id {
+            Announcer.announce("Deleted \(title) from Personal Audio")
+            if let nextID {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { focusedItemID = nextID }
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { addButtonFocused = true }
             }
+        } catch let failure as PersonalAudioDeletionFailure {
+            if failure == .cleanupFailed {
+                player.removePersonalAudioSpeedOverride(for: id)
+                player.unloadPersonalAudioIfCurrent(id: id, persistPosition: false)
+                NotificationCenter.default.post(name: .earshotPersonalAudioDidChange, object: nil)
+            }
+            alert = .deletionFailure(PersonalAudioLibraryPresentation.deletionFailureMessage(failure))
         } catch {
-            alert = .failure("The item was removed, but Earshot couldn’t finish cleaning up its stored copy. Earshot will retry cleanup later.")
+            alert = .deletionFailure(PersonalAudioLibraryPresentation.deletionFailureMessage(.persistenceFailed))
         }
     }
 
