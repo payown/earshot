@@ -164,7 +164,7 @@ final class DownloadActivityTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(sections.count, 7, "The canonical guide must be bundled with the app")
         XCTAssertEqual(Set(sections.map(\.id)).count, sections.count)
         XCTAssertTrue(sections.allSatisfy { !$0.paragraphs.isEmpty })
-        XCTAssertTrue(sections.flatMap(\.paragraphs).contains { $0.contains("Read download status") })
+        XCTAssertTrue(sections.flatMap(\.paragraphs).contains { $0.contains("Read the summary") })
         XCTAssertTrue(sections.flatMap(\.paragraphs).contains { $0.contains("Download N episodes") })
         XCTAssertTrue(sections.flatMap(\.paragraphs).contains {
             $0.contains("If Delete downloads when done is on, Clear inbox also removes those episodes' downloaded audio.")

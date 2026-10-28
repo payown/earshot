@@ -770,6 +770,25 @@ final class PlaybackLogicTests: XCTestCase {
 
     // MARK: Scrubber VoiceOver step (#610)
 
+    func testExplicitScrubberStepsAreIndependentOfEpisodeLength() {
+        for duration in [60.0, 3600.0, 36000.0] {
+            XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: duration, preference: .thirtySeconds), 30)
+            XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: duration, preference: .oneMinute), 60)
+            XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: duration, preference: .fiveMinutes), 300)
+        }
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 3600, preference: .automatic), 60)
+    }
+
+    func testScrubberAdjustmentsAccumulateAndClampToFullEpisode() {
+        let first = PlaybackLogic.adjustedScrubberPosition(from: 100, duration: 900, step: 300, forward: true)
+        let second = PlaybackLogic.adjustedScrubberPosition(from: first, duration: 900, step: 300, forward: true)
+        XCTAssertEqual(first, 400)
+        XCTAssertEqual(second, 700)
+        // Clamp to the actual duration; manual outro behavior uses the seek path.
+        XCTAssertEqual(PlaybackLogic.adjustedScrubberPosition(from: second, duration: 900, step: 300, forward: true), 900)
+        XCTAssertEqual(PlaybackLogic.adjustedScrubberPosition(from: 100, duration: 900, step: 300, forward: false), 0)
+    }
+
     func testScrubberStepIsFlatThirtySecondsAtOrUnderThirtyMinutes() {
         // Preserves Flutter-parity granularity for typical episode lengths.
         XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 60), 30)

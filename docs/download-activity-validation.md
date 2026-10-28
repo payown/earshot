@@ -16,7 +16,7 @@ The focused regression run includes DownloadManagerTests, DownloadScanBoundsTest
 
 1. With VoiceOver on, use Inbox options, Download all, and the second Download N episodes confirmation. Confirm the announcement describes requests and directs you to Download activity.
 
-2. In Downloads, open Download activity. Read the summary and several rows. Downloading, Waiting for Wi-Fi, Download failed, and Downloaded should be distinguishable. Use Read download status while several downloads finish; individual completions should not interrupt or build a queue of speech.
+2. In Downloads, open Download activity. Read the summary and several rows. Downloading, Waiting for Wi-Fi, Download failed, and Downloaded should be distinguishable. Read the summary again while several downloads finish; individual completions should not interrupt or build a queue of speech.
 
 3. With Wi-Fi-only enabled and Wi-Fi unavailable, request a download. It should remain Waiting for Wi-Fi. Restore Wi-Fi and verify it progresses and finishes. Background the app, return, and repeat after relaunch to check iOS background scheduling on the device.
 

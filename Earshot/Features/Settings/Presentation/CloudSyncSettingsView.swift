@@ -175,8 +175,9 @@ enum CloudSyncAnnouncement {
     ) -> String? {
         guard let current,
               current.endDate != nil,
-              !current.succeeded,
-              previous?.identifier != current.identifier else { return nil }
+              !current.succeeded else { return nil }
+        if let previous, previous.identifier == current.identifier,
+           previous.endDate != nil, !previous.succeeded { return nil }
         return "iCloud sync needs attention. Your local changes remain saved and Earshot will try again."
     }
 

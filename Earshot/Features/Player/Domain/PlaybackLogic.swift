@@ -1,6 +1,20 @@
 import Foundation
 import SwiftData
 
+/// The VoiceOver adjustment interval for the playback position control.
+enum PlaybackPositionStep: String, CaseIterable {
+    case automatic, thirtySeconds, oneMinute, fiveMinutes
+
+    var title: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .thirtySeconds: "30 seconds"
+        case .oneMinute: "1 minute"
+        case .fiveMinutes: "5 minutes"
+        }
+    }
+}
+
 /// The transient context that explains where the current playback run began.
 ///
 /// Folder origin is deliberately identity-only and in memory. Now Playing
@@ -469,10 +483,25 @@ enum PlaybackLogic {
     /// very long content, but no single flick ever jumps more than 5 minutes --
     /// an unbounded per-flick jump would be a worse regression than a few extra
     /// flicks. Unknown/non-positive duration falls back to the flat step.
-    static func scrubberStepSeconds(duration: Double) -> Double {
+    static func scrubberStepSeconds(
+        duration: Double, preference: PlaybackPositionStep = .automatic
+    ) -> Double {
+        switch preference {
+        case .thirtySeconds: return 30
+        case .oneMinute: return 60
+        case .fiveMinutes: return 300
+        case .automatic: break
+        }
         guard duration > 0 else { return minScrubberStepSeconds }
         let target = duration / targetScrubberFlicks
         return min(max(target, minScrubberStepSeconds), maxScrubberStepSeconds)
+    }
+
+    /// Clamp each deliberate adjustment to the whole episode, including its outro.
+    static func adjustedScrubberPosition(
+        from position: Double, duration: Double, step: Double, forward: Bool
+    ) -> Double {
+        min(max(position + (forward ? step : -step), 0), max(duration, 0))
     }
 
     // MARK: Remote command / lock-screen state (Bluetooth pause fix)

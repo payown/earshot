@@ -10,8 +10,8 @@ struct ListeningPlacesSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Text("Share listening positions and played state through a folder you already sync. Earshot does not create an account or send this data to an Earshot server.")
-                Text("Earshot 1.2.0 writes outward only. It does not import another device's changes yet.")
+                Text("Listening Places writes this device's episode positions and played state to a folder you choose. Other apps can use those files. Earshot does not import changes from other devices through this folder.")
+                Text("iCloud Sync separately syncs your Earshot library and listening progress between your devices through your private iCloud account. Listening Places does not require iCloud Sync or an Earshot account.")
             }
 
             Section("Folder") {

@@ -35,6 +35,28 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.hapticFeedbackEnabled)
     }
 
+    func testPlaybackPositionStepPersistsLocallyAndInvalidValueFallsBack() {
+        let context = TestStore.freshContext()
+        let settings = SettingsStore()
+        settings.configure(context: context)
+        XCTAssertEqual(settings.playbackPositionStep, .automatic)
+        XCTAssertTrue(AppSettingScope.isLocal(SettingsKey.playbackPositionStep))
+
+        for choice in PlaybackPositionStep.allCases {
+            settings.playbackPositionStep = choice
+            let reloaded = SettingsStore()
+            reloaded.configure(context: context)
+            XCTAssertEqual(reloaded.playbackPositionStep, choice)
+            XCTAssertEqual(reloaded.skipForwardSeconds, SettingsDefault.skipForwardSeconds)
+            XCTAssertEqual(reloaded.skipBackSeconds, SettingsDefault.skipBackSeconds)
+        }
+
+        AppSettingsStore(context: context).setRawValue("invalid", for: SettingsKey.playbackPositionStep)
+        let reloaded = SettingsStore()
+        reloaded.configure(context: context)
+        XCTAssertEqual(reloaded.playbackPositionStep, .automatic)
+    }
+
     func testFreshInstallDefaultsTranscriptExportsToSpeakersOnly() {
         let context = TestStore.freshContext()
         let settings = SettingsStore()

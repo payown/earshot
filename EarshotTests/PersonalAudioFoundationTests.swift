@@ -251,6 +251,42 @@ final class PersonalAudioFoundationTests: XCTestCase {
         XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<PersonalAudioItem>()), 1)
     }
 
+    func testCancellationDuringMetadataInspectionDoesNotImportOrLeaveFiles() async throws {
+        let source = try makePlayableAudioFile(name: "cancelled.caf", durationSeconds: 1)
+        let container = try ModelContainerFactory.makeInMemory()
+        let storage = PersonalAudioStorage(rootURL: root.appending(path: "PersonalAudio"))
+        let gate = MetadataInspectionGate()
+        let importer = PersonalAudioImporter(storage: storage, metadataLoader: .init(load: { _, _ in
+            await gate.wait()
+            return PersonalAudioMetadata(
+                title: "Audio", artist: nil, album: nil, durationSeconds: 1,
+                artworkJPEG: nil, chapters: []
+            )
+        }))
+        let importTask = Task { await importer.addToEarshot(fileURL: source, container: container) }
+        var started = false
+        for _ in 0..<500 {
+            if await gate.started { started = true; break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard started else {
+            importTask.cancel()
+            await gate.release()
+            return XCTFail("Metadata inspection did not start")
+        }
+
+        importTask.cancel()
+        await gate.release()
+        guard case .failed(.cancelled) = await importTask.value else {
+            return XCTFail("Cancelled import must not commit the file")
+        }
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<PersonalAudioItem>()), 0)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(
+            at: storage.rootURL, includingPropertiesForKeys: nil
+        ).isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+
 
     private enum TestFailure: Error { case persistence }
 
@@ -295,6 +331,24 @@ final class PersonalAudioFoundationTests: XCTestCase {
         buffer.frameLength = capacity
         try audioFile.write(from: buffer)
         return url
+    }
+}
+
+private actor MetadataInspectionGate {
+    private(set) var started = false
+    private var released = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        started = true
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 
