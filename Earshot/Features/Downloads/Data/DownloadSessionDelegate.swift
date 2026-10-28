@@ -112,6 +112,19 @@ final class DownloadEventJournal: @unchecked Sendable {
         return events
     }
 
+    /// An unreadable journal is not evidence that there are no pending events.
+    /// Reconciliation must preserve downloading rows until all keys are known.
+    func pendingEventsIfReadable() -> [PendingDownloadTerminalEvent]? {
+        lock.lock()
+        defer { lock.unlock() }
+        do {
+            try loadIfNeededLocked()
+            return events
+        } catch {
+            return nil
+        }
+    }
+
     @discardableResult
     func acknowledge(_ id: UUID) -> Bool {
         lock.lock()
@@ -191,8 +204,13 @@ final class DownloadEventJournal: @unchecked Sendable {
 
     private static func writeJournal(to url: URL, data: Data?) throws {
         guard let data else {
-            guard FileManager.default.fileExists(atPath: url.path) else { return }
-            try FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain
+                && (error.code == NSFileReadNoSuchFileError || error.code == NSFileNoSuchFileError) {
+                // Only confirmed absence is equivalent to successful removal.
+                return
+            }
             return
         }
         try FileManager.default.createDirectory(
@@ -274,8 +292,8 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         journal.acknowledge(event.id)
     }
 
-    func pendingTaskKeys() -> [String] {
-        journal.pendingEvents().map(\.taskKey)
+    func pendingTaskKeys() -> [String]? {
+        journal.pendingEventsIfReadable()?.map(\.taskKey)
     }
 
     private func record(
