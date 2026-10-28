@@ -201,3 +201,31 @@ enabled. This is the first phone candidate with a behavior-preserving production
 optimization; 280/281 were observational diagnostics. Awaiting the same paired
 unlock test. No symptom improvement, root cause, CI pass, merge, or release is
 claimed at this handoff.
+
+## Physical acceptance and clean fix
+
+After the requested paired player/Library unlock comparison on build 282,
+Michael confirmed, “it's fixed.” This is acceptance of the reported unlock
+responsiveness symptom in those checks. No numeric post-fix speech latency or
+acceptance of unrelated behavior is inferred.
+
+The retrieved build-282 report contains multiple player returns and a Library
+return. Scene-active to first focus spans vary (player approximately 0.386,
+6.796 and 1.363 seconds; Library 0.170 seconds). Without the physical gesture
+timestamps, these are not interchangeable with perceived response latency;
+do not select only the shortest sample as a measured speedup. Michael's direct
+observation supplies acceptance. Stable badge passes recorded zero property
+writes. The raw report remains in the local investigation data.
+
+Recording on the installed diagnostic build was disabled by a successful launch
+with `EARSHOT_UNLOCK_MEASURE=0`. Production probes and hooks were removed from
+all unrelated files and the generated project; only the two conditional badge
+setters and their regression coverage remain as product changes. The temporary
+probe is archived as noncompiled text in `unlock-2026-10-27/` for reproducibility.
+The clean rerun passed all 13 focused badge/speech tests, zero failures or skips,
+and the clean Release device build (command-line build 283, not installed) passed.
+Independent review of the scoped production/test diff found no actionable issues.
+The dedicated reviewer agent's configured model was unavailable, so an independent
+default reviewer performed the equivalent review using the archived review skill.
+Acceptance is complete; StartTesting remains in testing only until the required
+integration is finished. GitHub CI and merge are still pending.

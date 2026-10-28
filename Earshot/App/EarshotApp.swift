@@ -934,8 +934,6 @@ final class AppRuntime {
     /// active. This is event-driven (no timer or playback-path polling), and an
     /// account-change pause still requires the user's explicit confirmation.
     func retryCloudProjectionWhenActive() async {
-        let probe = UnlockResponsivenessProbe.shared.begin("cloud.foregroundRetry")
-        defer { UnlockResponsivenessProbe.shared.end("cloud.foregroundRetry", probe) }
         guard cloudSyncAvailability != .accountChanged,
               let container = readyContainer else { return }
         do {
@@ -1336,10 +1334,7 @@ struct EarshotApp: App {
                 }
             }
             .environment(runtime)
-            .task {
-                UnlockResponsivenessProbe.shared.start()
-                await runtime.activateProcessServices()
-            }
+            .task { await runtime.activateProcessServices() }
             .task(id: foregroundMaintenanceRequestID, priority: .utility) {
                 guard foregroundMaintenanceRequestID != nil,
                       runtime.shouldRunBackgroundServices else { return }
@@ -1370,7 +1365,6 @@ struct EarshotApp: App {
         // surfaces new episodes promptly without delaying VoiceOver focus and
         // first speech (#470). Skipped under tests.
         .onChange(of: scenePhase) { _, phase in
-            UnlockResponsivenessProbe.shared.phase(String(describing: phase), playing: runtime.player.isPlaying)
             runtime.updateLaunchScenePhase(phase)
             if phase == .active { LibrarySearchIndex.shared.requestRefresh() }
             if phase != .active {

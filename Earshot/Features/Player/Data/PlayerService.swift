@@ -2684,8 +2684,6 @@ final class PlayerService {
     /// (#736). Saving here is off the visible view hot path, so the resulting
     /// `@Query` invalidation costs nothing the user can feel.
     func persistForBackground() {
-        let probe = UnlockResponsivenessProbe.shared.begin("player.persistBackground")
-        defer { UnlockResponsivenessProbe.shared.end("player.persistBackground", probe) }
         recordPlaybackDiagnostic("background")
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         persistCurrentPosition()
