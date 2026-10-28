@@ -404,7 +404,7 @@ final class DownloadManager {
             if announceWaiting {
                 Announcer.announce("Waiting for Wi-Fi to download \(episode.title)")
             }
-            AppLog.networking.info("Download gated (no Wi-Fi): \(episode.title, privacy: .public)")
+            AppLog.networking.info("Download gated: Wi-Fi unavailable")
             return
         }
         guard let rawURL = URL(string: episode.audioURL),
@@ -438,7 +438,7 @@ final class DownloadManager {
             sourceURL: url
         )
         startTransfer(url, transferKey)
-        AppLog.networking.info("Download started (background): \(episode.title, privacy: .public)")
+        AppLog.networking.info("Download started in the background")
     }
 
     /// Enrolls an explicit user-selected batch through the same guarded path as
