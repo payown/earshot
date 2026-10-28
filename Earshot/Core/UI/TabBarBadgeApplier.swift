@@ -68,6 +68,8 @@ struct TabBarBadgeApplier: UIViewRepresentable {
             let counts = pendingCounts
             pendingCounts.removeAll(keepingCapacity: true)
             guard let tabBar = findTabBar(), let items = tabBar.items else { return }
+            let probe = UnlockResponsivenessProbe.shared.begin("badge.apply")
+            defer { UnlockResponsivenessProbe.shared.end("badge.apply", probe) }
             for (index, count) in counts where items.indices.contains(index) {
                 let value = TabBadgeFormat.badgeText(count)
                 if items[index].badgeValue != value { items[index].badgeValue = value }
@@ -75,11 +77,13 @@ struct TabBarBadgeApplier: UIViewRepresentable {
             // Preserve immediate suppression even when counts are unchanged:
             // UIKit may have recreated the badge during a tab selection.
             tabBar.layoutIfNeeded()
-            hideBadgeAccessibility(in: tabBar)
+            let writes = hideBadgeAccessibility(in: tabBar)
+            UnlockResponsivenessProbe.shared.event("badge.accessibilityWrites", value: writes)
             settledSuppression?.cancel()
             let suppression = DispatchWorkItem { [weak tabBar] in
                 guard let tabBar else { return }
-                hideBadgeAccessibility(in: tabBar)
+                let writes = hideBadgeAccessibility(in: tabBar)
+                UnlockResponsivenessProbe.shared.event("badge.settledAccessibilityWrites", value: writes)
             }
             settledSuppression = suppression
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: suppression)
@@ -92,18 +96,28 @@ struct TabBarBadgeApplier: UIViewRepresentable {
     /// Matched by private class-name substring, so it fails safe: if Apple
     /// renames the views, nothing is hidden and we're back to the (non-crashing)
     /// duplicate, never a broken tab bar.
-    private static func hideBadgeAccessibility(in root: UIView) {
+    private static func hideBadgeAccessibility(in root: UIView) -> Int {
         if String(describing: type(of: root)).contains("Badge") {
-            root.accessibilityElementsHidden = true
-            setIsAccessibilityElementFalse(in: root)
-            return
+            var writes = 0
+            // Reassigning these properties can invalidate the accessibility
+            // hierarchy even when UIKit's badge subtree is already correct.
+            // Still visit every pass so newly created/reset badges are repaired.
+            if !root.accessibilityElementsHidden {
+                root.accessibilityElementsHidden = true
+                writes += 1
+            }
+            return writes + setIsAccessibilityElementFalse(in: root)
         }
-        for sub in root.subviews { hideBadgeAccessibility(in: sub) }
+        return root.subviews.reduce(0) { $0 + hideBadgeAccessibility(in: $1) }
     }
 
-    private static func setIsAccessibilityElementFalse(in view: UIView) {
-        view.isAccessibilityElement = false
-        for sub in view.subviews { setIsAccessibilityElementFalse(in: sub) }
+    private static func setIsAccessibilityElementFalse(in view: UIView) -> Int {
+        var writes = 0
+        if view.isAccessibilityElement {
+            view.isAccessibilityElement = false
+            writes += 1
+        }
+        return writes + view.subviews.reduce(0) { $0 + setIsAccessibilityElementFalse(in: $1) }
     }
 
     /// Locates the app's single `UITabBar`. Earshot has exactly one

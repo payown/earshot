@@ -164,3 +164,40 @@ spoken-output timestamp is recorded, so first focus is not a direct measurement
 of VoiceOver speech latency or the instant the user unlocked. Requested a
 same-sequence test in Apple's Settings as an independent system-app control.
 No production fix is justified yet; the issue remains in progress.
+
+## Settings control and candidate 282
+
+Michael reports the same lock/unlock/flick sequence in Apple's Settings does
+not pause VoiceOver. This narrows the symptom to Earshot or its interaction with
+accessibility/audio services; it does not prove which component is responsible.
+
+Code review found unconditional accessibility setters in every immediate and
+delayed tab-badge suppression traversal, even when the values are already
+correct. Candidate 282 guards those setter calls. It still visits every badge
+and descendant, repairs newly created or reset UIKit views, preserves both
+immediate and delayed repair passes, and leaves labels/values/traits/rotor/focus
+requests untouched. Temporary probe events count actual property writes and
+time each badge apply. This is a candidate for physical comparison, not a
+trace-proven cause of the multi-second delay.
+
+The existing badge regression is extended to count setter invocations on stable
+fixture views across repeated immediate/delayed passes. The existing count-clear,
+UIKit-rebuild and late-created-badge checks remain. Focused badge and speech
+tests plus the Release device build are being run before phone installation.
+The diagnostic also now prevents new captures after its persisted opt-in expires.
+
+Focused simulator validation passed under Xcode 27.0 / iOS 26.5 on the existing
+Earshot-ColdLaunch simulator: 13 executed, zero failures or skips. Includes the
+extended `TabBarBadgeApplierTests`, four badge-format tests, and eight speech
+tests. The badge test confirms stable immediate/delayed passes invoke no guarded
+setters while clearing counts and repairing reset/late-created badges still work.
+StoreKit suites were explicitly excluded per AGENTS.md. Existing unrelated
+compiler warnings remain. No simulator result proves physical VoiceOver latency.
+
+Release device build 282 succeeded and passed strict signature verification.
+Direct installation, launch with recording enabled, installed-app query, and
+actual report retrieval all succeeded. Version 1.2.5 (282), process 7776, VoiceOver
+enabled. This is the first phone candidate with a behavior-preserving production
+optimization; 280/281 were observational diagnostics. Awaiting the same paired
+unlock test. No symptom improvement, root cause, CI pass, merge, or release is
+claimed at this handoff.

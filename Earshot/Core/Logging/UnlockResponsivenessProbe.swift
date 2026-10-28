@@ -117,6 +117,7 @@ final class UnlockResponsivenessProbe {
     }
 
     private func notification(_ name: String) {
+        guard enabled else { return }
         event(name)
         if name == "app.willEnterForeground", captureStart == nil { beginCapture() }
         if name == "app.didEnterBackground" { finishCapture() }
@@ -124,7 +125,7 @@ final class UnlockResponsivenessProbe {
     }
 
     private func beginCapture() {
-        guard captures.count < 15,
+        guard enabled, captures.count < 15,
               ProcessInfo.processInfo.systemUptime - sessionStart < 1800 else { return }
         let start = ProcessInfo.processInfo.systemUptime
         captureStart = start
