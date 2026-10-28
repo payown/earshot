@@ -319,7 +319,13 @@ final class EarshotUITests: XCTestCase {
         waitForExpectations(timeout: 15)
         let readStatus = app.buttons["Read download status"]
         XCTAssertTrue(readStatus.exists)
+        let expectedStatus = summary.label
         readStatus.tap()
+        let statusAlert = app.alerts["Download status"]
+        XCTAssertTrue(statusAlert.waitForExistence(timeout: 5))
+        XCTAssertTrue(statusAlert.staticTexts[expectedStatus].exists)
+        statusAlert.buttons["OK"].tap()
+        XCTAssertFalse(statusAlert.exists)
         app.buttons["Retry failed downloads"].tap()
         let retry = app.buttons["Retry 2 downloads"].firstMatch
         XCTAssertTrue(retry.waitForExistence(timeout: 5))
