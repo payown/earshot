@@ -647,28 +647,16 @@ final class DownloadManager {
 
         let keys = await liveKeys()
         guard !Task.isCancelled, self.context === context,
-              !RecoveryDownloadRemoval.isPending,
-              requiredGeneration.map({ journalDelegate.isCurrentNormalHandler($0) && Self.container === context.container }) ?? true else { return }
-        guard let liveKeys = keys else {
-            deferredReconciliationContext = context
-            deferredReconciliationKeys = liveKeys
-            journalDelegate.whenJournalReadable(id: journalWaiterID) { [weak self, weak journalDelegate] generation in
-                Task { @MainActor [weak self, weak journalDelegate] in
-                    guard let self, let journalDelegate,
-                          let context = self.deferredReconciliationContext,
-                          self.context === context, Self.container === context.container,
-                          !RecoveryDownloadRemoval.isPending,
-                          journalDelegate.isCurrentNormalHandler(generation),
-                          let retryKeys = self.deferredReconciliationKeys else { return }
-                    self.deferredReconciliationContext = nil
-                    self.deferredReconciliationKeys = nil
-                    await self.reconcileStuckDownloads(
-                        journalDelegate: journalDelegate,
-                        requiredGeneration: generation,
-                        liveKeys: retryKeys
-                    )
-                }
+              !RecoveryDownloadRemoval.isPending else { return }
+        if let requiredGeneration {
+            guard Self.container === context.container else { return }
+            guard journalDelegate.isCurrentNormalHandler(requiredGeneration) else {
+                deferReconciliation(context: context, journalDelegate: journalDelegate, liveKeys: liveKeys)
+                return
             }
+        }
+        guard let liveKeys = keys else {
+            deferReconciliation(context: context, journalDelegate: journalDelegate, liveKeys: liveKeys)
             return
         }
         deferredReconciliationContext = nil
@@ -693,6 +681,36 @@ final class DownloadManager {
         }
         save()
         AppLog.networking.info("Reconciled \(failed) stuck download(s) to failed")
+    }
+
+    private func deferReconciliation(
+        context: ModelContext, journalDelegate: DownloadSessionDelegate,
+        liveKeys: @escaping @MainActor () async -> Set<String>?
+    ) {
+        deferredReconciliationContext = context
+        deferredReconciliationKeys = liveKeys
+        journalDelegate.whenJournalReadable(id: journalWaiterID) { [weak self, weak journalDelegate] generation in
+            Task { @MainActor [weak self, weak journalDelegate] in
+                guard let self, let journalDelegate else { return }
+                await self.resumeDeferredReconciliation(journalDelegate: journalDelegate, generation: generation)
+            }
+        }
+    }
+
+    func resumeDeferredReconciliation(journalDelegate: DownloadSessionDelegate, generation: UInt64) async {
+        guard let context = deferredReconciliationContext,
+              self.context === context, Self.container === context.container,
+              !RecoveryDownloadRemoval.isPending,
+              let retryKeys = deferredReconciliationKeys else { return }
+        guard journalDelegate.isCurrentNormalHandler(generation) else {
+            deferReconciliation(context: context, journalDelegate: journalDelegate, liveKeys: retryKeys)
+            return
+        }
+        await reconcileStuckDownloads(
+            journalDelegate: journalDelegate,
+            requiredGeneration: generation,
+            liveKeys: retryKeys
+        )
     }
 
     /// The episodes whose download is currently in `state`, resolved on the

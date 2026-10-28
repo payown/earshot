@@ -993,6 +993,69 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, .downloading)
     }
 
+    func testDeferredReconciliationSurvivesStaleReadableCallback() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "journal-stale-callback", title: "Pending",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        let reader = JournalReadProbe()
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let delegate = DownloadSessionDelegate(journal: DownloadEventJournal(url: url, read: reader.read), retryDelays: [])
+        delegate.installTerminalHandler { _, _ in }
+        let oldGeneration = delegate.handlerGenerationForTesting()
+        await manager.reconcileStuckDownloads(journalDelegate: delegate) {
+            await DownloadManager.liveTaskKeys(taskDescriptions: { [] }, pendingKeys: { delegate.pendingTaskKeys() })
+        }
+        delegate.installTerminalHandler { _, _ in }
+        // Model the main-actor callback queued by the previous handler.
+        await manager.resumeDeferredReconciliation(journalDelegate: delegate, generation: oldGeneration)
+        reader.allowReads()
+        delegate.retryPendingEvents()
+        for _ in 0..<100 where episode.downloadStatus == .downloading {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(episode.downloadStatus, .failed)
+    }
+
+    func testDeferredReconciliationRetriesWhenHandlerChangesDuringTaskLookup() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "journal-stale-lookup", title: "Pending",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        let reader = JournalReadProbe()
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let delegate = DownloadSessionDelegate(journal: DownloadEventJournal(url: url, read: reader.read), retryDelays: [])
+        delegate.installTerminalHandler { _, _ in }
+        let gate = JournalRetryGate()
+        let waiting = expectation(description: "resumed task lookup is waiting")
+        var calls = 0
+        await manager.reconcileStuckDownloads(journalDelegate: delegate) {
+            calls += 1
+            if calls == 1 { return nil }
+            if calls == 2 {
+                waiting.fulfill()
+                await gate.wait()
+            }
+            return []
+        }
+        reader.allowReads()
+        delegate.retryPendingEvents()
+        await fulfillment(of: [waiting], timeout: 2)
+        delegate.installTerminalHandler { _, _ in }
+        await gate.release()
+        for _ in 0..<100 where episode.downloadStatus == .downloading {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(episode.downloadStatus, .failed)
+        XCTAssertGreaterThanOrEqual(calls, 3)
+    }
+
     func testReconciliationDoesNotOverwriteCompletionDuringTaskEnumeration() async throws {
         let context = TestStore.freshContext()
         let episode = Episode(guid: "finished-during-reconciliation", title: "Finished",

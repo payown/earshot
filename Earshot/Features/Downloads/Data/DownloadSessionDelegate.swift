@@ -370,6 +370,12 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         defer { handlerLock.unlock() }
         return replayTask != nil
     }
+
+    func handlerGenerationForTesting() -> UInt64 {
+        handlerLock.lock()
+        defer { handlerLock.unlock() }
+        return handlerGeneration
+    }
     #endif
 
     private func finishReplay(generation: UInt64, id: UUID) {
