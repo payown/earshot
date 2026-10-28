@@ -888,6 +888,8 @@ extension SubscriptionRepository {
         /// free-tier cap (0 for Plus users, 0 when already under the cap). #635.
         let skippedForCap: Int
         let failed: Int
+        /// Durable results that could not be resolved in the main context.
+        let unresolved: Int
         let cancelled: Bool
     }
 
@@ -920,7 +922,7 @@ extension SubscriptionRepository {
             return canonical
         }
         guard !canonicalFeedURLs.isEmpty else {
-            return BulkSubscribeResult(outcomes: [], skippedForCap: 0, failed: 0, cancelled: false)
+            return BulkSubscribeResult(outcomes: [], skippedForCap: 0, failed: 0, unresolved: 0, cancelled: false)
         }
 
         var maximumFollowedCount: Int?
@@ -986,6 +988,7 @@ extension SubscriptionRepository {
             outcomes: outcomes,
             skippedForCap: actorReport.skippedForCap,
             failed: actorReport.failed,
+            unresolved: results.count - outcomes.count,
             cancelled: Task.isCancelled
         )
     }

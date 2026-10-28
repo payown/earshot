@@ -14,6 +14,135 @@ import SwiftData
 @MainActor
 final class OPMLFileImporterTests: XCTestCase {
 
+    func testFolderSaveFailureKeepsStagedImportForRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = PendingOPMLImportStore(rootURL: root)
+        let coordinator = OPMLImportCoordinator(store: store)
+        let bytes = Data("<opml><body/></opml>".utf8)
+        try await coordinator.requestStage(bytes, displayName: "subscriptions.opml")
+
+        let result = await OPMLFileImporter.continuePendingImport(
+            coordinator: coordinator,
+            context: TestStore.freshContext(),
+            isEntitled: true,
+            importOperation: { _ in
+                OPMLImportOutcome(addedCount: 1, alreadyPresentCount: 0,
+                                  skippedForCapCount: 0, failedCount: 0,
+                                  cancelled: false, folderPersistenceFailed: true)
+            }
+        )
+
+        let counts = OPMLImportResultCounts(added: 1, alreadyPresent: 0, failed: 0, skippedForCap: 0)
+        XCTAssertEqual(result, .pending(counts, .failed))
+        let saved = try await store.load()
+        XCTAssertEqual(saved?.data, bytes)
+        XCTAssertEqual(saved?.metadata.stopReason, .failed)
+    }
+
+    func testMalformedAndNonOPMLDocumentsStayPendingWithoutImportingPartialFeeds() async throws {
+        let documents = [
+            "<opml><body><outline xmlUrl=\"https://a.com/feed\"/>",
+            "not XML",
+            "<document><body><outline xmlUrl=\"https://a.com/feed\"/></body></document>",
+            "<opml><head/></opml>"
+        ]
+        for document in documents {
+            let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let store = PendingOPMLImportStore(rootURL: root)
+            let coordinator = OPMLImportCoordinator(store: store)
+            let data = Data(document.utf8)
+            try await coordinator.requestStage(data, displayName: "subscriptions.opml")
+            let context = TestStore.freshContext()
+
+            let result = await OPMLFileImporter.continuePendingImport(
+                coordinator: coordinator, context: context, isEntitled: true
+            )
+
+            XCTAssertEqual(result, .pending(.zero, .failed))
+            XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 0)
+            let saved = try await store.load()
+            XCTAssertEqual(saved?.data, data)
+            XCTAssertEqual(saved?.metadata.stopReason, .failed)
+            XCTAssertNotNil(coordinator.pendingImport)
+        }
+    }
+
+    func testValidEmptyStagedOPMLCompletes() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = PendingOPMLImportStore(rootURL: root)
+        let coordinator = OPMLImportCoordinator(store: store)
+        try await coordinator.requestStage(Data("<opml><body/></opml>".utf8), displayName: "empty.opml")
+
+        let result = await OPMLFileImporter.continuePendingImport(
+            coordinator: coordinator, context: TestStore.freshContext(), isEntitled: true
+        )
+
+        XCTAssertEqual(result, .completed(.zero))
+        let saved = try await store.load()
+        XCTAssertNil(saved)
+    }
+
+    func testUnresolvedBackgroundResultKeepsStagedImport() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = PendingOPMLImportStore(rootURL: root)
+        let coordinator = OPMLImportCoordinator(store: store)
+        let document = """
+        <opml><body><outline text="News">
+          <outline xmlUrl="https://a.com/feed"/>
+          <outline xmlUrl="https://b.com/feed"/>
+        </outline></body></opml>
+        """
+        let bytes = Data(document.utf8)
+        try await coordinator.requestStage(bytes, displayName: "subscriptions.opml")
+        let context = TestStore.freshContext()
+        let first = Podcast(feedURL: "https://a.com/feed", title: "A")
+        let second = Podcast(feedURL: "https://b.com/feed", title: "B")
+        context.insert(first)
+        context.insert(second)
+        try context.save()
+        let repo = SubscriptionRepository(context: context, onMerge: {
+            context.delete(second)
+            try? context.save()
+        })
+        let service = OPMLImportService(context: context, subscriptions: repo)
+
+        let result = await OPMLFileImporter.continuePendingImport(
+            coordinator: coordinator, context: context, isEntitled: true,
+            importOperation: { await service.importOPML($0) }
+        )
+
+        guard case let .pending(counts, .failed) = result else {
+            return XCTFail("An unresolved feed must leave the import pending")
+        }
+        XCTAssertEqual(counts.failed, 0)
+        XCTAssertEqual(counts.alreadyPresent, 1)
+        let saved = try await store.load()
+        XCTAssertEqual(saved?.data, bytes)
+    }
+
+    func testUnreadableStagedBytesDoNotLeaveCoordinatorImporting() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = PendingOPMLImportStore(rootURL: root)
+        let coordinator = OPMLImportCoordinator(store: store)
+        let bytes = Data([0xff])
+        _ = try await coordinator.stage(bytes, displayName: "invalid.opml")
+
+        let result = await OPMLFileImporter.continuePendingImport(
+            coordinator: coordinator, context: TestStore.freshContext(), isEntitled: true
+        )
+
+        XCTAssertEqual(result, .unreadable)
+        XCTAssertNotNil(coordinator.pendingImport)
+        if case .importing = coordinator.state { XCTFail("Invalid bytes must not leave the import running") }
+        let saved = try await store.load()
+        XCTAssertEqual(saved?.data, bytes)
+    }
+
     /// Writes an OPML document to a throwaway temp `.opml` file and returns its URL.
     private func writeOPML(_ opml: String, ext: String = "opml") throws -> URL {
         let dir = FileManager.default.temporaryDirectory

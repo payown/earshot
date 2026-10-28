@@ -121,11 +121,17 @@ enum OPMLDocument {
     /// outlines and no `xmlUrl`) to a folder. Falls back gracefully on malformed
     /// input. Used by F10 import.
     static func groups(from opml: String) -> [OPMLGroup] {
-        guard let data = opml.data(using: .utf8) else { return [] }
+        validatedGroups(from: opml) ?? []
+    }
+
+    /// Returns nil for an incomplete document or a non-OPML XML document.
+    /// A valid OPML body with no outlines returns an empty array.
+    static func validatedGroups(from opml: String) -> [OPMLGroup]? {
+        guard let data = opml.data(using: .utf8) else { return nil }
         let parser = XMLParser(data: data)
         let delegate = OPMLGroupParser()
         parser.delegate = delegate
-        parser.parse()
+        guard parser.parse(), delegate.hasOPMLRoot, delegate.hasBody else { return nil }
         return delegate.result()
     }
 
@@ -151,6 +157,10 @@ private final class OPMLGroupParser: NSObject, XMLParserDelegate {
     private var folderStack: [String] = []
     private var elementIsFolder: [Bool] = []
     private var collected: [(folder: String?, url: String)] = []
+    /// Only the body and its nested outlines may contain importable outlines.
+    private var importableParents: [Bool] = []
+    private(set) var hasOPMLRoot = false
+    private(set) var hasBody = false
 
     func parser(
         _ parser: XMLParser,
@@ -159,7 +169,13 @@ private final class OPMLGroupParser: NSObject, XMLParserDelegate {
         qualifiedName qName: String?,
         attributes attributeDict: [String: String] = [:]
     ) {
-        guard elementName.lowercased() == "outline" else { return }
+        let name = elementName.lowercased()
+        if importableParents.isEmpty { hasOPMLRoot = name == "opml" }
+        let isBody = importableParents.count == 1 && hasOPMLRoot && name == "body"
+        if isBody { hasBody = true }
+        let isOutline = name == "outline" && importableParents.last == true
+        importableParents.append(isBody || isOutline)
+        guard isOutline else { return }
         let url = (attributeDict["xmlUrl"] ?? attributeDict["xmlurl"])?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if let url, !url.isEmpty {
@@ -177,7 +193,8 @@ private final class OPMLGroupParser: NSObject, XMLParserDelegate {
         namespaceURI: String?,
         qualifiedName qName: String?
     ) {
-        guard elementName.lowercased() == "outline" else { return }
+        let isImportable = importableParents.popLast() ?? false
+        guard elementName.lowercased() == "outline", isImportable else { return }
         if elementIsFolder.popLast() == true, !folderStack.isEmpty {
             folderStack.removeLast()
         }

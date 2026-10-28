@@ -35,9 +35,20 @@ struct OPMLImportCandidate: Equatable, Sendable {
 final class OPMLImportCoordinator {
     private(set) var state: OPMLImportCoordinatorState = .idle
     private let store: PendingOPMLImportStore
+    private let loadStagedDocument: @Sendable () async throws -> StagedOPMLImport?
+    private let stageDocument: @Sendable (Data, String, Date) async throws -> PendingOPMLImport
+    private var stageRequestInProgress = false
 
-    init(store: PendingOPMLImportStore) {
+    init(
+        store: PendingOPMLImportStore,
+        loadStagedDocument: (@Sendable () async throws -> StagedOPMLImport?)? = nil,
+        stageDocument: (@Sendable (Data, String, Date) async throws -> PendingOPMLImport)? = nil
+    ) {
         self.store = store
+        self.loadStagedDocument = loadStagedDocument ?? { try await store.load() }
+        self.stageDocument = stageDocument ?? { data, name, date in
+            try await store.stage(data, displayName: name, createdAt: date)
+        }
     }
 
     var pendingImport: PendingOPMLImport? {
@@ -65,15 +76,47 @@ final class OPMLImportCoordinator {
             displayName: displayName,
             createdAt: createdAt
         )
+        // Only one incoming document may inspect or stage the durable pending
+        // import at a time. Otherwise a second request can observe `.staging`
+        // as empty and replace the first one without confirmation.
+        guard !stageRequestInProgress else {
+            throw OPMLImportCoordinatorFailure.storageUnavailable
+        }
+        // Replacing the durable document while an import is running can make
+        // that import's completion discard or update the wrong document.
+        if case .importing = state {
+            throw OPMLImportCoordinatorFailure.storageUnavailable
+        }
+        stageRequestInProgress = true
+        defer { stageRequestInProgress = false }
         if let existing = pendingImport {
             state = .replacementRequested(existing: existing, candidate: candidate)
         } else {
-            _ = try await stageCandidate(candidate)
+            // A file can arrive before the launch-time restore has completed.
+            // Check the durable manifest directly before allowing a replacement.
+            // Mark staging first so an older restore result cannot overwrite the
+            // replacement confirmation while this actor is suspended.
+            state = .staging
+            do {
+                if let existing = try await store.loadMetadata() {
+                    state = .replacementRequested(existing: existing, candidate: candidate)
+                } else {
+                    _ = try await stageCandidate(candidate)
+                }
+            } catch {
+                state = .failed(pending: pendingImport, reason: .storageUnavailable)
+                throw error
+            }
         }
     }
 
     func confirmReplacement() async throws {
         guard case let .replacementRequested(_, candidate) = state else { return }
+        guard !stageRequestInProgress else {
+            throw OPMLImportCoordinatorFailure.storageUnavailable
+        }
+        stageRequestInProgress = true
+        defer { stageRequestInProgress = false }
         _ = try await stageCandidate(candidate)
     }
 
@@ -83,6 +126,8 @@ final class OPMLImportCoordinator {
     }
 
     func prepareContinuation() {
+        if case .importing = state { return }
+        guard !stageRequestInProgress else { return }
         guard let pending = pendingImport else { return }
         state = .readyToImport(pending)
     }
@@ -93,12 +138,15 @@ final class OPMLImportCoordinator {
         guard state == .idle else { return }
         state = .restoring
         do {
-            state = if let metadata = try await store.loadMetadata() {
+            let metadata = try await store.loadMetadata()
+            guard state == .restoring else { return }
+            state = if let metadata {
                 .pending(metadata)
             } else {
                 .idle
             }
         } catch {
+            guard state == .restoring else { return }
             state = .failed(pending: nil, reason: .storageUnavailable)
         }
     }
@@ -114,11 +162,7 @@ final class OPMLImportCoordinator {
         let previous = pendingImport
         state = .staging
         do {
-            let metadata = try await store.stage(
-                data,
-                displayName: displayName,
-                createdAt: createdAt
-            )
+            let metadata = try await stageDocument(data, displayName, createdAt)
             state = .pending(metadata)
             return metadata
         } catch {
@@ -140,10 +184,20 @@ final class OPMLImportCoordinator {
 
     /// Loads and verifies the staged bytes immediately before an import attempt.
     func beginContinuation() async throws -> StagedOPMLImport {
+        guard !stageRequestInProgress else { throw OPMLImportCoordinatorFailure.storageUnavailable }
+        if case .importing = state { throw OPMLImportCoordinatorFailure.storageUnavailable }
+        guard let pending = pendingImport else { throw OPMLImportCoordinatorFailure.noPendingImport }
+        // Claim the pending document before suspending for file I/O. A second
+        // request must not replace or discard it while this import owns it.
+        state = .importing(pending)
         do {
-            guard let staged = try await store.load() else {
+            guard let staged = try await loadStagedDocument() else {
                 state = .idle
                 throw OPMLImportCoordinatorFailure.noPendingImport
+            }
+            guard staged.metadata.id == pending.id else {
+                state = .failed(pending: pending, reason: .storageUnavailable)
+                throw OPMLImportCoordinatorFailure.storageUnavailable
             }
             state = .importing(staged.metadata)
             return staged
@@ -160,6 +214,11 @@ final class OPMLImportCoordinator {
         result: OPMLImportResultCounts,
         reason: OPMLImportStopReason
     ) async throws {
+        guard !stageRequestInProgress, case .importing = state else {
+            throw OPMLImportCoordinatorFailure.storageUnavailable
+        }
+        stageRequestInProgress = true
+        defer { stageRequestInProgress = false }
         let previous = pendingImport
         do {
             let metadata = try await store.record(result, stopReason: reason)
@@ -173,6 +232,11 @@ final class OPMLImportCoordinator {
     /// Completion commits by removing the manifest first; any leftover content is
     /// an unreferenced cache file and is cleaned without resurrecting old work.
     func complete(result: OPMLImportResultCounts) async throws {
+        guard !stageRequestInProgress, case .importing = state else {
+            throw OPMLImportCoordinatorFailure.storageUnavailable
+        }
+        stageRequestInProgress = true
+        defer { stageRequestInProgress = false }
         let previous = pendingImport
         do {
             try await store.discard()
@@ -184,6 +248,10 @@ final class OPMLImportCoordinator {
     }
 
     func discardPendingImport() async throws {
+        guard !stageRequestInProgress else { throw OPMLImportCoordinatorFailure.storageUnavailable }
+        if case .importing = state { throw OPMLImportCoordinatorFailure.storageUnavailable }
+        stageRequestInProgress = true
+        defer { stageRequestInProgress = false }
         let previous = pendingImport
         do {
             try await store.discard()
