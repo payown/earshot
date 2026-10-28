@@ -1,5 +1,64 @@
 import Foundation
 
+/// Public diagnostics must never contain a URL or an error's free-form text:
+/// either can include credentials, signed paths, or server-provided content.
+enum NetworkDiagnostic {
+    enum Level { case info, error }
+    typealias Sink = @Sendable (Level, String) -> Void
+
+    static let systemSink: Sink = { level, message in
+        switch level {
+        case .info: AppLog.networking.info("\(message, privacy: .public)")
+        case .error: AppLog.networking.error("\(message, privacy: .public)")
+        }
+    }
+
+    static func endpoint(_ url: URL?) -> String {
+        switch url?.scheme?.lowercased() {
+        case "https": "HTTPS request"
+        case "http": "HTTP request"
+        default: "network request"
+        }
+    }
+
+    static func reason(_ error: Error) -> String {
+        if let http = error as? HTTPError {
+            switch http {
+            case .server(let status): return "HTTP status \(status)"
+            case .badURL: return "invalid address"
+            case .transport: return "transport error"
+            }
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain { return "URL error \(nsError.code)" }
+        if nsError.domain == NSCocoaErrorDomain { return "Cocoa error \(nsError.code)" }
+        if error is CancellationError { return "cancelled" }
+        return "other error"
+    }
+
+    /// Content-Type is supplied by the server and can contain arbitrary text.
+    /// Keep only a fixed category in public diagnostics.
+    static func downloadRejection(url: URL?, status: Int, contentType: String, byteCount: Int) -> String {
+        let normalized = contentType.lowercased()
+        let category: String
+        if normalized.isEmpty {
+            category = "missing"
+        } else if normalized.hasPrefix("text/") || normalized.contains("application/json")
+                    || normalized.contains("application/xml") || normalized.contains("html") {
+            category = "non-media"
+        } else if normalized.hasPrefix("audio/") {
+            category = "audio"
+        } else {
+            category = "other"
+        }
+        return "Download rejected for \(endpoint(url)): HTTP \(status), content category \(category), bytes \(byteCount)"
+    }
+
+    static func downloadMoveFailure(url: URL?, error: Error) -> String {
+        "Download file move failed for \(endpoint(url)): \(reason(error))"
+    }
+}
+
 /// Errors surfaced by ``HTTPClient`` with user-facing messages.
 enum HTTPError: LocalizedError, Equatable {
     case badURL
@@ -31,6 +90,7 @@ struct HTTPClient {
     /// Awaitable backoff, injectable so tests can run the retry loop without
     /// sleeping. Honours cancellation via `Task.sleep`.
     private let sleep: @Sendable (TimeInterval) async throws -> Void
+    private let log: NetworkDiagnostic.Sink
 
     init(
         session: URLSession = EarshotURLSession.shared,
@@ -38,11 +98,13 @@ struct HTTPClient {
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { seconds in
             guard seconds > 0 else { return }
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-        }
+        },
+        log: @escaping NetworkDiagnostic.Sink = NetworkDiagnostic.systemSink
     ) {
         self.session = session
         self.retryPolicy = retryPolicy
         self.sleep = sleep
+        self.log = log
     }
 
     /// Fetches raw data for an `http`/`https` URL string.
@@ -121,7 +183,7 @@ struct HTTPClient {
                 // policy sees the real 5xx / URLError, then decide whether to
                 // loop again. Cancellation is not transient and surfaces as-is.
                 if policy.shouldRetry(error, afterAttempt: attempt) {
-                    AppLog.networking.info("Retrying \(url.absoluteString, privacy: .public) after attempt \(attempt, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    log(.info, "Retrying \(NetworkDiagnostic.endpoint(url)) after attempt \(attempt): \(NetworkDiagnostic.reason(error))")
                     continue
                 }
                 throw mapped(error, url: url)
@@ -142,8 +204,7 @@ struct HTTPClient {
         if let http,
            !(200...299).contains(http.statusCode),
            !acceptedStatuses.contains(http.statusCode) {
-            let url = request.url?.absoluteString ?? "unknown"
-            AppLog.networking.error("HTTP \(http.statusCode, privacy: .public) for \(url, privacy: .public)")
+            log(.error, "HTTP \(http.statusCode) for \(NetworkDiagnostic.endpoint(request.url))")
             throw HTTPError.server(status: http.statusCode)
         }
         return (data, http)
@@ -156,7 +217,7 @@ struct HTTPClient {
         if let httpError = error as? HTTPError {
             return httpError
         }
-        AppLog.networking.error("Transport error for \(url.absoluteString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        log(.error, "Transport error for \(NetworkDiagnostic.endpoint(url)): \(NetworkDiagnostic.reason(error))")
         return .transport(error.localizedDescription)
     }
 }

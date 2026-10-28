@@ -87,6 +87,35 @@ final class ArtworkCacheTests: XCTestCase {
         XCTAssertNotNil(image, "image(for:maxPixelSize:) should decode the PNG served by the mock protocol")
     }
 
+    func testArtworkFailureDiagnosticsOmitSignedURLAndErrorDescription() async throws {
+        let capture = NetworkLogCapture()
+        let url = try XCTUnwrap(URL(string: "https://private.example/signed-path-token-\(UUID().uuidString)?access_token=query-secret"))
+        let cache = ArtworkCache(session: MockURLProtocol.makeSession(),
+                                 log: { _, message in capture.append(message) })
+
+        MockURLProtocol.setOutcomes([.response(statusCode: 403, data: Data())])
+        let statusResult = await cache.data(for: url)
+        XCTAssertNil(statusResult)
+
+        let failure = URLError(.timedOut, userInfo: [NSLocalizedDescriptionKey: "transport-secret \(url.absoluteString)"])
+        MockURLProtocol.setOutcomes([.failure(failure)])
+        let transportResult = await cache.data(for: url)
+        XCTAssertNil(transportResult)
+
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: Data("invalid image".utf8))])
+        let image = await cache.image(for: url, maxPixelSize: 64)
+        XCTAssertNil(image)
+        XCTAssertEqual(capture.messages, [
+            "Artwork HTTP 403 for HTTPS request",
+            "Artwork fetch failed for HTTPS request: URL error -1001",
+            "Artwork data for HTTPS request could not be decoded"
+        ])
+        let output = capture.messages.joined(separator: " ")
+        for secret in ["private.example", "signed-path-token", "query-secret", "transport-secret", url.absoluteString] {
+            XCTAssertFalse(output.contains(secret))
+        }
+    }
+
     // MARK: Downsampling (#481)
 
     /// `downsampledImage(from:maxPixelSize:)` must decode a large source down so

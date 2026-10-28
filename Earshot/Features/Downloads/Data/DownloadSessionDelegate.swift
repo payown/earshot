@@ -264,7 +264,10 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
                 contentType: contentType,
                 byteCount: byteCount
             ) else {
-                AppLog.networking.error("Download rejected for \(sourceURL.absoluteString, privacy: .public): HTTP \(http.statusCode, privacy: .public), Content-Type \(contentType, privacy: .public)")
+                let diagnostic = NetworkDiagnostic.downloadRejection(
+                    url: sourceURL, status: http.statusCode, contentType: contentType, byteCount: byteCount
+                )
+                AppLog.networking.error("\(diagnostic, privacy: .public)")
                 record(taskKey: taskKey, outcome: .failed)
                 return
             }
@@ -281,7 +284,8 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
                 outcome: .finished(fileName: destination.lastPathComponent)
             )
         } catch {
-            AppLog.networking.error("Download file move failed for \(sourceURL.absoluteString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            let diagnostic = NetworkDiagnostic.downloadMoveFailure(url: sourceURL, error: error)
+            AppLog.networking.error("\(diagnostic, privacy: .public)")
             record(taskKey: taskKey, outcome: .failed)
         }
     }

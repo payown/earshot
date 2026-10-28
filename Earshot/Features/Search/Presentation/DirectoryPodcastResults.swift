@@ -128,7 +128,7 @@ struct DirectoryPodcastResults: View {
                 }
             } catch {
                 AppLog.networking.error(
-                    "Subscribe from directory failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    "Subscribe from directory failed: \(NetworkDiagnostic.reason(error), privacy: .public)"
                 )
                 Announcer.announce(
                     "Couldn't follow \(result.title). \(SubscribeErrorMessage.userFacing(error))"

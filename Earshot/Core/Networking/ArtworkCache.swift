@@ -101,6 +101,7 @@ final class ArtworkCache: @unchecked Sendable {
     private let lock = NSLock()
     private var resources: Resources?
     private let directoryURL: URL?
+    private let log: NetworkDiagnostic.Sink
 
     var urlCache: URLCache {
         currentResources().urlCache
@@ -116,8 +117,10 @@ final class ArtworkCache: @unchecked Sendable {
     /// real network — otherwise a cache miss fetched a reserved `example.test` host
     /// and intermittently failed with `-1003` (a shared-cache eviction race between
     /// parallel tests). The injected session's own configuration is used as-is.
-    init(session: URLSession? = nil, directoryURL: URL? = nil) {
+    init(session: URLSession? = nil, directoryURL: URL? = nil,
+         log: @escaping NetworkDiagnostic.Sink = NetworkDiagnostic.systemSink) {
         self.directoryURL = directoryURL ?? Self.cacheDirectoryURL()
+        self.log = log
         self.resources = Self.makeResources(session: session, directory: self.directoryURL)
     }
 
@@ -187,12 +190,12 @@ final class ArtworkCache: @unchecked Sendable {
         do {
             let (data, response) = try await resources.session.data(for: request)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                AppLog.networking.error("Artwork HTTP \(http.statusCode, privacy: .public) for \(url.absoluteString, privacy: .public)")
+                log(.error, "Artwork HTTP \(http.statusCode) for \(NetworkDiagnostic.endpoint(url))")
                 return nil
             }
             return data
         } catch {
-            AppLog.networking.error("Artwork fetch failed for \(url.absoluteString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            log(.error, "Artwork fetch failed for \(NetworkDiagnostic.endpoint(url)): \(NetworkDiagnostic.reason(error))")
             return nil
         }
     }
@@ -215,7 +218,7 @@ final class ArtworkCache: @unchecked Sendable {
         // Fall back to a direct decode so we still show artwork; this path is rare
         // and not on the hot scroll path.
         guard let image = UIImage(data: data) else {
-            AppLog.networking.error("Artwork data for \(url.absoluteString, privacy: .public) could not be decoded")
+            log(.error, "Artwork data for \(NetworkDiagnostic.endpoint(url)) could not be decoded")
             return nil
         }
         return image

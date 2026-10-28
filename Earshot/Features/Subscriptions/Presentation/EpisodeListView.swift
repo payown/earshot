@@ -873,7 +873,7 @@ struct EpisodeListView: View {
         } catch {
             olderEpisodesState = .failed
             AppLog.subscriptions.error(
-                "Loading older episodes failed: \(error.localizedDescription, privacy: .public)"
+                "Loading older episodes failed: \(NetworkDiagnostic.reason(error), privacy: .public)"
             )
             Announcer.announce("Couldn't load older episodes")
         }

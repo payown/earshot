@@ -921,7 +921,7 @@ final class PlayerService {
                 downloadPath: episode.localAudioURL?.path,
                 audioURL: episode.audioURL
             ) else {
-                AppLog.player.error("Cannot play episode, no usable source: \(episode.audioURL, privacy: .public)")
+                AppLog.player.error("Cannot play episode: no usable audio source")
                 if announcesQueueNavigation {
                     Announcer.announce("Could not play \(episode.title). No usable audio source.")
                 }
@@ -1135,7 +1135,7 @@ final class PlayerService {
             downloadPath: episode.localAudioURL?.path,
             audioURL: episode.audioURL
         ) else {
-            AppLog.player.error("Cannot load episode, no usable source: \(episode.audioURL, privacy: .public)")
+            AppLog.player.error("Cannot load episode: no usable audio source")
             return
         }
         beginMediaResolution()

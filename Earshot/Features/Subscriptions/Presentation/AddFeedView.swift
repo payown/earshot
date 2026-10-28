@@ -83,11 +83,10 @@ struct AddFeedView: View {
             Announcer.announce("Now following \(podcast.displayName)")
             dismiss()
         } catch {
-            // Keep the raw error for diagnostics, but never surface it: a raw
-            // transport string (FeedError.network) garbles VoiceOver (#688). The
+            // A raw transport string (FeedError.network) garbles VoiceOver (#688). The
             // curated message drives the visible text, the a11y label (:55), and
             // the announcement alike.
-            AppLog.subscriptions.error("Add feed failed: \(error.localizedDescription, privacy: .public)")
+            AppLog.subscriptions.error("Add feed failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
             let message = SubscribeErrorMessage.userFacing(error)
             errorMessage = message
             Announcer.announce("Couldn't add podcast. \(message)")

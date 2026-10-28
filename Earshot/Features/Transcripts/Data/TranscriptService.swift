@@ -51,10 +51,13 @@ struct TranscriptService {
     /// API downloads before we can measure, so this is a post-fetch guard; the
     /// resource timeout in ``EarshotURLSession`` bounds the download itself.)
     private let maxBytes: Int
+    private let log: NetworkDiagnostic.Sink
 
-    init(http: HTTPClient = HTTPClient(), maxBytes: Int = 5_000_000) {
+    init(http: HTTPClient = HTTPClient(), maxBytes: Int = 5_000_000,
+         log: @escaping NetworkDiagnostic.Sink = NetworkDiagnostic.systemSink) {
         self.http = http
         self.maxBytes = maxBytes
+        self.log = log
     }
 
     /// Loads and parses the transcript at `urlString`, returning parsed segments
@@ -64,7 +67,7 @@ struct TranscriptService {
         guard let url = URL(string: trimmed),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https" else {
-            AppLog.networking.error("Transcript URL invalid: \(urlString, privacy: .public)")
+            log(.error, "Transcript URL invalid")
             return .failure(.invalidURL)
         }
 
@@ -74,21 +77,21 @@ struct TranscriptService {
             (data, response) = try await http.dataWithResponse(from: trimmed)
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            AppLog.networking.error("Transcript fetch failed for \(trimmed, privacy: .public): \(message, privacy: .public)")
+            log(.error, "Transcript fetch failed for \(NetworkDiagnostic.endpoint(url)): \(NetworkDiagnostic.reason(error))")
             return .failure(.network(message))
         }
 
         guard data.count <= maxBytes else {
-            AppLog.networking.error("Transcript too large (\(data.count, privacy: .public) bytes) for \(trimmed, privacy: .public)")
+            log(.error, "Transcript too large (\(data.count) bytes) for \(NetworkDiagnostic.endpoint(url))")
             return .failure(.tooLarge(bytes: data.count))
         }
         guard !data.isEmpty else {
-            AppLog.networking.info("Transcript body empty for \(trimmed, privacy: .public)")
+            log(.info, "Transcript body empty for \(NetworkDiagnostic.endpoint(url))")
             return .failure(.empty)
         }
 
         guard let text = decodeText(data) else {
-            AppLog.networking.error("Transcript decode failed for \(trimmed, privacy: .public)")
+            log(.error, "Transcript decode failed for \(NetworkDiagnostic.endpoint(url))")
             return .failure(.decodingFailed)
         }
 
@@ -96,11 +99,11 @@ struct TranscriptService {
         let format = TranscriptFormat.detect(url: url, contentType: contentType)
         let segments = TranscriptParser.parse(text, as: format)
         guard !segments.isEmpty else {
-            AppLog.networking.info("Transcript parsed to zero segments (\(format.rawValue, privacy: .public)) for \(trimmed, privacy: .public)")
+            log(.info, "Transcript parsed to zero segments (\(format.rawValue)) for \(NetworkDiagnostic.endpoint(url))")
             return .failure(.empty)
         }
 
-        AppLog.networking.info("Parsed \(segments.count, privacy: .public) transcript segments (\(format.rawValue, privacy: .public)) from \(trimmed, privacy: .public)")
+        log(.info, "Parsed \(segments.count) transcript segments (\(format.rawValue)) from \(NetworkDiagnostic.endpoint(url))")
         return .success(segments)
     }
 
