@@ -56,7 +56,6 @@ struct DownloadActivityScreen: View {
     @State private var loadError: String?
     @State private var retryRequest: [EpisodeLocalKey]?
     @State private var isRetrying = false
-    @State private var showStatusSummary = false
 
     private struct Entry: Identifiable {
         let id: EpisodeLocalKey
@@ -79,8 +78,6 @@ struct DownloadActivityScreen: View {
                 Text("This screen tracks episode audio downloads. To retry a failed check for new episodes, open Settings, Feed Refresh.")
                 Text(summary.text)
                     .accessibilityIdentifier("downloadActivitySummary")
-                Button("Read download status") { showStatusSummary = true }
-                    .accessibilityLabel("Read download status")
                 Toggle("Include completed downloads", isOn: $showCompleted)
                 Button("Retry failed downloads") {
                     retryRequest = Array(records.filter { $0.status == .failed }
@@ -120,11 +117,6 @@ struct DownloadActivityScreen: View {
         }
         .navigationTitle("Download activity")
         .task(id: page) { load(page) }
-        .alert("Download status", isPresented: $showStatusSummary) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(summary.text)
-        }
         .confirmationDialog("Retry failed downloads?", isPresented: Binding(
             get: { retryRequest != nil },
             set: { if !$0 { retryRequest = nil } }

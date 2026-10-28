@@ -317,15 +317,8 @@ final class EarshotUITests: XCTestCase {
         let failure = NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "failed 2", "Downloading 0")
         expectation(for: failure, evaluatedWith: summary)
         waitForExpectations(timeout: 15)
-        let readStatus = app.buttons["Read download status"]
-        XCTAssertTrue(readStatus.exists)
-        let expectedStatus = summary.label
-        readStatus.tap()
-        let statusAlert = app.alerts["Download status"]
-        XCTAssertTrue(statusAlert.waitForExistence(timeout: 5))
-        XCTAssertTrue(statusAlert.staticTexts[expectedStatus].exists)
-        statusAlert.buttons["OK"].tap()
-        XCTAssertFalse(statusAlert.exists)
+        XCTAssertTrue(summary.isHittable, "The current status should be available to read directly")
+        XCTAssertFalse(app.buttons["Read download status"].exists)
         app.buttons["Retry failed downloads"].tap()
         let retry = app.buttons["Retry 2 downloads"].firstMatch
         XCTAssertTrue(retry.waitForExistence(timeout: 5))

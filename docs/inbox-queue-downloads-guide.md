@@ -56,7 +56,7 @@ Open Downloads, then Download activity. You can also reach Download activity fro
 
 Downloading means Earshot has requested a transfer from iOS. It may still be connecting or waiting for system scheduling. Waiting for Wi-Fi means the Wi-Fi-only setting is holding the request. Download failed means the request did not succeed. Downloaded means completed audio is stored locally.
 
-The summary and episode states update without announcing every completion. Activate Read download status to hear one current summary. Include completed downloads lets you review completed requests alongside other states. Otherwise, the list shows downloading, waiting, and failed episodes. Use Show more download requests to reveal more entries.
+The summary and episode states update without announcing every completion. Read the summary to check the current counts. Include completed downloads lets you review completed requests alongside other states. Otherwise, the list shows downloading, waiting, and failed episodes. Use Show more download requests to reveal more entries.
 
 Find a failed episode and activate Retry download for that episode. Retry failed downloads offers a confirmation for up to 50 failures across all podcasts. Any additional failures remain available for another batch. Retries still respect Wi-Fi-only. A failed episode may still stream when played, but streaming needs a connection.
 
