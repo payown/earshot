@@ -94,7 +94,12 @@ struct TabBarBadgeApplier: UIViewRepresentable {
     /// duplicate, never a broken tab bar.
     private static func hideBadgeAccessibility(in root: UIView) {
         if String(describing: type(of: root)).contains("Badge") {
-            root.accessibilityElementsHidden = true
+            // Reassigning these properties can invalidate the accessibility
+            // hierarchy even when UIKit's badge subtree is already correct.
+            // Still visit every pass so newly created/reset badges are repaired.
+            if !root.accessibilityElementsHidden {
+                root.accessibilityElementsHidden = true
+            }
             setIsAccessibilityElementFalse(in: root)
             return
         }
@@ -102,7 +107,9 @@ struct TabBarBadgeApplier: UIViewRepresentable {
     }
 
     private static func setIsAccessibilityElementFalse(in view: UIView) {
-        view.isAccessibilityElement = false
+        if view.isAccessibilityElement {
+            view.isAccessibilityElement = false
+        }
         for sub in view.subviews { setIsAccessibilityElementFalse(in: sub) }
     }
 
