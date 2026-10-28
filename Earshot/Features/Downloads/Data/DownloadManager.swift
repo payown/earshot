@@ -208,6 +208,10 @@ final class DownloadManager {
 
     @ObservationIgnored private static let delegate = DownloadSessionDelegate()
     @ObservationIgnored private static let terminalRetrier = DownloadEventRetrier()
+    /// Store effects already committed in this process but not yet removed
+    /// from the journal. Retry only the acknowledgement, since a newer
+    /// download may have started after the first application.
+    @ObservationIgnored private static var pendingAcknowledgements: Set<UUID> = []
 
     /// The one background session for the process. Lazily created; recreating it
     /// on a background relaunch reconnects the delegate to outstanding tasks.
@@ -979,15 +983,25 @@ final class DownloadManager {
             try DownloadTaskKey.findEpisode(matching: $0, in: $1)
         },
         persist: (ModelContext) throws -> Void = { try $0.save() },
-        acknowledge: (PendingDownloadTerminalEvent) -> Void = { delegate.acknowledge($0) }
+        acknowledge: (PendingDownloadTerminalEvent) -> Bool = { delegate.acknowledge($0) }
     ) -> Bool {
+        func acknowledgeAppliedEvent() -> Bool {
+            guard acknowledge(event) else {
+                pendingAcknowledgements.insert(event.id)
+                return false
+            }
+            pendingAcknowledgements.remove(event.id)
+            return true
+        }
+        if pendingAcknowledgements.contains(event.id) {
+            return acknowledgeAppliedEvent()
+        }
         if RecoveryDownloadRemoval.isPending {
             if case .finished(let fileName) = event.outcome,
                let url = DownloadPaths.resolveLocalURL(storedValue: fileName) {
                 try? FileManager.default.removeItem(at: url)
             }
-            acknowledge(event)
-            return true
+            return acknowledgeAppliedEvent()
         }
         guard let context = container?.mainContext else { return false }
         do {
@@ -999,8 +1013,7 @@ final class DownloadManager {
             case .failed:
                 try fail(taskKey: event.taskKey, episode: episode, context: context, persist: persist)
             }
-            acknowledge(event)
-            return true
+            return acknowledgeAppliedEvent()
         } catch {
             AppLog.networking.error("Download event will be retried: \(error.localizedDescription, privacy: .public)")
             return false

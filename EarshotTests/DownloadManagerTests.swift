@@ -687,6 +687,62 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertTrue(DownloadEventJournal(url: directory.appendingPathComponent("events.json")).pendingEvents().isEmpty)
     }
 
+    func testFailedJournalAcknowledgementRetriesWithoutDeletingOwnedAudio() throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "ack-retry", title: "Retry", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let name = "earshot-test-ack-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            DownloadManager.setContainerForTesting(nil)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let writer = JournalWriteProbe()
+        let path = directory.appendingPathComponent("events.json")
+        let journal = DownloadEventJournal(url: path, write: writer.write)
+        let event = journal.record(taskKey: episode.guid, outcome: .finished(fileName: name))
+        DownloadManager.setContainerForTesting(context.container)
+        writer.failNext()
+
+        XCTAssertFalse(DownloadManager.handle(event, acknowledge: { journal.acknowledge($0.id) }))
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, name)
+        XCTAssertEqual(journal.pendingEvents(), [event])
+        XCTAssertEqual(DownloadEventJournal(url: path).pendingEvents(), [event])
+        XCTAssertTrue(DownloadManager.handle(event, acknowledge: { journal.acknowledge($0.id) }))
+        XCTAssertTrue(journal.pendingEvents().isEmpty)
+        XCTAssertTrue(DownloadEventJournal(url: path).pendingEvents().isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testAcknowledgementRetryDoesNotApplyOldFailureToNewAttempt() throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "ack-old-failure", title: "Retry", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            DownloadManager.setContainerForTesting(nil)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let writer = JournalWriteProbe()
+        let path = directory.appendingPathComponent("events.json")
+        let journal = DownloadEventJournal(url: path, write: writer.write)
+        let event = journal.record(taskKey: episode.guid, outcome: .failed)
+        DownloadManager.setContainerForTesting(context.container)
+        writer.failNext()
+        XCTAssertFalse(DownloadManager.handle(event, acknowledge: { journal.acknowledge($0.id) }))
+        XCTAssertEqual(episode.downloadStatus, .failed)
+
+        ActiveDownload.setDownloadStatus(.downloading, on: episode, in: context)
+        try context.save()
+        XCTAssertTrue(DownloadManager.handle(event, acknowledge: { journal.acknowledge($0.id) }))
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+        XCTAssertTrue(DownloadEventJournal(url: path).pendingEvents().isEmpty)
+    }
+
     func test_finishedDownloadSchedulesNotificationWhenEnabled() async throws {
         let context = TestStore.freshContext()
         let episode = Episode(
@@ -1650,6 +1706,77 @@ final class DownloadEventJournalTests: XCTestCase {
         )
     }
 
+    func testUnreadableAndUnsupportedJournalsAreNeverOverwritten() throws {
+        for original in [Data(#"{"version":1,"events":"broken"}"#.utf8),
+                         Data(#"{"version":99,"events":[]}"#.utf8)] {
+            try original.write(to: journalURL, options: .atomic)
+            let journal = DownloadEventJournal(url: journalURL)
+            let event = journal.record(taskKey: "feed|episode", outcome: .failed)
+            XCTAssertEqual(journal.pendingEvents(), [event])
+            XCTAssertEqual(try Data(contentsOf: journalURL), original)
+            XCTAssertFalse(journal.acknowledge(event.id))
+            XCTAssertThrowsError(try journal.acknowledgeAllForRecovery())
+            XCTAssertEqual(journal.pendingEvents(), [event])
+            XCTAssertEqual(try Data(contentsOf: journalURL), original)
+        }
+    }
+
+    func testUnreadableJournalPathDoesNotGetTreatedAsMissing() throws {
+        try FileManager.default.createDirectory(at: journalURL, withIntermediateDirectories: true)
+        let marker = journalURL.appendingPathComponent("preserve")
+        try Data("original".utf8).write(to: marker)
+        let journal = DownloadEventJournal(url: journalURL)
+        let event = journal.record(taskKey: "feed|episode", outcome: .failed)
+        XCTAssertFalse(journal.acknowledge(event.id))
+        XCTAssertThrowsError(try journal.acknowledgeAllForRecovery())
+        XCTAssertEqual(try Data(contentsOf: marker), Data("original".utf8))
+        XCTAssertEqual(journal.pendingEvents(), [event])
+    }
+
+    func testPermissionFailureRetainsJournalUntilItBecomesReadable() throws {
+        let originalJournal = DownloadEventJournal(url: journalURL)
+        let oldEvent = originalJournal.record(taskKey: "old", outcome: .failed)
+        let original = try Data(contentsOf: journalURL)
+        let reader = JournalReadProbe()
+        let journal = DownloadEventJournal(url: journalURL, read: reader.read)
+        let newEvent = journal.record(taskKey: "new", outcome: .failed)
+        XCTAssertFalse(journal.acknowledge(newEvent.id))
+        XCTAssertEqual(try Data(contentsOf: journalURL), original)
+        XCTAssertEqual(journal.pendingEvents(), [newEvent])
+
+        reader.allowReads()
+        XCTAssertEqual(journal.pendingEvents(), [oldEvent, newEvent])
+        XCTAssertTrue(journal.acknowledge(newEvent.id))
+        XCTAssertEqual(DownloadEventJournal(url: journalURL).pendingEvents(), [oldEvent])
+    }
+
+    func testFailedRecordWriteRetainsEventAndLaterWritePersistsBoth() {
+        let writer = JournalWriteProbe()
+        let journal = DownloadEventJournal(url: journalURL, write: writer.write)
+        writer.failNext()
+        let first = journal.record(taskKey: "feed|first", outcome: .failed)
+        XCTAssertEqual(journal.pendingEvents(), [first])
+        XCTAssertTrue(DownloadEventJournal(url: journalURL).pendingEvents().isEmpty,
+                      "A failed write cannot survive process death")
+        let second = journal.record(taskKey: "feed|second", outcome: .failed)
+        XCTAssertEqual(DownloadEventJournal(url: journalURL).pendingEvents(), [first, second])
+    }
+
+    func testPreviouslyUnreadableJournalCanBeLoadedWithoutLosingNewEvent() throws {
+        try Data("unreadable".utf8).write(to: journalURL)
+        let journal = DownloadEventJournal(url: journalURL)
+        let newEvent = journal.record(taskKey: "new", outcome: .failed)
+
+        let replacementURL = directory.appendingPathComponent("replacement.json")
+        let replacement = DownloadEventJournal(url: replacementURL)
+        let oldEvent = replacement.record(taskKey: "old", outcome: .failed)
+        try Data(contentsOf: replacementURL).write(to: journalURL, options: .atomic)
+
+        XCTAssertTrue(journal.acknowledge(newEvent.id))
+        XCTAssertEqual(journal.pendingEvents(), [oldEvent])
+        XCTAssertEqual(DownloadEventJournal(url: journalURL).pendingEvents(), [oldEvent])
+    }
+
     func testRecoveryHandlerDoesNotQueuePersistedEventReplay() {
         let journal = DownloadEventJournal(url: journalURL)
         journal.record(taskKey: "feed|episode", outcome: .failed)
@@ -1662,6 +1789,42 @@ final class DownloadEventJournalTests: XCTestCase {
 
         XCTAssertEqual(handled, 0)
         XCTAssertEqual(journal.pendingEvents().count, 1)
+    }
+}
+
+private final class JournalWriteProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var shouldFail = false
+
+    func failNext() { lock.withLock { shouldFail = true } }
+
+    func write(_ url: URL, _ data: Data?) throws {
+        let fail = lock.withLock {
+            defer { shouldFail = false }
+            return shouldFail
+        }
+        if fail { throw DownloadEventTestError.injected }
+        guard let data else {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            return
+        }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+    }
+}
+
+private final class JournalReadProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var blocked = true
+
+    func allowReads() { lock.withLock { blocked = false } }
+
+    func read(_ url: URL) throws -> Data {
+        if lock.withLock({ blocked }) { throw CocoaError(.fileReadNoPermission) }
+        return try Data(contentsOf: url)
     }
 }
 

@@ -34,8 +34,9 @@ struct PendingDownloadTerminalEvent: Codable, Equatable, Sendable {
 }
 
 /// Thread-safe, atomic file journal for terminal URL-session events. Events are
-/// acknowledged only after DownloadManager has attempted their idempotent store
-/// update, so a kill between delivery and container readiness replays safely.
+/// acknowledged only after DownloadManager has saved their idempotent store
+/// update. An unsuccessful disk write retains the event in memory, but cannot
+/// make it survive process death while storage is unavailable.
 final class DownloadEventJournal: @unchecked Sendable {
     private struct PersistedJournal: Codable {
         let version: Int
@@ -67,22 +68,23 @@ final class DownloadEventJournal: @unchecked Sendable {
     private let url: URL
     private let lock = NSLock()
     private var events: [PendingDownloadTerminalEvent]
+    private var needsLoad: Bool
+    private let read: @Sendable (URL) throws -> Data
+    private let write: @Sendable (URL, Data?) throws -> Void
 
-    init(url: URL) {
+    init(url: URL,
+         read: @escaping @Sendable (URL) throws -> Data = { try Data(contentsOf: $0) },
+         write: @escaping @Sendable (URL, Data?) throws -> Void = DownloadEventJournal.writeJournal) {
         self.url = url
+        self.read = read
+        self.write = write
         events = []
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        needsLoad = true
         do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            let header = try decoder.decode(VersionHeader.self, from: data)
-            guard header.version == Self.currentVersion else {
-                throw LoadError.unsupportedVersion(header.version)
-            }
-            events = try decoder.decode(PersistedJournal.self, from: data).events
+            try loadIfNeededLocked()
         } catch {
             AppLog.networking.error(
-                "Could not decode pending download event journal; pending events were not loaded: \(error.localizedDescription, privacy: .public)"
+                "Could not load pending download event journal; original data retained: \(NetworkDiagnostic.reason(error), privacy: .public)"
             )
         }
     }
@@ -94,6 +96,8 @@ final class DownloadEventJournal: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let event = PendingDownloadTerminalEvent(taskKey: taskKey, outcome: outcome)
+        // Always retain the callback in memory, even if reading or writing the
+        // journal fails. Do not replace an unreadable or newer-format journal.
         events.append(event)
         persistLocked()
         return event
@@ -102,19 +106,39 @@ final class DownloadEventJournal: @unchecked Sendable {
     func pendingEvents() -> [PendingDownloadTerminalEvent] {
         lock.lock()
         defer { lock.unlock() }
+        // A previously unavailable file may become readable before replay.
+        // Keep live events even when the on-disk journal is still unavailable.
+        try? loadIfNeededLocked()
         return events
     }
 
-    func acknowledge(_ id: UUID) {
+    @discardableResult
+    func acknowledge(_ id: UUID) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        events.removeAll { $0.id == id }
-        persistLocked()
+        do {
+            try loadIfNeededLocked()
+            let retained = events
+            events.removeAll { $0.id == id }
+            do {
+                try persistLockedThrowing()
+                return true
+            } catch {
+                events = retained
+                throw error
+            }
+        } catch {
+            AppLog.networking.error(
+                "Could not acknowledge pending download event: \(NetworkDiagnostic.reason(error), privacy: .public)"
+            )
+            return false
+        }
     }
 
     func acknowledgeAllForRecovery() throws {
         lock.lock()
         defer { lock.unlock() }
+        try loadIfNeededLocked()
         let retained = events
         events.removeAll()
         do {
@@ -130,13 +154,43 @@ final class DownloadEventJournal: @unchecked Sendable {
             try persistLockedThrowing()
         } catch {
             AppLog.networking.error(
-                "Could not persist pending download event: \(error.localizedDescription, privacy: .public)"
+                "Could not persist pending download event: \(NetworkDiagnostic.reason(error), privacy: .public)"
             )
         }
     }
 
     private func persistLockedThrowing() throws {
-        if events.isEmpty {
+        try loadIfNeededLocked()
+        let data = try events.isEmpty ? nil : JSONEncoder().encode(PersistedJournal(
+            version: Self.currentVersion,
+            events: events
+        ))
+        try write(url, data)
+    }
+
+    private func loadIfNeededLocked() throws {
+        guard needsLoad else { return }
+        let data: Data
+        do {
+            data = try read(url)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain
+            && (error.code == NSFileReadNoSuchFileError || error.code == NSFileNoSuchFileError) {
+            needsLoad = false
+            return
+        }
+        let decoder = JSONDecoder()
+        let header = try decoder.decode(VersionHeader.self, from: data)
+        guard header.version == Self.currentVersion else {
+            throw LoadError.unsupportedVersion(header.version)
+        }
+        let stored = try decoder.decode(PersistedJournal.self, from: data).events
+        let inMemoryIDs = Set(events.map(\.id))
+        events = stored.filter { !inMemoryIDs.contains($0.id) } + events
+        needsLoad = false
+    }
+
+    private static func writeJournal(to url: URL, data: Data?) throws {
+        guard let data else {
             guard FileManager.default.fileExists(atPath: url.path) else { return }
             try FileManager.default.removeItem(at: url)
             return
@@ -145,10 +199,6 @@ final class DownloadEventJournal: @unchecked Sendable {
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let data = try JSONEncoder().encode(PersistedJournal(
-            version: Self.currentVersion,
-            events: events
-        ))
         try data.write(to: url, options: .atomic)
     }
 }
@@ -209,7 +259,8 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     }
 
     /// Installs the process-level background-session completion callback. It is
-    /// independent of store readiness because terminal events are durable first.
+    /// independent of store readiness. Journal writes can fail, in which case
+    /// events remain only in memory and may be lost if the process exits.
     func installEventsFinishedHandler(
         _ handler: @escaping @Sendable () -> Void
     ) {
@@ -218,7 +269,8 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         handlerLock.unlock()
     }
 
-    func acknowledge(_ event: PendingDownloadTerminalEvent) {
+    @discardableResult
+    func acknowledge(_ event: PendingDownloadTerminalEvent) -> Bool {
         journal.acknowledge(event.id)
     }
 
