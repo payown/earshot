@@ -108,6 +108,49 @@ final class OPMLImportCoordinatorTests: XCTestCase {
         XCTAssertEqual(staged.data, Data("second".utf8))
     }
 
+    func testIncomingDocumentCannotReplaceCandidateWhileConfirmationIsOpen() async throws {
+        let store = try makeStore()
+        let coordinator = OPMLImportCoordinator(store: store)
+        _ = try await coordinator.stage(Data("original".utf8), displayName: "old.opml")
+        try await coordinator.requestStage(Data("first".utf8), displayName: "first.opml")
+        let originalConfirmation = coordinator.state
+        do {
+            try await coordinator.requestStage(Data("second".utf8), displayName: "second.opml")
+            XCTFail("An open confirmation must keep the first candidate")
+        } catch {
+            XCTAssertEqual(error as? OPMLImportCoordinatorFailure, .storageUnavailable)
+        }
+        XCTAssertEqual(coordinator.state, originalConfirmation)
+        try await coordinator.confirmReplacement()
+        let staged = try await store.load()
+        XCTAssertEqual(staged?.data, Data("first".utf8))
+    }
+
+    func testIncomingDocumentCannotReplaceCandidateWhileRecoveryConfirmationIsOpen() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appending(path: "Pending OPML Import")
+        let store = PendingOPMLImportStore(rootURL: root)
+        _ = try await store.stage(Data("original".utf8), displayName: "old.opml")
+        try Data("broken".utf8).write(to: root.appending(path: "pending.json"))
+        let coordinator = OPMLImportCoordinator(store: store)
+        try await coordinator.requestStage(Data("first".utf8), displayName: "first.opml")
+        let originalConfirmation = coordinator.state
+        do {
+            try await coordinator.requestStage(Data("second".utf8), displayName: "second.opml")
+            XCTFail("An open recovery confirmation must keep the first candidate")
+        } catch {
+            XCTAssertEqual(error as? OPMLImportCoordinatorFailure, .storageUnavailable)
+        }
+        XCTAssertEqual(coordinator.state, originalConfirmation)
+        try await coordinator.confirmReplacement()
+        let staged = try await store.load()
+        XCTAssertEqual(staged?.data, Data("first".utf8))
+        let archiveRoot = parent.appending(path: "Pending OPML Recovery")
+        let archive = try XCTUnwrap(try FileManager.default.contentsOfDirectory(at: archiveRoot, includingPropertiesForKeys: nil).first)
+        XCTAssertEqual(try Data(contentsOf: archive.appending(path: "pending.json")), Data("broken".utf8))
+    }
+
     func testIncomingDocumentCannotReplaceAnImportAlreadyInProgress() async throws {
         let store = try makeStore()
         let coordinator = OPMLImportCoordinator(store: store)

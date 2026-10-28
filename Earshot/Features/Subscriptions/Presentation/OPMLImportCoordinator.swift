@@ -85,6 +85,14 @@ final class OPMLImportCoordinator {
         guard !stageRequestInProgress else {
             throw OPMLImportCoordinatorFailure.storageUnavailable
         }
+        // A visible confirmation refers to its original candidate. Do not let
+        // a later Open In request silently change the file it would import.
+        switch state {
+        case .replacementRequested, .unreadableReplacementRequested:
+            throw OPMLImportCoordinatorFailure.storageUnavailable
+        default:
+            break
+        }
         // Replacing the durable document while an import is running can make
         // that import's completion discard or update the wrong document.
         if case .importing = state {
