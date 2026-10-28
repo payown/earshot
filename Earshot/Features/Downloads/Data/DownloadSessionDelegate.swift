@@ -256,6 +256,7 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     private var replayTask: Task<Void, Never>?
     private var replayID: UUID?
     private var replayRequested = false
+    private var readableWaiters: [UUID: @Sendable (UInt64) -> Void] = [:]
     private let retryDelays: [Duration]
     private let retrySleep: @Sendable (Duration) async throws -> Void
     private var eventsFinishedHandler: (@Sendable () -> Void)?
@@ -283,6 +284,7 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         replayRequested = false
         handlerGeneration &+= 1
         normalHandler = replayingPendingEvents
+        if !replayingPendingEvents { readableWaiters.removeAll() }
         terminalHandler = handler
         self.replayHandler = replayHandler
         handlerLock.unlock()
@@ -307,22 +309,49 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
             defer { self.finishReplay(generation: generation, id: id) }
             if let events = self.journal.pendingEventsIfReadable() {
                 await self.deliverReplay(events, generation: generation)
+                self.notifyReadable(generation: generation)
                 return
             }
             // Deliver newly arrived in-memory events even if older bytes are
             // unreadable; never modify the unreadable journal during this scan.
             await self.deliverReplay(self.journal.pendingEvents(), generation: generation)
+            // The preceding read may have succeeded after the initial try-lock
+            // failed, or while replaying a newly arrived event.
+            if let events = self.journal.pendingEventsIfReadable() {
+                await self.deliverReplay(events, generation: generation)
+                self.notifyReadable(generation: generation)
+                return
+            }
             for delay in self.retryDelays {
                 do { try await self.retrySleep(delay) } catch { return }
                 guard !Task.isCancelled, self.isCurrentNormalHandler(generation) else { return }
                 if let events = self.journal.pendingEventsIfReadable() {
                     await self.deliverReplay(events, generation: generation)
+                    self.notifyReadable(generation: generation)
                     return
                 }
             }
         }
         replayTask = task
         handlerLock.unlock()
+    }
+
+    /// Register first, then start a scan: a read that finished just before
+    /// registration must not leave a skipped launch reconciliation stranded.
+    func whenJournalReadable(id: UUID, _ callback: @escaping @Sendable (UInt64) -> Void) {
+        handlerLock.lock()
+        readableWaiters[id] = callback
+        handlerLock.unlock()
+        retryPendingEvents()
+    }
+
+    private func notifyReadable(generation: UInt64) {
+        handlerLock.lock()
+        guard handlerGeneration == generation, normalHandler else { handlerLock.unlock(); return }
+        let callbacks = Array(readableWaiters.values)
+        readableWaiters.removeAll()
+        handlerLock.unlock()
+        for callback in callbacks { callback(generation) }
     }
 
     func isCurrentNormalHandler(_ generation: UInt64) -> Bool {

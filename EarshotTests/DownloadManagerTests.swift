@@ -942,6 +942,57 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, .failed)
     }
 
+    func testUnreadableJournalAutomaticallyResumesDeferredReconciliation() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "journal-recovered", title: "Pending",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        let reader = JournalReadProbe()
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let journal = DownloadEventJournal(url: url, read: reader.read)
+        let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [])
+        delegate.installTerminalHandler { _, _ in }
+
+        await manager.reconcileStuckDownloads(journalDelegate: delegate) {
+            await DownloadManager.liveTaskKeys(taskDescriptions: { [] }, pendingKeys: { delegate.pendingTaskKeys() })
+        }
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+        reader.allowReads()
+        // This is the same entry point used on foreground and protected-data availability.
+        delegate.retryPendingEvents()
+        for _ in 0..<100 where episode.downloadStatus == .downloading {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(episode.downloadStatus, .failed)
+    }
+
+    func testDeferredReconciliationDoesNotUseReplacedContext() async throws {
+        let oldContext = TestStore.freshContext()
+        let episode = Episode(guid: "journal-old-context", title: "Pending",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: oldContext)
+        let manager = makeManager(oldContext)
+        DownloadManager.setContainerForTesting(oldContext.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        let reader = JournalReadProbe()
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let delegate = DownloadSessionDelegate(journal: DownloadEventJournal(url: url, read: reader.read), retryDelays: [])
+        delegate.installTerminalHandler { _, _ in }
+        await manager.reconcileStuckDownloads(journalDelegate: delegate) {
+            await DownloadManager.liveTaskKeys(taskDescriptions: { [] }, pendingKeys: { delegate.pendingTaskKeys() })
+        }
+        let replacement = TestStore.freshContext()
+        manager.configureForTesting(context: replacement, isOnWifi: true)
+        DownloadManager.setContainerForTesting(replacement.container)
+        reader.allowReads()
+        delegate.retryPendingEvents()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+    }
+
     func testReconciliationDoesNotOverwriteCompletionDuringTaskEnumeration() async throws {
         let context = TestStore.freshContext()
         let episode = Episode(guid: "finished-during-reconciliation", title: "Finished",

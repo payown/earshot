@@ -191,6 +191,9 @@ final class DownloadManager {
     @ObservationIgnored private var hasReceivedNetworkPath = false
 
     @ObservationIgnored private var context: ModelContext?
+    @ObservationIgnored private weak var deferredReconciliationContext: ModelContext?
+    @ObservationIgnored private var deferredReconciliationKeys: (@MainActor () async -> Set<String>?)?
+    @ObservationIgnored private let journalWaiterID = UUID()
     @ObservationIgnored private var settings: AppSettingsStore?
     @ObservationIgnored private let monitor = NWPathMonitor()
     /// Observer for `.earshotQueueDidChange`, so queued episodes auto-download.
@@ -207,6 +210,10 @@ final class DownloadManager {
 
     #if DEBUG
     func configureForTesting(context: ModelContext, isOnWifi: Bool) {
+        if self.context !== context {
+            deferredReconciliationContext = nil
+            deferredReconciliationKeys = nil
+        }
         self.context = context
         self.settings = AppSettingsStore(context: context)
         self.isOnWifi = isOnWifi
@@ -381,6 +388,10 @@ final class DownloadManager {
     }
 
     func configure(context: ModelContext) {
+        if self.context !== context {
+            deferredReconciliationContext = nil
+            deferredReconciliationKeys = nil
+        }
         self.context = context
         self.settings = AppSettingsStore(context: context)
         monitor.pathUpdateHandler = { [weak self] path in
@@ -420,6 +431,8 @@ final class DownloadManager {
 
     /// Releases the old SwiftData graph before Settings reset unlinks its files.
     func releasePersistence() async {
+        deferredReconciliationContext = nil
+        deferredReconciliationKeys = nil
         Self.terminalRetrier.cancelAll()
         _ = await Self.cancelAllTasksAndWaitForRecovery()
         context = nil
@@ -623,13 +636,43 @@ final class DownloadManager {
     /// The candidate rows now come from the bounded ``ActiveDownload`` table
     /// rather than a whole-`Episode`-table fetch on the main actor (#701); the
     /// orphan comparison itself is unchanged.
-    func reconcileStuckDownloads(liveKeys: @MainActor () async -> Set<String>? = { await DownloadManager.liveTaskKeys() }) async {
+    func reconcileStuckDownloads(
+        journalDelegate: DownloadSessionDelegate = DownloadManager.delegate,
+        requiredGeneration: UInt64? = nil,
+        liveKeys: @escaping @MainActor () async -> Set<String>? = { await DownloadManager.liveTaskKeys() }
+    ) async {
         guard let context else { return }
         let markedDownloading = await activeEpisodes(state: .downloading, in: context)
         guard !markedDownloading.isEmpty else { return }
 
-        guard let liveKeys = await liveKeys(), !Task.isCancelled, self.context === context,
-              !RecoveryDownloadRemoval.isPending else { return }
+        let keys = await liveKeys()
+        guard !Task.isCancelled, self.context === context,
+              !RecoveryDownloadRemoval.isPending,
+              requiredGeneration.map({ journalDelegate.isCurrentNormalHandler($0) && Self.container === context.container }) ?? true else { return }
+        guard let liveKeys = keys else {
+            deferredReconciliationContext = context
+            deferredReconciliationKeys = liveKeys
+            journalDelegate.whenJournalReadable(id: journalWaiterID) { [weak self, weak journalDelegate] generation in
+                Task { @MainActor [weak self, weak journalDelegate] in
+                    guard let self, let journalDelegate,
+                          let context = self.deferredReconciliationContext,
+                          self.context === context, Self.container === context.container,
+                          !RecoveryDownloadRemoval.isPending,
+                          journalDelegate.isCurrentNormalHandler(generation),
+                          let retryKeys = self.deferredReconciliationKeys else { return }
+                    self.deferredReconciliationContext = nil
+                    self.deferredReconciliationKeys = nil
+                    await self.reconcileStuckDownloads(
+                        journalDelegate: journalDelegate,
+                        requiredGeneration: generation,
+                        liveKeys: retryKeys
+                    )
+                }
+            }
+            return
+        }
+        deferredReconciliationContext = nil
+        deferredReconciliationKeys = nil
         let identities = markedDownloading.map { episode in
             (composite: DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
              bare: episode.guid)
