@@ -43,9 +43,12 @@ struct ITunesSearchService: Sendable {
     private static let maximumResults = 200
 
     private let session: URLSession
+    private let log: NetworkDiagnostic.Sink
 
-    init(session: URLSession = EarshotURLSession.shared) {
+    init(session: URLSession = EarshotURLSession.shared,
+         log: @escaping NetworkDiagnostic.Sink = NetworkDiagnostic.systemSink) {
         self.session = session
+        self.log = log
     }
 
     /// Searches the directory for `term`. Never throws; failures are folded into
@@ -71,7 +74,7 @@ struct ITunesSearchService: Sendable {
             URLQueryItem(name: "term", value: trimmed),
         ]
         guard let url = components.url else {
-            AppLog.networking.error("iTunes search URL construction failed for term \(trimmed, privacy: .public)")
+            log(.error, "iTunes search URL construction failed")
             return .failure
         }
 
@@ -83,10 +86,10 @@ struct ITunesSearchService: Sendable {
             let mapped = decoded.results.compactMap { $0.asResult }
             return .results(Self.dedupedByFeedURL(mapped))
         } catch is DecodingError {
-            AppLog.networking.error("iTunes search decode failed for term \(trimmed, privacy: .public)")
+            log(.error, "iTunes search decode failed")
             return .failure
         } catch {
-            AppLog.networking.error("iTunes search failed: \(error.localizedDescription, privacy: .public)")
+            log(.error, "iTunes search failed: \(NetworkDiagnostic.reason(error))")
             return .failure
         }
     }
@@ -130,7 +133,7 @@ private struct ITunesPodcast: Decodable {
     /// silently dropping an otherwise-subscribable podcast.
     var asResult: PodcastSearchResult? {
         guard let feedUrl else {
-            AppLog.networking.info("Dropping iTunes result with no feed URL: \(collectionName ?? trackName ?? "untitled", privacy: .public)")
+            AppLog.networking.info("Dropping iTunes result with no feed URL")
             return nil
         }
         let title = collectionName ?? trackName ?? "Untitled Podcast"

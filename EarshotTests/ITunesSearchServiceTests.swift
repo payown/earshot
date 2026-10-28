@@ -230,6 +230,25 @@ final class ITunesSearchServiceTests: XCTestCase {
         XCTAssertEqual(outcome, .failure)
     }
 
+    func testSearchDiagnosticsOmitSearchTermsAndTransportErrorText() async {
+        let capture = NetworkLogCapture()
+        let service = ITunesSearchService(session: MockURLProtocol.makeSession(),
+                                         log: { _, message in capture.append(message) })
+        let term = "private-search-query-secret"
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: Data("invalid".utf8))])
+        let malformed = await service.search(term)
+        XCTAssertEqual(malformed, .failure)
+        let error = URLError(.timedOut, userInfo: [NSLocalizedDescriptionKey: "error-secret https://private.example/?token=secret"])
+        MockURLProtocol.setOutcomes([.failure(error)])
+        let failed = await service.search(term)
+        XCTAssertEqual(failed, .failure)
+        XCTAssertEqual(capture.messages, ["iTunes search decode failed", "iTunes search failed: URL error -1001"])
+        let log = capture.messages.joined(separator: " ")
+        for secret in [term, "error-secret", "private.example", "token=secret"] {
+            XCTAssertFalse(log.contains(secret))
+        }
+    }
+
     // MARK: Query encoding / parameter-injection hardening
 
     func test_searchTerm_isConfinedToTermParameter_noInjection() async {

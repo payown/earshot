@@ -29,13 +29,16 @@ actor ApplePodcastCategoryCache {
 struct ApplePodcastCategoryService: ApplePodcastCategoryFetching, Sendable {
     private let session: URLSession
     private let cache: ApplePodcastCategoryCache
+    private let log: NetworkDiagnostic.Sink
 
     init(
         session: URLSession = EarshotURLSession.shared,
-        cache: ApplePodcastCategoryCache = .shared
+        cache: ApplePodcastCategoryCache = .shared,
+        log: @escaping NetworkDiagnostic.Sink = NetworkDiagnostic.systemSink
     ) {
         self.session = session
         self.cache = cache
+        self.log = log
     }
 
     nonisolated func topPodcasts(
@@ -94,9 +97,7 @@ struct ApplePodcastCategoryService: ApplePodcastCategoryFetching, Sendable {
         } catch is CancellationError {
             return .failure
         } catch {
-            AppLog.networking.error(
-                "Apple podcast category load failed for genre \(categoryID, privacy: .public): \(error.localizedDescription, privacy: .public)"
-            )
+            log(.error, "Apple podcast category load failed for genre \(categoryID): \(NetworkDiagnostic.reason(error))")
             return .failure
         }
     }
