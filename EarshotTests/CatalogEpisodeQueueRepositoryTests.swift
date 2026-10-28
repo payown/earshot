@@ -406,6 +406,29 @@ final class CatalogEpisodeQueueRepositoryTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalEpisodeState>()), 0)
     }
 
+    func testRemovingCatalogEpisodeKeepsSharedLegacyDownload() async throws {
+        _ = TestStore.freshContext()
+        let repository = CatalogEpisodeQueueRepository(container: TestStore.container)
+        let value = preview(guid: "shared-guid")
+        _ = await repository.add(value)
+        let fileName = "catalog-shared-\(UUID().uuidString).mp3"
+        let fileURL = try seedLocalDownload(status: .downloaded, fileName: fileName)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let context = freshAssertionContext()
+        let otherPodcast = Podcast(feedURL: "https://other.example/feed", title: "Other")
+        let other = Episode(guid: value.id, title: "Other", audioURL: "https://h/other.mp3",
+                            downloadStatus: .downloaded, downloadPath: fileName)
+        other.podcast = otherPodcast
+        context.insert(otherPodcast); context.insert(other)
+        LocalStateStore.persist(other, in: context)
+        try context.save()
+        let result = await repository.remove(CatalogEpisodeIdentity(feedURL: value.podcastFeedURL, guid: value.id))
+        XCTAssertEqual(result, .success(.removed))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        let rows = try freshAssertionContext().fetch(FetchDescriptor<LocalEpisodeState>())
+        XCTAssertTrue(rows.contains { $0.podcastFeedURL == otherPodcast.feedURL && $0.downloadPath == fileName })
+    }
+
     func testFailedRemoveSaveRetainsCompletedDownloadDatabaseRuntimeAndFile() async throws {
         _ = TestStore.freshContext()
         let value = preview(guid: "failed-download-cleanup")

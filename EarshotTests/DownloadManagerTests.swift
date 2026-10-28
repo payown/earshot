@@ -287,6 +287,35 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: completedFile.path))
     }
 
+    func testStorageSnapshotMatchesActiveEpisodesOffMainAndReadsOtherContextSaves() async throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.com/show", title: "Show")
+        let episode = Episode(guid: "same-guid", title: "Episode", audioURL: "https://example.com/audio")
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        context.insert(LocalEpisodeState(podcastFeedURL: podcast.feedURL, episodeGUID: episode.guid,
+                                         downloadStatus: .downloading))
+        context.insert(LocalEpisodeState(podcastFeedURL: "https://example.com/other", episodeGUID: episode.guid,
+                                         downloadStatus: .pending, downloadPath: "orphan.mp3"))
+        context.insert(LocalEpisodeState(podcastFeedURL: "https://example.com/third", episodeGUID: "done",
+                                         downloadStatus: .downloaded, downloadPath: "done.mp3"))
+        try context.save()
+        let snapshot = try await DownloadStorageSnapshot.load(container: context.container)
+        XCTAssertEqual(snapshot.counts, .init(downloadedCount: 2, activeCount: 1))
+        XCTAssertEqual(snapshot.paths, ["orphan.mp3", "done.mp3"])
+        XCTAssertFalse(snapshot.executedStoreWorkOnMainThread)
+
+        let otherContext = ModelContext(context.container)
+        otherContext.insert(LocalEpisodeState(podcastFeedURL: "https://example.com/fourth", episodeGUID: "new",
+                                              downloadStatus: .downloaded, downloadPath: "new.mp3"))
+        try otherContext.save()
+        let refreshed = try await DownloadStorageSnapshot.load(container: context.container)
+        XCTAssertEqual(refreshed.counts, .init(downloadedCount: 3, activeCount: 1))
+        XCTAssertEqual(refreshed.paths, ["orphan.mp3", "done.mp3", "new.mp3"])
+        XCTAssertFalse(refreshed.executedStoreWorkOnMainThread)
+    }
+
     func test_storageSummaryReportsCompletedActiveAndAllocatedBytes() async throws {
         let context = TestStore.freshContext()
         let completedName = "earshot-test-summary-\(UUID().uuidString).mp3"
@@ -303,10 +332,13 @@ final class DownloadManagerTests: XCTestCase {
         let manager = makeManager(context)
 
         let summary = await manager.storageSummary()
+        let counts = await manager.storageCounts()
 
         XCTAssertEqual(summary.downloadedCount, 1)
         XCTAssertEqual(summary.activeCount, 1)
         XCTAssertGreaterThan(summary.allocatedBytes, 0)
+        XCTAssertEqual(counts.downloadedCount, 1)
+        XCTAssertEqual(counts.activeCount, 1)
     }
 
     func test_clearAllDownloads_deletesEveryFileAndResetsState() async throws {
@@ -380,7 +412,8 @@ final class DownloadManagerTests: XCTestCase {
     func test_finishedDownloadAfterEpisodeDeletionRemovesOrphanedFile() throws {
         let name = "earshot-test-orphan-completion-\(UUID().uuidString).mp3"
         let fileURL = try plantDownloadFile(named: name)
-        DownloadManager.setContainerForTesting(nil)
+        let context = TestStore.freshContext()
+        DownloadManager.setContainerForTesting(context.container)
         defer { DownloadManager.setContainerForTesting(nil) }
 
         DownloadManager.handle(PendingDownloadTerminalEvent(
@@ -392,6 +425,266 @@ final class DownloadManagerTests: XCTestCase {
             FileManager.default.fileExists(atPath: fileURL.path),
             "a completion with no surviving episode must not leak downloaded audio"
         )
+    }
+
+    func testFinishedEventWaitsForContainerWithoutDeletingFile() throws {
+        let name = "earshot-test-waiting-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        DownloadManager.setContainerForTesting(nil)
+        let handled = DownloadManager.handle(PendingDownloadTerminalEvent(
+            taskKey: "waiting", outcome: .finished(fileName: name)
+        ))
+        XCTAssertFalse(handled)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testOrphanedLegacyEventDoesNotDeleteAnotherEpisodesFile() throws {
+        let context = TestStore.freshContext()
+        let name = "earshot-shared-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let owner = Episode(guid: "owner", title: "Owner", audioURL: "https://h/a.mp3",
+                            downloadStatus: .downloaded, downloadPath: name)
+        try persistLocalDownloadState(for: [owner], in: context)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        XCTAssertTrue(DownloadManager.handle(PendingDownloadTerminalEvent(
+            taskKey: "missing-episode", outcome: .finished(fileName: name)
+        )))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertEqual(owner.downloadPath, name)
+    }
+
+    func testRemovingOrCleaningSharedLegacyDownloadKeepsOtherEpisodesAudio() throws {
+        for usePlayedCleanup in [false, true] {
+            let context = TestStore.freshContext()
+            let name = "shared-legacy-\(UUID().uuidString).mp3"
+            let file = try plantDownloadFile(named: name)
+            let a = Podcast(feedURL: "https://first.example/feed", title: "First")
+            let b = Podcast(feedURL: "https://second.example/feed", title: "Second")
+            let first = Episode(guid: "1", title: "First", audioURL: "https://h/a.mp3",
+                                downloadStatus: .downloaded, downloadPath: name)
+            let second = Episode(guid: "1", title: "Second", audioURL: "https://h/b.mp3",
+                                 downloadStatus: .downloaded,
+                                 downloadPath: "/old/container/Downloads/\(name)")
+            first.podcast = a; second.podcast = b
+            context.insert(a); context.insert(b); context.insert(first); context.insert(second)
+            LocalStateStore.persist(first, in: context)
+            LocalStateStore.persist(second, in: context)
+            try context.save()
+            let manager = makeManager(context)
+            if usePlayedCleanup {
+                DownloadCleanup.removeDownloadFileAndState(first, in: context)
+            } else {
+                manager.removeDownload(first)
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+            XCTAssertNil(first.downloadPath)
+            XCTAssertNotNil(second.downloadPath)
+            manager.removeDownload(second)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        }
+    }
+
+    func testExpirationPreservesAudioReferencedByAnotherEpisode() throws {
+        let context = TestStore.freshContext()
+        let name = "shared-expiration-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        let a = Podcast(feedURL: "https://expired.example/feed", title: "Expired")
+        let b = Podcast(feedURL: "https://kept.example/feed", title: "Kept")
+        let first = Episode(guid: "1", title: "Expired", audioURL: "https://h/a.mp3",
+                            downloadStatus: .downloaded, downloadPath: name)
+        let second = Episode(guid: "1", title: "Kept", audioURL: "https://h/b.mp3",
+                             downloadStatus: .downloaded, downloadPath: name)
+        let c = Podcast(feedURL: "https://expired2.example/feed", title: "Also expired")
+        let third = Episode(guid: "1", title: "Also expired", audioURL: "https://h/c.mp3",
+                            downloadStatus: .downloaded, downloadPath: name)
+        first.podcast = a; second.podcast = b
+        third.podcast = c
+        context.insert(a); context.insert(b); context.insert(c)
+        context.insert(first); context.insert(second); context.insert(third)
+        LocalStateStore.persist(first, in: context); LocalStateStore.persist(second, in: context)
+        LocalStateStore.persist(third, in: context)
+        context.insert(RecentlyExpired(episode: first, expiredAt: Date().addingTimeInterval(-9 * 86400)))
+        context.insert(RecentlyExpired(episode: third, expiredAt: Date().addingTimeInterval(-9 * 86400)))
+        try context.save()
+        ExpirationService(context: context).runExpiration(now: Date())
+        XCTAssertNil(first.downloadPath)
+        XCTAssertNil(third.downloadPath)
+        XCTAssertEqual(second.downloadPath, name)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func testBulkCleanupRetainsFileOwnedOutsideBatch() throws {
+        let context = TestStore.freshContext()
+        let name = "bulk-shared-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        let episodes = (0..<3).map { index in
+            let podcast = Podcast(feedURL: "https://show\(index).example/feed", title: "Show")
+            let episode = Episode(guid: "1", title: "Episode", audioURL: "https://h/a.mp3",
+                                  downloadStatus: .downloaded, downloadPath: name)
+            episode.podcast = podcast
+            context.insert(podcast); context.insert(episode)
+            LocalStateStore.persist(episode, in: context)
+            return episode
+        }
+        try context.save()
+        let ownership = DownloadCleanup.bulkOwnership(for: Array(episodes.prefix(2)), in: context)
+        for episode in episodes.prefix(2) {
+            DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(episodes[2].downloadPath, name)
+        DownloadCleanup.removeDownloadFileAndState(episodes[2], in: context)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func testExpirationRemovesSharedFileWhenAllOwnersArePurged() throws {
+        let context = TestStore.freshContext()
+        let name = "expired-shared-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        for index in 0..<2 {
+            let podcast = Podcast(feedURL: "https://expired\(index).example/feed", title: "Show")
+            let episode = Episode(guid: "1", title: "Expired", audioURL: "https://h/a.mp3",
+                                  downloadStatus: .downloaded, downloadPath: name)
+            episode.podcast = podcast
+            context.insert(podcast); context.insert(episode)
+            LocalStateStore.persist(episode, in: context)
+            context.insert(RecentlyExpired(episode: episode, expiredAt: Date().addingTimeInterval(-9 * 86400)))
+        }
+        try context.save()
+        // A separate context refaults the episodes without relying on the
+        // transient state of the objects that created the download rows.
+        LocalRuntimeState.shared.clear()
+        let refaultedContext = ModelContext(context.container)
+        ExpirationService(context: refaultedContext).runExpiration(now: Date())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(try refaultedContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 0)
+    }
+
+    func testExpirationSaveFailureKeepsFileAndDownloadState() throws {
+        let context = TestStore.freshContext()
+        let name = "expired-save-failure-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        let episode = Episode(guid: "expiration-save", title: "Expired", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        try persistLocalDownloadState(for: [episode], in: context)
+        context.insert(RecentlyExpired(episode: episode, expiredAt: Date().addingTimeInterval(-9 * 86400)))
+        try context.save()
+        ExpirationService(context: context, saveOperation: { _ in
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+            throw DownloadEventTestError.injected
+        }).runExpiration(now: Date())
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, name)
+        let fresh = ModelContext(context.container)
+        XCTAssertEqual(try fresh.fetch(FetchDescriptor<LocalEpisodeState>()).first?.downloadPath, name)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<RecentlyExpired>()), 1)
+    }
+
+    func testExpirationSaveFailureRestoresRefaultedDownloadFromLocalState() throws {
+        let context = TestStore.freshContext()
+        let name = "expired-refault-failure-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        let original = Episode(guid: "expiration-refault", title: "Expired", audioURL: "https://h/a.mp3",
+                               downloadStatus: .downloaded, downloadPath: name)
+        try persistLocalDownloadState(for: [original], in: context)
+        context.insert(RecentlyExpired(episode: original, expiredAt: Date().addingTimeInterval(-9 * 86400)))
+        try context.save()
+        LocalRuntimeState.shared.clear()
+        let fresh = ModelContext(context.container)
+        let episode = try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertNil(LocalRuntimeState.shared.episode(episode.persistentModelID))
+
+        ExpirationService(context: fresh, saveOperation: { _ in
+            throw DownloadEventTestError.injected
+        }).runExpiration(now: Date())
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, name)
+        let verify = ModelContext(context.container)
+        XCTAssertEqual(try verify.fetch(FetchDescriptor<LocalEpisodeState>()).first?.downloadPath, name)
+        XCTAssertEqual(try verify.fetchCount(FetchDescriptor<RecentlyExpired>()), 1)
+    }
+
+    func testExpirationSavesBeforeRemovingUnsharedFile() throws {
+        let context = TestStore.freshContext()
+        let name = "expired-save-success-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        let episode = Episode(guid: "expiration-success", title: "Expired", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        try persistLocalDownloadState(for: [episode], in: context)
+        context.insert(RecentlyExpired(episode: episode, expiredAt: Date().addingTimeInterval(-9 * 86400)))
+        try context.save()
+        var saved = false
+        ExpirationService(context: context, saveOperation: { target in
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+            try target.save()
+            saved = true
+        }).runExpiration(now: Date())
+
+        XCTAssertTrue(saved)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertNil(episode.downloadPath)
+    }
+
+    func testFinishedEventFetchFailurePreservesFileForRetry() throws {
+        let context = TestStore.freshContext()
+        let name = "earshot-test-fetch-failure-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        defer {
+            DownloadManager.setContainerForTesting(nil)
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        DownloadManager.setContainerForTesting(context.container)
+        let handled = DownloadManager.handle(
+            PendingDownloadTerminalEvent(taskKey: "waiting", outcome: .finished(fileName: name)),
+            resolve: { _, _ in throw DownloadEventTestError.injected }
+        )
+        XCTAssertFalse(handled)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testFinishedEventRetriesSaveAndReplayKeepsOwnedFile() throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "retry-save", title: "Retry", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let name = "earshot-test-save-failure-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        defer {
+            DownloadManager.setContainerForTesting(nil)
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        DownloadManager.setContainerForTesting(context.container)
+        let event = PendingDownloadTerminalEvent(taskKey: episode.guid, outcome: .finished(fileName: name))
+        XCTAssertFalse(DownloadManager.handle(event, persist: { _ in throw DownloadEventTestError.injected }))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertTrue(DownloadManager.handle(event))
+        XCTAssertTrue(DownloadManager.handle(event))
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, name)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testJournalRetainsEventAcrossFailedFetchUntilSuccessfulReplay() throws {
+        let context = TestStore.freshContext()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = DownloadEventJournal(url: directory.appendingPathComponent("events.json"))
+        let event = journal.record(taskKey: "no-such-episode", outcome: .failed)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+
+        XCTAssertFalse(DownloadManager.handle(event,
+            resolve: { _, _ in throw DownloadEventTestError.injected },
+            acknowledge: { journal.acknowledge($0.id) }))
+        XCTAssertEqual(DownloadEventJournal(url: directory.appendingPathComponent("events.json")).pendingEvents(), [event])
+        XCTAssertTrue(DownloadManager.handle(event, acknowledge: { journal.acknowledge($0.id) }))
+        XCTAssertTrue(DownloadEventJournal(url: directory.appendingPathComponent("events.json")).pendingEvents().isEmpty)
     }
 
     func test_finishedDownloadSchedulesNotificationWhenEnabled() async throws {
@@ -498,6 +791,93 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
         XCTAssertEqual(episode.downloadStatus, .none)
         XCTAssertNil(episode.downloadPath)
+    }
+
+    func testLateFailureFromSupersededSourceDoesNotFailNewDownload() throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "replacement", title: "Replacement",
+                              audioURL: "https://cdn.test/new.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let oldKey = DownloadTransferKey.key(identityKey: episode.guid,
+                                               sourceURL: try XCTUnwrap(URL(string: "https://cdn.test/old.mp3")))
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        XCTAssertTrue(DownloadManager.handle(PendingDownloadTerminalEvent(taskKey: oldKey, outcome: .failed)))
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+    }
+
+    func testBBCPreferredSelectorIsAcceptedForCompletionAndFailure() throws {
+        let context = TestStore.freshContext()
+        let selector = "http://open.live.bbc.co.uk/mediaselector/6/select/version/123/proto/http/format/json"
+        let episode = Episode(guid: "bbc-selector", title: "BBC", audioURL: selector,
+                              downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let preferred = SecureURL.preferredMediaHTTPS(try XCTUnwrap(URL(string: selector)))
+        let key = DownloadTransferKey.key(identityKey: episode.guid, sourceURL: preferred)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        XCTAssertTrue(DownloadManager.handle(PendingDownloadTerminalEvent(taskKey: key, outcome: .failed)))
+        XCTAssertEqual(episode.downloadStatus, .failed)
+        ActiveDownload.setDownloadStatus(.downloading, on: episode, in: context)
+        try context.save()
+        let name = "bbc-\(UUID().uuidString).mp3"
+        _ = try plantDownloadFile(named: name)
+        XCTAssertTrue(DownloadManager.handle(PendingDownloadTerminalEvent(taskKey: key, outcome: .finished(fileName: name))))
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, name)
+    }
+
+    func testCancellationResolvesOldWaiterAndChangedSourceDoesNotResolveNewWaiter() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "wait-cancel", title: "Wait", audioURL: "https://h/old.mp3")
+        try persistLocalDownloadState(for: [episode], in: context)
+        var started: [String] = []
+        let manager = DownloadManager(startTransfer: { _, key in started.append(key) })
+        manager.configureForTesting(context: context, isOnWifi: true)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        let first = Task { await manager.downloadAndWait(episode, timeout: 2) }
+        while started.isEmpty { await Task.yield() }
+        let oldKey = try XCTUnwrap(started.first)
+        manager.removeDownload(episode)
+        let cancelled = await first.value
+        XCTAssertFalse(cancelled)
+
+        episode.audioURL = "https://h/new.mp3"
+        let second = Task { await manager.downloadAndWait(episode, timeout: 2) }
+        while started.count < 2 { await Task.yield() }
+        XCTAssertTrue(DownloadManager.handle(PendingDownloadTerminalEvent(taskKey: oldKey, outcome: .failed)))
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+        let name = "new-\(UUID().uuidString).mp3"
+        _ = try plantDownloadFile(named: name)
+        XCTAssertTrue(DownloadManager.handle(PendingDownloadTerminalEvent(taskKey: started[1], outcome: .finished(fileName: name))))
+        let completed = await second.value
+        XCTAssertTrue(completed)
+    }
+
+    func testTaskEnumerationSeesEventJournaledDuringEnumeration() async {
+        var journal: [String] = []
+        let keys = await DownloadManager.liveTaskKeys(taskDescriptions: {
+            journal.append("feed|episode")
+            return []
+        }, pendingKeys: { journal })
+        XCTAssertTrue(keys.contains("feed|episode"))
+    }
+
+    func testReconciliationDoesNotOverwriteCompletionDuringTaskEnumeration() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "finished-during-reconciliation", title: "Finished",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        await manager.reconcileStuckDownloads {
+            episode.downloadPath = "finished.mp3"
+            ActiveDownload.setDownloadStatus(.downloaded, on: episode, in: context)
+            try? context.save()
+            return []
+        }
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, "finished.mp3")
     }
 
     func testDownloadPayloadValidationRejectsEmptyAndKnownNonMediaBodies() {
@@ -1098,6 +1478,50 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(idle.downloadStatus, DownloadStatus.none)
     }
 }
+
+@MainActor
+final class DownloadEventRetrierTests: XCTestCase {
+    func testRetriesTransientErrorAndStopsAfterSuccess() async {
+        let retrier = DownloadEventRetrier(delays: [.zero, .zero, .zero], sleep: { _ in await Task.yield() })
+        let event = PendingDownloadTerminalEvent(taskKey: "episode", outcome: .failed)
+        var attempts = 0
+        retrier.submit(event) { _ in
+            attempts += 1
+            return attempts == 3
+        }
+        for _ in 0..<100 where attempts < 3 { await Task.yield() }
+        XCTAssertEqual(attempts, 3)
+        retrier.cancelAll()
+    }
+
+    func testCancellationStopsPendingRetriesAndAllowsReactivation() async {
+        let retrier = DownloadEventRetrier(delays: [.seconds(30)])
+        let event = PendingDownloadTerminalEvent(taskKey: "episode", outcome: .failed)
+        var attempts = 0
+        retrier.submit(event) { _ in attempts += 1; return false }
+        await Task.yield()
+        retrier.cancelAll()
+        retrier.submit(event) { _ in attempts += 1; return true }
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(attempts, 2)
+        retrier.cancelAll()
+    }
+
+    func testRetryCountIsBoundedAndLeavesEventAvailableForLaterActivation() async {
+        let retrier = DownloadEventRetrier(delays: [.zero, .zero], sleep: { _ in await Task.yield() })
+        let event = PendingDownloadTerminalEvent(taskKey: "episode", outcome: .failed)
+        var attempts = 0
+        retrier.submit(event) { _ in attempts += 1; return false }
+        for _ in 0..<100 where attempts < 3 { await Task.yield() }
+        XCTAssertEqual(attempts, 3)
+        await Task.yield()
+        retrier.submit(event) { _ in attempts += 1; return true }
+        XCTAssertEqual(attempts, 4)
+        retrier.cancelAll()
+    }
+}
+
+private enum DownloadEventTestError: Error { case injected }
 
 private actor DownloadCompletionNotificationCenter: @preconcurrency NotificationScheduling {
     struct RequestSnapshot: Sendable {

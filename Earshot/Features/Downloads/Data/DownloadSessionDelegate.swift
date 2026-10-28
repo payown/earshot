@@ -222,6 +222,10 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         journal.acknowledge(event.id)
     }
 
+    func pendingTaskKeys() -> [String] {
+        journal.pendingEvents().map(\.taskKey)
+    }
+
     private func record(
         taskKey: String, outcome: PendingDownloadTerminalEvent.Outcome
     ) {
@@ -270,14 +274,7 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         }
         do {
             let directory = try DownloadPaths.downloadsDirectory()
-            let destination = DownloadPaths.destination(
-                inDirectory: directory,
-                guid: DownloadTaskKey.parse(
-                    DownloadTransferKey.identityKey(from: taskKey)
-                ).guid,
-                sourceURL: sourceURL
-            )
-            try? FileManager.default.removeItem(at: destination)
+            let destination = DownloadPaths.uniqueDestination(inDirectory: directory, sourceURL: sourceURL)
             try FileManager.default.moveItem(at: location, to: destination)
             record(
                 taskKey: taskKey,

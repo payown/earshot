@@ -172,7 +172,10 @@ final class CatalogEpisodeQueueRepository {
             }
             try cleanupSaveOperation(context)
             LocalRuntimeState.shared.setEpisode(cleanup.episodeID, status: .none, path: nil)
-            if let fileURL = cleanup.fileURL { try? FileManager.default.removeItem(at: fileURL) }
+            try? DownloadPaths.removeIfUnshared(
+                storedValue: cleanup.fileURL?.lastPathComponent,
+                excluding: [cleanup.key], in: context
+            )
         } catch {
             context.rollback()
             AppLog.player.error(

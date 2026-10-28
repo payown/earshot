@@ -136,6 +136,7 @@ struct ChapterListView: View {
             loadingChapters = false
             return
         }
+        let requestID = player.chapterLoadIdentity
         loadingChapters = true
         let found = await ChapterService().chapters(
             chapterURL: episode.chapterURL,
@@ -147,7 +148,9 @@ struct ChapterListView: View {
         // Hand the list to the engine so auto-skip can evaluate the active
         // chapter on each tick, and seed the local skip mirror from any state
         // already set this session.
-        player.setChapters(found)
+        if player.chapterLoadIdentity == requestID {
+            player.setChapters(found)
+        }
         skipState = Dictionary(
             uniqueKeysWithValues: found.map { ($0.index, player.isChapterSkipped($0)) }
         )

@@ -369,10 +369,11 @@ final class InboxRepository {
     /// inbox" never dismisses episodes outside the visible scope (#763).
     func clearInbox(_ episodes: [Episode]) {
         let shouldDeleteDownloads = DownloadCleanup.deleteAfterPlayedEnabled(context)
+        let ownership = shouldDeleteDownloads ? DownloadCleanup.bulkOwnership(for: episodes, in: context) : nil
         for episode in episodes {
             episode.inboxDismissed = true
             if shouldDeleteDownloads {
-                DownloadCleanup.removeDownloadFileAndState(episode, in: context)
+                DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
             }
         }
         save(changedEpisodes: episodes, inboxDismissedChangedExplicitly: true)

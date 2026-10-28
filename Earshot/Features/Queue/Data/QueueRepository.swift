@@ -717,6 +717,7 @@ final class QueueRepository {
         let items = orderedItems()
         let episodes = items.compactMap(\.episode)
         let shouldDeleteDownloads = DownloadCleanup.deleteAfterPlayedEnabled(context)
+        let ownership = shouldDeleteDownloads ? DownloadCleanup.bulkOwnership(for: episodes, in: context) : nil
         var stagedFollowedRemoval = false
         for item in items {
             if let episode = item.episode {
@@ -728,7 +729,7 @@ final class QueueRepository {
                 if !episode.isPlayed { episode.isPlayed = false }
                 episode.inboxDismissed = true
                 if shouldDeleteDownloads {
-                    DownloadCleanup.removeDownloadFileAndState(episode, in: context)
+                    DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
                 }
             }
             context.delete(item)

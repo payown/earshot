@@ -69,13 +69,14 @@ final class EpisodeRepository {
                 continue
             }
 
+            let ownership = deleteAfterPlayed ? DownloadCleanup.bulkOwnership(for: unplayed, in: context) : nil
             for episode in unplayed {
                 episode.isPlayed = true
                 episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
                     nowPlayed: true, wasDismissed: episode.inboxDismissed
                 )
                 if deleteAfterPlayed {
-                    DownloadCleanup.removeDownloadFileAndState(episode, in: context)
+                    DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
                 }
             }
             guard save(changedEpisodes: unplayed, notifyInbox: false) else { break }
@@ -124,13 +125,14 @@ final class EpisodeRepository {
                 await Task.yield()
                 continue
             }
+            let ownership = deleteAfterPlayed ? DownloadCleanup.bulkOwnership(for: selected, in: context) : nil
             for episode in selected {
                 episode.isPlayed = played
                 episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
                     nowPlayed: played, wasDismissed: episode.inboxDismissed
                 )
                 if deleteAfterPlayed {
-                    DownloadCleanup.removeDownloadFileAndState(episode, in: context)
+                    DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
                 }
             }
             guard save(changedEpisodes: selected, notifyInbox: false) else { break }

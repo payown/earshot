@@ -74,6 +74,8 @@ final class PlayerService {
     /// so the UI can decide whether to show the chapter line and prev/next
     /// controls without reaching into the private `currentChapters`.
     var chapterCount: Int = 0
+    /// True until the current item's chapter lookup has finished.
+    private(set) var isLoadingChapters = false
 
     /// `nil` means this episode follows the device-wide default. Kept observed
     /// so the player sheet updates immediately after a VoiceOver adjustment.
@@ -228,6 +230,8 @@ final class PlayerService {
     @ObservationIgnored private let audioSession: any PlayerAudioSession
     @ObservationIgnored private let mediaHTTPSProbe: any MediaHTTPSProbing
     @ObservationIgnored private let mediaRecoveryFeed: any FeedFetching
+    @ObservationIgnored private let chapterLoader: @MainActor (String?, String, String?, String?) async -> [Chapter]
+    @ObservationIgnored private let artworkLoader: @MainActor (URL) async -> UIImage?
     @ObservationIgnored private var mediaRecoveryAttemptedEpisodeID: PersistentIdentifier?
     @ObservationIgnored private var mediaRecoveryInProgressEpisodeID: PersistentIdentifier?
     @ObservationIgnored private var mediaRecoveryGeneration = 0
@@ -246,13 +250,21 @@ final class PlayerService {
         audioSession: any PlayerAudioSession = AVAudioSession.sharedInstance(),
         mediaHTTPSProbe: any MediaHTTPSProbing = MediaHTTPSProbe(),
         mediaRecoveryFeed: any FeedFetching = FeedService(),
-        personalAudioStorage: PersonalAudioStorage = PersonalAudioStorage()
+        personalAudioStorage: PersonalAudioStorage = PersonalAudioStorage(),
+        chapterLoader: @escaping @MainActor (String?, String, String?, String?) async -> [Chapter] = { chapterURL, audioURL, downloadPath, description in
+            await ChapterService().chapters(chapterURL: chapterURL, audioURL: audioURL, downloadPath: downloadPath, descriptionHTML: description)
+        },
+        artworkLoader: @escaping @MainActor (URL) async -> UIImage? = { url in
+            await ArtworkCache.shared.image(for: url, maxPixelSize: ArtworkCache.nowPlayingMaxPixelSize)
+        }
     ) {
         self.playbackHandoff = playbackHandoff
         self.audioSession = audioSession
         self.mediaHTTPSProbe = mediaHTTPSProbe
         self.mediaRecoveryFeed = mediaRecoveryFeed
         self.personalAudioStorage = personalAudioStorage
+        self.chapterLoader = chapterLoader
+        self.artworkLoader = artworkLoader
     }
 
     /// Generation token for the sleep-timer volume fade (review P1-4). Each fade
@@ -308,6 +320,8 @@ final class PlayerService {
     // Artwork: track the last URL we fetched so we don't re-download when the
     // same episode (or a different episode with the same artwork) is loaded.
     @ObservationIgnored private var lastArtworkURL: URL?
+    @ObservationIgnored private var requestedArtworkURL: URL?
+    @ObservationIgnored private var artworkRequestID = UUID()
 
     // Hold-to-fast-forward (4× scan, #373). While held, playback runs at 4× and
     // the prior effective rate is stashed so release restores it exactly —
@@ -332,14 +346,10 @@ final class PlayerService {
     // (no SwiftData model). `currentChapters` is the chapter list the player
     // screen loaded for the current episode, supplied via `setChapters`.
     @ObservationIgnored private var skippedChapterIndices: [String: Set<Int>] = [:]
-    @ObservationIgnored private var currentChapters: [Chapter] = []
-    /// Resolves chapters for the loaded episode. Held so the engine can populate
-    /// `currentChapters` itself on every episode load (review P1-1) rather than
-    /// relying on the player-controls sheet being opened.
-    @ObservationIgnored private let chapterService = ChapterService()
-    /// Guards against a stale async chapter load applying to the wrong episode:
-    /// the guid the most recent chapter load was started for.
-    @ObservationIgnored private var chapterLoadEpisodeGUID: String?
+    private var currentChapters: [Chapter] = []
+    /// Changes for every load, including a revisit to the same episode.
+    private var chapterRequestID = UUID()
+    var chapterLoadIdentity: UUID { chapterRequestID }
     /// Loop guard: the chapter index we last auto-skipped *from*. We don't fire
     /// again until the active chapter moves away from it, so the seek's own
     /// position update can't restart an endless skip loop.
@@ -1394,9 +1404,7 @@ final class PlayerService {
         currentChapters = []
         resetChapterObservables()
         lastAutoSkipFromChapterIndex = nil
-        // Invalidates any in-flight async chapter load: its apply guard
-        // requires this guid to still match, so the stale result is dropped.
-        chapterLoadEpisodeGUID = nil
+        chapterRequestID = UUID()
         clearPreload()
 
         lastTickPosition = nil
@@ -2204,9 +2212,7 @@ final class PlayerService {
 
     // MARK: Public — chapter auto-skip (#373)
 
-    /// Supplies the current episode's chapter list to the engine so auto-skip can
-    /// evaluate the active chapter on each tick. Called by the player screen once
-    /// chapters are loaded. Clears the loop guard so a fresh list starts clean.
+    /// Supplies chapters to the engine and its presentation surfaces.
     func setChapters(_ chapters: [Chapter]) {
         currentChapters = chapters
         lastAutoSkipFromChapterIndex = nil
@@ -2216,61 +2222,42 @@ final class PlayerService {
         // same-index early-return keep a stale title.
         currentChapterIndex = nil
         updateCurrentChapter()
+        isLoadingChapters = false
     }
 
     /// Resolves and installs the loaded episode's chapters in the engine so
     /// auto-skip works on every episode, not only after the player-controls
     /// sheet has been opened (review P1-1). Only Sendable strings cross the
     /// async boundary — the `@Model` stays on the main actor — and the result is
-    /// discarded if the user switched episodes while it loaded. The
-    /// controls-sheet `setChapters` path still applies (idempotent; same list).
+    /// discarded if the user switched episodes while it loaded.
     private func loadChaptersForCurrentEpisode() {
         guard let episode = currentEpisode else { return }
-        let guid = episode.guid
         let chapterURL = episode.chapterURL
         let audioURL = episode.audioURL
         let downloadPath = episode.localAudioURL?.path
         let descriptionHTML = episode.episodeDescription
-        chapterLoadEpisodeGUID = guid
+        let requestID = UUID()
+        chapterRequestID = requestID
+        isLoadingChapters = true
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let found = await self.chapterService.chapters(
-                chapterURL: chapterURL,
-                audioURL: audioURL,
-                downloadPath: downloadPath,
-                descriptionHTML: descriptionHTML
-            )
+            let found = await self.chapterLoader(chapterURL, audioURL, downloadPath, descriptionHTML)
             // Drop a stale load: only apply if this is still the loaded episode
             // and no newer load has superseded us.
-            guard self.chapterLoadEpisodeGUID == guid,
-                  self.currentEpisode?.guid == guid else { return }
-            self.currentChapters = found
-            self.lastAutoSkipFromChapterIndex = nil
-            self.chapterCount = found.count
-            // A fresh list invalidates the cached index; clear it so the refresh
-            // below isn't suppressed by the same-index early-return.
-            self.currentChapterIndex = nil
-            self.updateCurrentChapter()
+            guard self.chapterRequestID == requestID else { return }
+            self.setChapters(found)
         }
     }
 
     private func loadChapters(for item: PersonalAudioItem, audioURL: URL) {
-        let id = item.id
-        chapterLoadEpisodeGUID = nil
+        let requestID = UUID()
+        chapterRequestID = requestID
+        isLoadingChapters = true
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let found = await self.chapterService.chapters(
-                chapterURL: nil,
-                audioURL: audioURL.absoluteString,
-                downloadPath: audioURL.path,
-                descriptionHTML: nil
-            )
-            guard self.nowPlayingPersonalAudioID == id else { return }
-            self.currentChapters = found
-            self.lastAutoSkipFromChapterIndex = nil
-            self.chapterCount = found.count
-            self.currentChapterIndex = nil
-            self.updateCurrentChapter()
+            let found = await self.chapterLoader(nil, audioURL.absoluteString, audioURL.path, nil)
+            guard self.chapterRequestID == requestID else { return }
+            self.setChapters(found)
         }
     }
 
@@ -3726,7 +3713,7 @@ final class PlayerService {
         let shouldResume = intendsToPlay
         let feedURL = episode.podcast?.feedURL
         let guid = episode.guid
-        let staleLocalURL = episode.localAudioURL
+        let staleDownloadPath = episode.downloadPath
 
         player.pause()
         episode.downloadPath = nil
@@ -3737,7 +3724,9 @@ final class PlayerService {
                 return
             }
         }
-        if let staleLocalURL { try? FileManager.default.removeItem(at: staleLocalURL) }
+        if let context {
+            try? DownloadPaths.removeIfUnshared(storedValue: staleDownloadPath, for: episode, in: context)
+        }
         Announcer.announce("The downloaded copy could not play. Trying the current episode audio.")
 
         Task { @MainActor [weak self, weak episode] in
@@ -3815,7 +3804,6 @@ final class PlayerService {
                 || episode.downloadStatus == .downloading
                 || episode.downloadStatus == .pending
             let staleDownloadPath = episode.downloadPath
-            let staleLocalURL = episode.localAudioURL
             episode.downloadPath = nil
             if let context {
                 ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
@@ -3830,8 +3818,8 @@ final class PlayerService {
                         staleDownloadPath: staleDownloadPath
                     )
                 ])
-            } else if let staleLocalURL {
-                try? FileManager.default.removeItem(at: staleLocalURL)
+            } else if let context {
+                try? DownloadPaths.removeIfUnshared(storedValue: staleDownloadPath, for: episode, in: context)
             }
             if currentEpisode === episode {
                 let position = currentPositionSeconds
@@ -3940,6 +3928,11 @@ final class PlayerService {
     /// Clears the Now Playing center and the local mirror together.
     private func clearNowPlayingInfo() {
         recordPlaybackDiagnostic("nowPlaying.clear")
+        chapterRequestID = UUID()
+        isLoadingChapters = false
+        artworkRequestID = UUID()
+        requestedArtworkURL = nil
+        lastArtworkURL = nil
         cachedNowPlayingInfo = [:]
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
@@ -3960,7 +3953,16 @@ final class PlayerService {
         // Preserve artwork that was already set by a prior fetch so it isn't
         // cleared by this synchronous update. The async artwork path will
         // overwrite it (or set it for the first time) when the image arrives.
-        if let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] {
+        let remoteArtworkURL = currentEpisode.flatMap {
+            ($0.artworkURL ?? $0.podcast?.artworkURL).flatMap(URL.init)
+        }
+        let localArtworkURL = currentPersonalAudio?.artworkFilename.flatMap { personalAudioStorage.resolve($0) }
+        let artworkURL = localArtworkURL ?? remoteArtworkURL
+        if artworkURL != requestedArtworkURL {
+            requestedArtworkURL = artworkURL
+            artworkRequestID = UUID()
+            lastArtworkURL = nil
+        } else if let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] {
             info[MPMediaItemPropertyArtwork] = existing
         }
         writeNowPlayingInfo(info)
@@ -3973,14 +3975,11 @@ final class PlayerService {
 
         // Kick off an async artwork fetch for the newly loaded episode. No-ops
         // immediately when the URL matches the last successfully-fetched artwork.
-        let artworkURL = currentEpisode.flatMap {
-            ($0.artworkURL ?? $0.podcast?.artworkURL).flatMap(URL.init)
-        }
-        if let filename = currentPersonalAudio?.artworkFilename,
-           let localURL = personalAudioStorage.resolve(filename) {
-            Task { [weak self] in await self?.updateNowPlayingLocalArtwork(from: localURL) }
+        let requestID = artworkRequestID
+        if let localURL = localArtworkURL {
+            Task { [weak self] in await self?.updateNowPlayingLocalArtwork(from: localURL, requestID: requestID) }
         } else {
-            Task { [weak self] in await self?.updateNowPlayingArtwork(from: artworkURL) }
+            Task { [weak self] in await self?.updateNowPlayingArtwork(from: artworkURL, requestID: requestID) }
         }
     }
 
@@ -4014,7 +4013,8 @@ final class PlayerService {
     /// the main actor (this method is `@MainActor`-isolated). The `lastArtworkURL`
     /// guard prevents redundant fetches when the same episode is toggled
     /// play/pause repeatedly.
-    private func updateNowPlayingArtwork(from url: URL?) async {
+    private func updateNowPlayingArtwork(from url: URL?, requestID: UUID) async {
+        guard artworkRequestID == requestID else { return }
         guard let url else {
             // No artwork URL — clear any stale artwork from a previous episode.
             lastArtworkURL = nil
@@ -4029,19 +4029,17 @@ final class PlayerService {
 
         // ArtworkCache serves from its disk cache when present and fetches
         // (then caches) otherwise; it returns nil instead of throwing on failure.
-        guard let image = await ArtworkCache.shared.image(
-            for: url,
-            maxPixelSize: ArtworkCache.nowPlayingMaxPixelSize
-        ) else { return }
+        guard let image = await artworkLoader(url), artworkRequestID == requestID else { return }
         lastArtworkURL = url
         setArtwork(image)
     }
 
-    private func updateNowPlayingLocalArtwork(from url: URL) async {
+    private func updateNowPlayingLocalArtwork(from url: URL, requestID: UUID) async {
+        guard artworkRequestID == requestID else { return }
         guard url != lastArtworkURL else { return }
         let data = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
         guard let data, let image = UIImage(data: data),
-              currentPersonalAudio?.artworkFilename == url.lastPathComponent else { return }
+              artworkRequestID == requestID else { return }
         lastArtworkURL = url
         setArtwork(image)
     }
