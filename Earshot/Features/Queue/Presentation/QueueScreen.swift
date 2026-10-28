@@ -682,6 +682,9 @@ struct QueueScreen: View {
                     systemImage: isEnrollingDownloads ? "arrow.down.circle" : "ellipsis.circle"
                 )
             }
+            // Toolbar presentation can reduce the visible Label to its icon;
+            // give the menu itself a name even in that presentation.
+            .accessibilityLabel(isEnrollingDownloads ? "Preparing downloads" : "Queue options")
             .disabled(isEnrollingDownloads)
         }
     }

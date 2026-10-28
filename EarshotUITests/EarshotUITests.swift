@@ -79,6 +79,40 @@ final class EarshotUITests: XCTestCase {
         XCTAssertEqual(toggle.value as? String, "0")
     }
 
+    func testPlaybackPositionAdjustmentSetting() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Settings"].tap()
+        let playback = app.buttons["Playback"]
+        XCTAssertTrue(playback.waitForExistence(timeout: 5))
+        playback.tap()
+
+        let adjustment = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label == %@", "Playback position adjustment")
+        ).firstMatch
+        func revealAdjustment() {
+            for _ in 0..<6 where !adjustment.isHittable { app.swipeUp() }
+            XCTAssertTrue(adjustment.isHittable, app.debugDescription)
+        }
+        revealAdjustment()
+        XCTAssertEqual(adjustment.value as? String, "Automatic")
+        // Tap the visible picker to open its native menu; the accessibility
+        // representation is an adjustable element for VoiceOver.
+        adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let fiveMinutes = app.buttons["5 minutes"].firstMatch
+        XCTAssertTrue(fiveMinutes.waitForExistence(timeout: 5))
+        fiveMinutes.tap()
+        XCTAssertEqual(adjustment.value as? String, "5 minutes")
+
+        app.navigationBars.buttons["Settings"].tap()
+        XCTAssertTrue(playback.waitForExistence(timeout: 5))
+        playback.tap()
+        revealAdjustment()
+        XCTAssertEqual(adjustment.value as? String, "5 minutes")
+    }
+
     func testHomeScreenBadgeOptInAndOptOut() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
@@ -219,6 +253,7 @@ final class EarshotUITests: XCTestCase {
         let speed = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Playback speed")).firstMatch
         XCTAssertTrue(speed.waitForExistence(timeout: 10))
         XCTAssertNotEqual(speed.elementType, .button, "Playback speed must remain an adjustable element for VoiceOver rate feedback")
+        XCTAssertFalse((speed.value as? String ?? "").isEmpty, "The initial speed must have a spoken value before playback")
         speed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let input = app.textFields["Custom playback speed"]
         XCTAssertTrue(input.waitForExistence(timeout: 5))
@@ -282,7 +317,9 @@ final class EarshotUITests: XCTestCase {
         let failure = NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "failed 2", "Downloading 0")
         expectation(for: failure, evaluatedWith: summary)
         waitForExpectations(timeout: 15)
-        XCTAssertTrue(app.buttons["Read download status"].exists)
+        let readStatus = app.buttons["Read download status"]
+        XCTAssertTrue(readStatus.exists)
+        readStatus.tap()
         app.buttons["Retry failed downloads"].tap()
         let retry = app.buttons["Retry 2 downloads"].firstMatch
         XCTAssertTrue(retry.waitForExistence(timeout: 5))
@@ -477,6 +514,10 @@ final class EarshotUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(nativeRouteButton.frame.height, 44)
         XCTAssertLessThan(nativeRouteButton.frame.maxX, notes.frame.minX)
         XCTAssertLessThan(nativeRouteButton.frame.maxY, app.frame.maxY)
+        app.buttons["Close player"].tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Mini player, ")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["AirPlay"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["AirPlay"].firstMatch.isHittable)
     }
 
     func testPlayerOptionsAndTouchTargets() {
@@ -560,6 +601,9 @@ final class EarshotUITests: XCTestCase {
         app.launch()
         let options = app.buttons["Queue options"].firstMatch
         XCTAssertTrue(options.waitForExistence(timeout: 10))
+        app.tabBars.buttons["Library"].tap()
+        app.tabBars.buttons["Queue"].tap()
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
         options.tap()
         app.buttons["Clear queue"].firstMatch.tap()
         let clear = app.buttons["Clear entire Queue"].firstMatch

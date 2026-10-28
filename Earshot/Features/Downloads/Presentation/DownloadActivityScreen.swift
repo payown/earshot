@@ -78,7 +78,8 @@ struct DownloadActivityScreen: View {
                 Text("This screen tracks episode audio downloads. To retry a failed check for new episodes, open Settings, Feed Refresh.")
                 Text(summary.text)
                     .accessibilityIdentifier("downloadActivitySummary")
-                Button("Read download status") { Announcer.announce(summary.text) }
+                Button("Read download status") { Announcer.announce(summary.text, assertive: true) }
+                    .accessibilityLabel("Read download status")
                 Toggle("Include completed downloads", isOn: $showCompleted)
                 Button("Retry failed downloads") {
                     retryRequest = Array(records.filter { $0.status == .failed }

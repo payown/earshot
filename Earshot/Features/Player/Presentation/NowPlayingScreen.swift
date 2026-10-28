@@ -251,6 +251,8 @@ struct NowPlayingScreen: View {
             transportRow
             HStack(spacing: Spacing.lg) {
                 RoutePickerView()
+                    .accessibilityLabel("AirPlay")
+                    .accessibilityHint("Choose audio output device")
                     .frame(width: 64, height: 56)
                     .frame(maxWidth: .infinity)
                 if player.nowPlayingPersonalAudio == nil {
@@ -665,6 +667,10 @@ struct NowPlayingScreen: View {
                     .contentShape(Rectangle())
                     .background(.thinMaterial, in: Capsule())
             }
+            // Keep the visible button named during initial accessibility tree
+            // construction as well as in its adjustable representation below.
+            .accessibilityLabel("Playback speed")
+            .accessibilityValue(speedAccessibilityValue)
             // Replace the button's accessibility node with a PURE adjustable
             // element (no button trait). Combining `.isButton` with the adjustable
             // trait makes VoiceOver announce "button, adjustable" and suppresses
@@ -996,7 +1002,7 @@ struct NowPlayingScreen: View {
 
 /// The in-app progress scrubber: a visual `Slider` for sighted drag, with its
 /// accessibility fully hand-authored via `.accessibilityRepresentation` so
-/// VoiceOver hears a spoken time position and adjusts in 30-second steps rather
+/// VoiceOver hears a spoken time position and adjusts in chosen time steps rather
 /// than the meaningless "x percent" a raw slider announces.
 ///
 /// While the user drags, the thumb follows a local `dragSeconds` instead of the
@@ -1004,6 +1010,7 @@ struct NowPlayingScreen: View {
 /// actual seek lands once on drag-end (never per frame), keeping the synchronous
 /// `context.save()` off the drag path (the #362 main-run-loop lesson).
 private struct ScrubberView: View {
+    @Environment(SettingsStore.self) private var settings
     let player: PlayerService
     @Binding var preview: Double?
 
@@ -1020,11 +1027,9 @@ private struct ScrubberView: View {
     private var duration: Double { player.durationSeconds }
     private var hasDuration: Bool { player.hasKnownDuration }
 
-    /// VoiceOver adjust step, scaled to episode duration (#610). Matches the flat
-    /// 30s used by the Flutter scrubber for anything at or under 30 minutes;
-    /// longer episodes take fewer, larger steps so a multi-hour episode doesn't
-    /// need 100+ flicks to cross.
-    private var stepSeconds: Double { PlaybackLogic.scrubberStepSeconds(duration: duration) }
+    private var stepSeconds: Double {
+        PlaybackLogic.scrubberStepSeconds(duration: duration, preference: settings.playbackPositionStep)
+    }
 
     /// The position to render: the drag value mid-gesture, otherwise a pending
     /// VoiceOver-adjust target if one hasn't converged yet, otherwise the live
@@ -1081,9 +1086,13 @@ private struct ScrubberView: View {
                             let target: Double
                             switch direction {
                             case .increment:
-                                target = min(base + stepSeconds, duration)
+                                target = PlaybackLogic.adjustedScrubberPosition(
+                                    from: base, duration: duration, step: stepSeconds, forward: true
+                                )
                             case .decrement:
-                                target = max(base - stepSeconds, 0)
+                                target = PlaybackLogic.adjustedScrubberPosition(
+                                    from: base, duration: duration, step: stepSeconds, forward: false
+                                )
                             @unknown default:
                                 return
                             }

@@ -372,6 +372,15 @@ final class ListeningPlacesService {
         guard let bookmarkData, let context else { return }
         let generation = writeGeneration
         do {
+            // Refresh an unmodified legacy README even when the snapshot has
+            // not changed and therefore does not need a device-file write.
+            // Documentation refresh must not prevent reading an existing device
+            // file if a folder provider cannot update the README.
+            try? await transport.prepareFolder(bookmarkData: bookmarkData)
+            guard !Task.isCancelled,
+                  generation == writeGeneration,
+                  enabled,
+                  self.bookmarkData == bookmarkData else { return }
             if let data = try await transport.readDeviceFile(
                 bookmarkData: bookmarkData,
                 deviceID: deviceID

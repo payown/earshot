@@ -45,6 +45,8 @@ enum SettingsKey {
     static let equalizerTreble = "equalizer_treble"
     static let skipForwardSeconds = "skip_forward_seconds"
     static let skipBackSeconds = "skip_back_seconds"
+    /// Device-local interval for the VoiceOver playback-position adjustment.
+    static let playbackPositionStep = "playback_position_step"
     // direct_touch_enabled: retained for data compatibility only. Its one
     // consumer, PlayerService.fastForwardRotorAvailable, no longer gates on it
     // (#610 -- the fast-forward rotor action is now always available regardless).
@@ -321,6 +323,7 @@ enum SettingsDefault {
     static let equalizerBand: EqualizerBandGain = .neutral
     static let skipForwardSeconds = 30
     static let skipBackSeconds = 15
+    static let playbackPositionStep: PlaybackPositionStep = .automatic
     static let wifiOnlyDownloads = true
     static let downloadCompletionNotifications = false
     /// Auto-delete downloads after played is OFF by default: it destroys files,

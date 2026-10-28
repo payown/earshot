@@ -21,6 +21,7 @@ final class SettingsStore {
     var skipSilenceEnabled: Bool = SettingsDefault.skipSilenceEnabled { didSet { persist { $0.setBool(skipSilenceEnabled, for: SettingsKey.skipSilenceEnabled) } } }
     var skipForwardSeconds: Int = SettingsDefault.skipForwardSeconds { didSet { persist { $0.setInt(skipForwardSeconds, for: SettingsKey.skipForwardSeconds) } } }
     var skipBackSeconds: Int = SettingsDefault.skipBackSeconds { didSet { persist { $0.setInt(skipBackSeconds, for: SettingsKey.skipBackSeconds) } } }
+    var playbackPositionStep: PlaybackPositionStep = SettingsDefault.playbackPositionStep { didSet { persist { $0.setRawValue(playbackPositionStep.rawValue, for: SettingsKey.playbackPositionStep) } } }
     var wrapQueue: Bool = SettingsDefault.wrapQueue { didSet { persist { $0.setBool(wrapQueue, for: SettingsKey.wrapQueue) } } }
     var continueAfterEpisode: Bool = SettingsDefault.continueAfterEpisode { didSet { persist { $0.setBool(continueAfterEpisode, for: SettingsKey.continueAfterEpisode) } } }
     var continueAfterGroupEnds: Bool = SettingsDefault.continueAfterGroupEnds { didSet { persist { $0.setBool(continueAfterGroupEnds, for: SettingsKey.continueAfterGroupEnds) } } }
@@ -115,6 +116,8 @@ final class SettingsStore {
         assignIfChanged(\.skipSilenceEnabled, store.bool(SettingsKey.skipSilenceEnabled, default: SettingsDefault.skipSilenceEnabled))
         assignIfChanged(\.skipForwardSeconds, store.int(SettingsKey.skipForwardSeconds, default: SettingsDefault.skipForwardSeconds))
         assignIfChanged(\.skipBackSeconds, store.int(SettingsKey.skipBackSeconds, default: SettingsDefault.skipBackSeconds))
+        assignIfChanged(\.playbackPositionStep, store.rawValue(SettingsKey.playbackPositionStep)
+            .flatMap(PlaybackPositionStep.init(rawValue:)) ?? SettingsDefault.playbackPositionStep)
         assignIfChanged(\.keepFinishedEpisodesInQueue, store.bool(SettingsKey.keepFinishedEpisodesInQueue, default: false))
         assignIfChanged(\.wrapQueue, store.bool(SettingsKey.wrapQueue, default: SettingsDefault.wrapQueue))
         assignIfChanged(\.continueAfterEpisode, store.bool(SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode))

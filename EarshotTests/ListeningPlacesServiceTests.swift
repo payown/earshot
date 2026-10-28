@@ -83,9 +83,11 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertNil(records[0]["label"])
         XCTAssertNil(records[0]["feed"])
         XCTAssertEqual(records[0]["position_ms"] as? Int, 90_000)
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: directory.appending(path: "Listening Places/README.txt").path
-        ))
+        let readme = try String(
+            contentsOf: directory.appending(path: "Listening Places/README.txt"), encoding: .utf8
+        )
+        XCTAssertTrue(readme.contains("Earshot does not import changes from other devices"))
+        XCTAssertTrue(readme.contains("iCloud Sync separately syncs"))
 
         episode.positionSeconds = 0
         try container.mainContext.save()
@@ -170,6 +172,42 @@ final class ListeningPlacesServiceTests: XCTestCase {
             .appending(path: "devices", directoryHint: .isDirectory)
             .appending(path: "1234abcd.json")
         XCTAssertTrue(FileManager.default.fileExists(atPath: deviceFile.path))
+    }
+
+    func testReadmeUpdatesOnlyUnmodifiedLegacyText() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "listening-places-readme-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let places = directory.appending(path: "Listening Places", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: places, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let readme = places.appending(path: "README.txt")
+        let legacy = """
+            Listening Places
+            ================
+
+            This folder is how your audio apps remember where you got to, across your devices, without an account and without anybody's server.
+
+            Each device writes exactly one file in "devices" and reads the others. Nothing here is audio -- these are only positions, a few hundred kilobytes at most. The ids are hashed, so this folder does not list what you listen to in readable form.
+
+            You can delete this folder at any time. Nothing breaks: every app still knows your place on the device you are using. It just stops being shared.
+
+            Format: listening-places/1
+            """
+        let bookmark = try directory.bookmarkData(
+            options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil
+        )
+        let transport = ListeningPlacesFileTransport()
+        try Data(legacy.utf8).write(to: readme)
+        try await transport.prepareFolder(bookmarkData: bookmark)
+        let updated = try String(contentsOf: readme, encoding: .utf8)
+        XCTAssertTrue(updated.contains("Earshot does not import changes from other devices"))
+        XCTAssertTrue(updated.contains("iCloud Sync separately syncs"))
+        XCTAssertTrue(updated.contains("unless you enable them"))
+
+        let edited = legacy + "\nMy own notes."
+        try Data(edited.utf8).write(to: readme)
+        try await transport.prepareFolder(bookmarkData: bookmark)
+        XCTAssertEqual(try String(contentsOf: readme, encoding: .utf8), edited)
     }
 
     private func makeContainer() throws -> ModelContainer {

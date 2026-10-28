@@ -20,6 +20,10 @@ struct PlaybackSettingsView: View {
         Self.skipIntervals.map { .init(value: $0, title: "\($0)s", spoken: "\($0) seconds") }
     }
 
+    private var positionStepOptions: [AdjustableOptionPicker<PlaybackPositionStep>.Option] {
+        PlaybackPositionStep.allCases.map { .init(value: $0, title: $0.title, spoken: $0.title) }
+    }
+
     private var volumeBoostOptions: [AdjustableOptionPicker<VolumeBoostLevel>.Option] {
         VolumeBoostLevel.allCases.map {
             .init(value: $0, title: $0.title, spoken: $0.spokenValue)
@@ -84,6 +88,17 @@ struct PlaybackSettingsView: View {
                 // heading stop. The distinct Auto-advance and Queue sections keep
                 // their headers.
                 Text("Shows Previous and Next chapter buttons beside the chapter name in the player. Turn off to navigate chapters with the VoiceOver rotor on the artwork.")
+            }
+
+            Section {
+                AdjustableOptionPicker(
+                    "Playback position adjustment",
+                    options: positionStepOptions,
+                    selection: $settings.playbackPositionStep,
+                    hint: "Flick up or down to choose an adjustment interval"
+                )
+            } footer: {
+                Text("Controls how far VoiceOver moves playback position with each flick. Automatic adjusts the interval to the episode length. Skip buttons use their own settings.")
             }
 
             Section {
