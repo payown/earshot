@@ -47,8 +47,10 @@ durations and counts; no episode/show identifiers, spoken text, or URLs.
   does not establish that it blocks the main actor.
 - No capture covers work before the first foreground lifecycle callback.
 - Diagnostic overhead and a direct development installation can affect behavior.
-- The recorder stops taking new events after 30 minutes. Relaunching normally
-  disables it; re-enable with the explicit environment variable.
+- Build 280 enables recording only in the explicitly launched process. Build
+  281 persists the opt-in deadline for 30 minutes so normal process relaunches
+  continue the same test. An explicit `EARSHOT_UNLOCK_MEASURE=0` launch clears
+  the persisted opt-in. Each process also has a 30-minute recording cap.
 
 ## Device checks after installation
 
@@ -80,3 +82,43 @@ No full regression suite was run for temporary observational instrumentation.
 Existing baseline compiler warnings remain in unrelated files. No production
 behavior fix, merge, App Store upload, or TestFlight distribution has occurred.
 Awaiting Michael's paired full-player/Library unlock attempts and report retrieval.
+
+## Build 280 observations and recording limitation
+
+Michael reports approximately six seconds before the paused full player became
+responsive. In Library, with the episode still paused, VoiceOver was sluggish
+for four to six seconds but was not fully unresponsive. Both observations are
+physical-device evidence; the exact duration is approximate.
+
+The retrieved report contained 31 events and one 20.015-second startup capture,
+ending with the first backgrounding approximately 53 seconds after probe start
+and two audio route-change events. It contained no full-player appearance event
+or either subsequent unlock attempt. It therefore cannot establish main-thread
+or accessibility-event timing for the reported tests. Startup's largest timer
+gap (276.54 ms) must not be substituted for an unlock measurement.
+
+The reason for the missing recording is not established. Process relaunch would
+disable build 280's environment-only recorder. Build 281 carries the explicit
+opt-in deadline through normal relaunch, preserves the same build's recent
+events/captures, and records process IDs and report-write timestamps to make
+this failure visible. This changes the diagnostic, not production behavior.
+
+## Build 281 recorder verification
+
+Release build 281 succeeded and passed strict signature verification. Device
+installation and installed-version query confirmed 1.2.5 (281). Launching with
+the recording environment created process 7713 and a build-281 report with
+VoiceOver enabled. A subsequent launch without that environment created process
+7715 and retained both processes' start events. After the startup capture saved,
+a second normal relaunch created process 7717 and retained the complete earlier
+capture (1,194 ticks), verified by equality with the previously retrieved capture.
+This proves cross-process opt-in and report retention on this phone. These
+startup/controlled relaunch checks are not a physical unlock reproduction.
+
+The system also supplied an Earshot disk-writes resource report timestamped
+18:17 local time. Its action is explicitly `none`, and its aggregate window spans
+approximately 5.2 hours, predating installation of diagnostic 280. Utility-thread
+Core Data/SQLite samples are present. This is neither a kill report nor evidence
+of a main-thread unlock stall; it does not establish the missing recorder's cause
+or attribute its aggregate writes to diagnostic instrumentation. Raw report is
+kept locally with the investigation data, not copied into an issue as user data.

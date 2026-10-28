@@ -22,6 +22,8 @@ final class UnlockResponsivenessProbe {
     }
     struct Report: Codable, Sendable {
         let build: String
+        let processID: Int32
+        let savedAtUnixSeconds: Double
         let voiceOver: Bool
         let systemSearchEnabled: Bool
         let events: [Event]
@@ -29,7 +31,17 @@ final class UnlockResponsivenessProbe {
     }
 
     static let shared = UnlockResponsivenessProbe()
-    private let enabled = ProcessInfo.processInfo.environment["EARSHOT_UNLOCK_MEASURE"] == "1"
+    private let enabledUntil: TimeInterval = {
+        let defaults = UserDefaults.standard
+        let key = "earshot.diagnostics.unlock.enabledUntil"
+        switch ProcessInfo.processInfo.environment["EARSHOT_UNLOCK_MEASURE"] {
+        case "1": defaults.set(Date().timeIntervalSince1970 + 1800, forKey: key)
+        case "0": defaults.removeObject(forKey: key)
+        default: break
+        }
+        return defaults.double(forKey: key)
+    }()
+    private var enabled: Bool { Date().timeIntervalSince1970 < enabledUntil }
     private let sessionStart = ProcessInfo.processInfo.systemUptime
     private var started = false
     private var observers: [NSObjectProtocol] = []
@@ -43,6 +55,17 @@ final class UnlockResponsivenessProbe {
     func start() {
         guard enabled, !started else { return }
         started = true
+        // A normal launch after the OS or user ends the diagnostic process
+        // must retain earlier attempts within the same bounded test session.
+        let file = URL.documentsDirectory.appendingPathComponent("earshot-unlock-279.json")
+        if let data = try? Data(contentsOf: file),
+           let report = try? JSONDecoder().decode(Report.self, from: data),
+           report.build == Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+           report.savedAtUnixSeconds > Date().timeIntervalSince1970 - 1800,
+           (report.events.last?.uptime ?? 0) <= ProcessInfo.processInfo.systemUptime {
+            events = Array(report.events.suffix(3500))
+            captures = Array(report.captures.suffix(12))
+        }
         let notifications: [(Notification.Name, String)] = [
             (UIApplication.willEnterForegroundNotification, "app.willEnterForeground"),
             (UIApplication.didBecomeActiveNotification, "app.didBecomeActive"),
@@ -62,7 +85,7 @@ final class UnlockResponsivenessProbe {
                 MainActor.assumeIsolated { self?.notification(label) }
             })
         }
-        event("probe.start")
+        event("probe.start", value: Int(ProcessInfo.processInfo.processIdentifier))
         save()
     }
 
@@ -131,6 +154,8 @@ final class UnlockResponsivenessProbe {
     private func save() {
         let report = Report(
             build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+            processID: ProcessInfo.processInfo.processIdentifier,
+            savedAtUnixSeconds: Date().timeIntervalSince1970,
             voiceOver: UIAccessibility.isVoiceOverRunning,
             systemSearchEnabled: LibrarySearchIndex.isEnabled,
             events: events, captures: captures
