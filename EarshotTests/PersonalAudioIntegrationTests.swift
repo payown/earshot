@@ -229,6 +229,33 @@ final class PersonalAudioIntegrationTests: XCTestCase {
         XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<PersonalAudioItem>()), 0)
     }
 
+    func testUnloadingAfterCommittedDeletionDoesNotRestoreDeletedAudio() throws {
+        let source = try makePlayableAudioFile(name: "keep-source.caf", durationSeconds: 2)
+        let storage = PersonalAudioStorage(rootURL: root.appending(path: "PersonalAudio"))
+        let staged = try storage.stageCopy(from: source, id: UUID().uuidString)
+        let managed = try storage.finalize(staged, artworkStagingFilename: nil)
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let item = PersonalAudioItem(
+            id: staged.id, title: "Recording", originalFilename: source.lastPathComponent,
+            mediaFilename: managed.mediaFilename, typeIdentifier: staged.typeIdentifier,
+            durationSeconds: 2, byteSize: staged.byteSize, contentHash: staged.contentHash
+        )
+        context.insert(item)
+        try context.save()
+        let player = PlayerService(audioSession: TestPersonalAudioSession(), personalAudioStorage: storage)
+        player.configure(context: context)
+        player.play(item)
+        XCTAssertTrue(player.isPlaying)
+
+        try PersonalAudioImporter(storage: storage).delete(itemID: staged.id, in: container)
+        player.unloadPersonalAudioIfCurrent(id: staged.id, persistPosition: false)
+
+        XCTAssertNil(player.nowPlayingPersonalAudioID)
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<PersonalAudioItem>()), 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+
     func testPersonalAudioPlayedStateResetsProgressAndCanBeMarkedUnplayed() throws {
         let storage = PersonalAudioStorage(rootURL: root.appending(path: "PersonalAudio"))
         let container = try ModelContainerFactory.makeInMemory()

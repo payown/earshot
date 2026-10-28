@@ -73,7 +73,15 @@ actor PendingOPMLImportStore {
         )
         let contentURL = documentsURL.appending(path: metadata.contentFileName, directoryHint: .notDirectory)
 
-        if !FileManager.default.fileExists(atPath: contentURL.path) {
+        // A same-name file may itself be damaged. Verify bytes rather than
+        // trusting the content-addressed name before reusing it.
+        let existing: Data?
+        do {
+            existing = try Data(contentsOf: contentURL, options: .mappedIfSafe)
+        } catch where Self.isMissingFile(error) {
+            existing = nil
+        }
+        if existing != data {
             try data.write(to: contentURL, options: [.atomic, .completeFileProtection])
         }
         // Reassert attributes even when content-addressing reuses existing bytes;
@@ -95,24 +103,34 @@ actor PendingOPMLImportStore {
     /// Restores launch state without mapping or hashing the document. Full content
     /// verification remains mandatory in ``load()`` immediately before retry.
     func loadMetadata() throws -> PendingOPMLImport? {
-        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
-            removeUnreferencedDocuments(keeping: nil)
+        let metadata: PendingOPMLImport
+        do {
+            metadata = try readManifest()
+        } catch where Self.isMissingFile(error) {
+            // An absent manifest is not permission to delete orphaned content.
+            do {
+                let contents = try FileManager.default.contentsOfDirectory(
+                    at: documentsURL, includingPropertiesForKeys: nil
+                )
+                if !contents.isEmpty { throw PendingOPMLImportStoreError.contentMissing }
+            } catch where Self.isMissingFile(error) {
+                // A fresh install has no documents directory yet.
+            }
             return nil
         }
-
-        let metadata = try readManifest()
         let contentURL = documentsURL.appending(
             path: metadata.contentFileName,
             directoryHint: .notDirectory
         )
-        guard FileManager.default.fileExists(atPath: contentURL.path) else {
+        let values: URLResourceValues
+        do {
+            values = try contentURL.resourceValues(forKeys: [.fileSizeKey])
+        } catch where Self.isMissingFile(error) {
             throw PendingOPMLImportStoreError.contentMissing
         }
-        let values = try contentURL.resourceValues(forKeys: [.fileSizeKey])
         guard values.fileSize == metadata.byteCount else {
             throw PendingOPMLImportStoreError.contentSizeMismatch
         }
-        removeUnreferencedDocuments(keeping: metadata.contentFileName)
         return metadata
     }
 
@@ -134,6 +152,30 @@ actor PendingOPMLImportStore {
             try FileManager.default.removeItem(at: manifestURL)
         }
         removeUnreferencedDocuments(keeping: nil)
+    }
+
+    /// Keep the entire original directory before replacing an unreadable record.
+    /// Copying first leaves the original untouched if storage or access fails.
+    func preserveUnreadableImport() throws {
+        let archiveRoot = rootURL.deletingLastPathComponent()
+            .appending(path: "Pending OPML Recovery", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: archiveRoot, withIntermediateDirectories: true)
+        try applyCompleteProtection(archiveRoot)
+        try excludeFromBackup(archiveRoot)
+        let archive = archiveRoot.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        do {
+            try FileManager.default.copyItem(at: rootURL, to: archive)
+            try applyCompleteProtection(archive)
+        } catch {
+            try? FileManager.default.removeItem(at: archive)
+            throw error
+        }
+    }
+
+    private static func isMissingFile(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return (nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoSuchFileError)
+            || (nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ENOENT))
     }
 
     private func requirePending() throws -> StagedOPMLImport {
@@ -173,7 +215,15 @@ actor PendingOPMLImportStore {
     private func readManifest() throws -> PendingOPMLImport {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let metadata = try decoder.decode(PendingOPMLImport.self, from: Data(contentsOf: manifestURL))
+        let data = try Data(contentsOf: manifestURL)
+        // Check the version before decoding the remaining fields. A future
+        // version may have a different shape and must not be called corrupt.
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let version = object["formatVersion"] as? Int,
+           version != PendingOPMLImport.currentFormatVersion {
+            throw PendingOPMLImportStoreError.unsupportedFormat(version)
+        }
+        let metadata = try decoder.decode(PendingOPMLImport.self, from: data)
         guard metadata.formatVersion == PendingOPMLImport.currentFormatVersion else {
             throw PendingOPMLImportStoreError.unsupportedFormat(metadata.formatVersion)
         }
@@ -190,10 +240,12 @@ actor PendingOPMLImportStore {
 
     private func validatedData(for metadata: PendingOPMLImport) throws -> Data {
         let url = documentsURL.appending(path: metadata.contentFileName, directoryHint: .notDirectory)
-        guard FileManager.default.fileExists(atPath: url.path) else {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url, options: .mappedIfSafe)
+        } catch where Self.isMissingFile(error) {
             throw PendingOPMLImportStoreError.contentMissing
         }
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
         guard data.count == metadata.byteCount else {
             throw PendingOPMLImportStoreError.contentSizeMismatch
         }

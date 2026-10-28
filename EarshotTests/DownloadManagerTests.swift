@@ -917,7 +917,29 @@ final class DownloadManagerTests: XCTestCase {
             journal.append("feed|episode")
             return []
         }, pendingKeys: { journal })
-        XCTAssertTrue(keys.contains("feed|episode"))
+        XCTAssertEqual(keys?.contains("feed|episode"), true)
+    }
+
+    func testUnknownJournalDoesNotCauseOrphanReconciliation() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "journal-unavailable", title: "Pending",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+
+        let unknown = await DownloadManager.liveTaskKeys(
+            taskDescriptions: { [] }, pendingKeys: { nil }
+        )
+        XCTAssertNil(unknown)
+        await manager.reconcileStuckDownloads { unknown }
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+
+        // Once the journal is readable, genuinely orphaned work can be reset.
+        let empty = await DownloadManager.liveTaskKeys(
+            taskDescriptions: { [] }, pendingKeys: { [] }
+        )
+        await manager.reconcileStuckDownloads { empty }
+        XCTAssertEqual(episode.downloadStatus, .failed)
     }
 
     func testReconciliationDoesNotOverwriteCompletionDuringTaskEnumeration() async throws {
@@ -1676,6 +1698,14 @@ final class DownloadEventJournalTests: XCTestCase {
         XCTAssertNotNil(object["events"] as? [Any])
     }
 
+    func testAcknowledgementSucceedsWhenJournalWasAlreadyRemoved() throws {
+        let journal = DownloadEventJournal(url: journalURL)
+        let event = journal.record(taskKey: "feed|episode", outcome: .failed)
+        try FileManager.default.removeItem(at: journalURL)
+        XCTAssertTrue(journal.acknowledge(event.id))
+        XCTAssertTrue(journal.pendingEvents().isEmpty)
+    }
+
     func testUnsupportedJournalVersionDoesNotDecodeEvents() throws {
         let journal = DownloadEventJournal(url: journalURL)
         journal.record(taskKey: "feed|episode", outcome: .failed)
@@ -1733,6 +1763,18 @@ final class DownloadEventJournalTests: XCTestCase {
         XCTAssertEqual(journal.pendingEvents(), [event])
     }
 
+    func testDelegateDistinguishesUnreadableJournalFromEmptyJournal() throws {
+        let original = Data(#"{"version":99,"events":[]}"#.utf8)
+        try original.write(to: journalURL)
+        let delegate = DownloadSessionDelegate(journal: DownloadEventJournal(url: journalURL))
+        XCTAssertNil(delegate.pendingTaskKeys())
+        XCTAssertEqual(try Data(contentsOf: journalURL), original)
+
+        // A missing journal is a known empty journal, so orphan cleanup can run.
+        try FileManager.default.removeItem(at: journalURL)
+        XCTAssertEqual(delegate.pendingTaskKeys(), [])
+    }
+
     func testPermissionFailureRetainsJournalUntilItBecomesReadable() throws {
         let originalJournal = DownloadEventJournal(url: journalURL)
         let oldEvent = originalJournal.record(taskKey: "old", outcome: .failed)
@@ -1740,11 +1782,13 @@ final class DownloadEventJournalTests: XCTestCase {
         let reader = JournalReadProbe()
         let journal = DownloadEventJournal(url: journalURL, read: reader.read)
         let newEvent = journal.record(taskKey: "new", outcome: .failed)
+        XCTAssertNil(journal.pendingEventsIfReadable())
         XCTAssertFalse(journal.acknowledge(newEvent.id))
         XCTAssertEqual(try Data(contentsOf: journalURL), original)
         XCTAssertEqual(journal.pendingEvents(), [newEvent])
 
         reader.allowReads()
+        XCTAssertEqual(journal.pendingEventsIfReadable(), [oldEvent, newEvent])
         XCTAssertEqual(journal.pendingEvents(), [oldEvent, newEvent])
         XCTAssertTrue(journal.acknowledge(newEvent.id))
         XCTAssertEqual(DownloadEventJournal(url: journalURL).pendingEvents(), [oldEvent])

@@ -83,6 +83,17 @@ final class PendingOPMLImportStoreTests: XCTestCase {
         XCTAssertEqual(restored?.metadata.displayName, "two.opml")
     }
 
+    func testRestagingRepairsCorruptContentWithMatchingFilename() async throws {
+        let root = try temporaryRoot()
+        let store = PendingOPMLImportStore(rootURL: root)
+        let original = Data("original".utf8)
+        let metadata = try await store.stage(original, displayName: "old.opml")
+        try Data("tampered".utf8).write(to: root.appending(path: "Documents/\(metadata.contentFileName)"))
+        _ = try await store.stage(original, displayName: "new.opml")
+        let restored = try await store.load()
+        XCTAssertEqual(restored?.data, original)
+    }
+
     func testRecordsRetryableResultWithoutRewritingDocument() async throws {
         let root = try temporaryRoot()
         let store = PendingOPMLImportStore(rootURL: root)

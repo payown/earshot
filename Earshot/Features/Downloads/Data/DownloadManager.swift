@@ -404,7 +404,7 @@ final class DownloadManager {
             if announceWaiting {
                 Announcer.announce("Waiting for Wi-Fi to download \(episode.title)")
             }
-            AppLog.networking.info("Download gated (no Wi-Fi): \(episode.title, privacy: .public)")
+            AppLog.networking.info("Download gated: Wi-Fi unavailable")
             return
         }
         guard let rawURL = URL(string: episode.audioURL),
@@ -438,7 +438,7 @@ final class DownloadManager {
             sourceURL: url
         )
         startTransfer(url, transferKey)
-        AppLog.networking.info("Download started (background): \(episode.title, privacy: .public)")
+        AppLog.networking.info("Download started in the background")
     }
 
     /// Enrolls an explicit user-selected batch through the same guarded path as
@@ -575,13 +575,12 @@ final class DownloadManager {
     /// The candidate rows now come from the bounded ``ActiveDownload`` table
     /// rather than a whole-`Episode`-table fetch on the main actor (#701); the
     /// orphan comparison itself is unchanged.
-    func reconcileStuckDownloads(liveKeys: @MainActor () async -> Set<String> = { await DownloadManager.liveTaskKeys() }) async {
+    func reconcileStuckDownloads(liveKeys: @MainActor () async -> Set<String>? = { await DownloadManager.liveTaskKeys() }) async {
         guard let context else { return }
         let markedDownloading = await activeEpisodes(state: .downloading, in: context)
         guard !markedDownloading.isEmpty else { return }
 
-        let liveKeys = await liveKeys()
-        guard !Task.isCancelled, self.context === context,
+        guard let liveKeys = await liveKeys(), !Task.isCancelled, self.context === context,
               !RecoveryDownloadRemoval.isPending else { return }
         let identities = markedDownloading.map { episode in
             (composite: DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
@@ -1132,7 +1131,7 @@ final class DownloadManager {
     /// The task keys (composite `"feedURL|guid"`, or bare guids from tasks
     /// enqueued by a pre-#576 build) of tasks the background session still has
     /// in flight.
-    private static func liveTaskKeys() async -> Set<String> {
+    private static func liveTaskKeys() async -> Set<String>? {
         await liveTaskKeys(
             taskDescriptions: { await allTasks().compactMap(\.taskDescription) },
             pendingKeys: { delegate.pendingTaskKeys() }
@@ -1140,12 +1139,12 @@ final class DownloadManager {
     }
 
     static func liveTaskKeys(
-        taskDescriptions: () async -> [String], pendingKeys: () -> [String]
-    ) async -> Set<String> {
+        taskDescriptions: () async -> [String], pendingKeys: () -> [String]?
+    ) async -> Set<String>? {
         let descriptions = await taskDescriptions()
         // Read after URLSession enumeration: a task may have finished and been
         // journaled while getAllTasks was suspended.
-        let pending = pendingKeys()
+        guard let pending = pendingKeys() else { return nil }
         var keys = Set<String>()
         for value in descriptions + pending {
             keys.insert(value)

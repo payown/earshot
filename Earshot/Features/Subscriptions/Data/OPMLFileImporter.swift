@@ -49,7 +49,12 @@ enum OPMLFileImporter {
         importOperation: (@MainActor (String) async -> OPMLImportOutcome)? = nil
     ) async -> ContinuationResult {
         guard let staged = try? await coordinator.beginContinuation() else {
-            await announceSettled("Couldn't read the saved OPML file")
+            if case let .failed(_, reason) = coordinator.state,
+               reason == .damagedPendingImport || reason == .unsupportedPendingImport {
+                await announceSettled("The saved OPML import can't be continued. Choose a new OPML file in Settings, Data. Earshot will keep a copy of the saved import.")
+            } else {
+                await announceSettled("Couldn't read the saved OPML file. Try again.")
+            }
             return .unreadable
         }
         defer { progress?.finish() }

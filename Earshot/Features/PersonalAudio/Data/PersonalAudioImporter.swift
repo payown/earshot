@@ -24,6 +24,12 @@ enum PersonalAudioImportFailure: Error, Sendable, Equatable {
     case processingFailure
 }
 
+enum PersonalAudioDeletionFailure: Error, Sendable, Equatable {
+    case itemNotFound
+    case persistenceFailed
+    case cleanupFailed
+}
+
 enum PersonalAudioImportOutcome {
     case added(itemID: String)
     case duplicateNeedsConfirmation(PreparedPersonalAudioImport)
@@ -38,20 +44,27 @@ final class PersonalAudioImporter {
         let load: @Sendable (URL, String) async throws -> PersonalAudioMetadata
     }
 
+    struct DeletionSaver {
+        let save: (ModelContext) throws -> Void
+    }
+
     private let storage: PersonalAudioStorage
     private let extractMetadata: @Sendable (URL, String) async throws -> PersonalAudioMetadata
+    private let saveDeletion: (ModelContext) throws -> Void
     private let saveItem: (PersonalAudioItem, ModelContext) throws -> Void
 
     init(
         storage: PersonalAudioStorage = PersonalAudioStorage(),
         metadataExtractor: PersonalAudioMetadataExtractor = PersonalAudioMetadataExtractor(),
         metadataLoader: MetadataLoader? = nil,
+        deletionSaver: DeletionSaver? = nil,
         saveItem: @escaping (PersonalAudioItem, ModelContext) throws -> Void = { item, context in
             context.insert(item)
             try context.save()
         }
     ) {
         self.storage = storage
+        self.saveDeletion = deletionSaver?.save ?? { try $0.save() }
         if let metadataLoader {
             self.extractMetadata = metadataLoader.load
         } else {
@@ -170,20 +183,34 @@ final class PersonalAudioImporter {
             predicate: #Predicate { $0.id == itemID }
         )
         descriptor.fetchLimit = 1
-        guard let item = try context.fetch(descriptor).first else { return }
+        let item: PersonalAudioItem
+        do {
+            guard let found = try context.fetch(descriptor).first else {
+                throw PersonalAudioDeletionFailure.itemNotFound
+            }
+            item = found
+        } catch let failure as PersonalAudioDeletionFailure {
+            throw failure
+        } catch {
+            throw PersonalAudioDeletionFailure.persistenceFailed
+        }
         let mediaFilename = item.mediaFilename
         let artworkFilename = item.artworkFilename
         context.delete(item)
         do {
-            try context.save()
+            try saveDeletion(context)
         } catch {
             context.rollback()
-            throw error
+            throw PersonalAudioDeletionFailure.persistenceFailed
         }
-        try storage.removeManagedFiles(
-            mediaFilename: mediaFilename,
-            artworkFilename: artworkFilename
-        )
+        do {
+            try storage.removeManagedFiles(
+                mediaFilename: mediaFilename,
+                artworkFilename: artworkFilename
+            )
+        } catch {
+            throw PersonalAudioDeletionFailure.cleanupFailed
+        }
     }
 
     private func commit(

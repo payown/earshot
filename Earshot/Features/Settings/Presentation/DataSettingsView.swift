@@ -39,6 +39,13 @@ struct DataSettingsView: View {
                     ? "Follow a podcast to enable export."
                     : "Saves your podcast list as a file you can use as a backup")
 
+                if case let .failed(_, reason) = opmlImportCoordinator.state {
+                    if reason == .damagedPendingImport || reason == .unsupportedPendingImport {
+                        Text("The saved OPML import can't be continued. Choose a new OPML file to import; Earshot will keep a copy of the saved import.")
+                    } else if reason == .storageUnavailable {
+                        Text("Earshot couldn't access OPML import storage. Try again after unlocking your device.")
+                    }
+                }
                 if let pending = opmlImportCoordinator.pendingImport {
                     Button {
                         opmlImportCoordinator.prepareContinuation()

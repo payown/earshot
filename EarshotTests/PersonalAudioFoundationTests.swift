@@ -166,6 +166,54 @@ final class PersonalAudioFoundationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
+    func testDeleteSaveFailureKeepsTheItemAndItsManagedAudio() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let storage = PersonalAudioStorage(rootURL: root.appending(path: "PersonalAudio"))
+        try storage.prepare()
+        let filename = "\(UUID().uuidString).wav"
+        let fileURL = storage.rootURL.appending(path: filename)
+        try Data([1, 2, 3]).write(to: fileURL)
+        let item = PersonalAudioItem(
+            title: "Recording", originalFilename: "recording.wav", mediaFilename: filename,
+            typeIdentifier: "public.wav", durationSeconds: 1, byteSize: 3, contentHash: "hash"
+        )
+        container.mainContext.insert(item)
+        try container.mainContext.save()
+
+        let importer = PersonalAudioImporter(storage: storage, deletionSaver: .init(save: { _ in
+            throw CocoaError(.fileWriteNoPermission)
+        }))
+        XCTAssertThrowsError(try importer.delete(itemID: item.id, in: container)) {
+            XCTAssertEqual($0 as? PersonalAudioDeletionFailure, .persistenceFailed)
+        }
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<PersonalAudioItem>()), 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testDeleteCleanupFailureIsDistinctFromFailureToRemoveItem() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let storage = PersonalAudioStorage(rootURL: root.appending(path: "PersonalAudio"))
+        let item = PersonalAudioItem(
+            title: "Recording", originalFilename: "recording.wav", mediaFilename: "../invalid.wav",
+            typeIdentifier: "public.wav", durationSeconds: 1, byteSize: 3, contentHash: "hash"
+        )
+        container.mainContext.insert(item)
+        try container.mainContext.save()
+        let itemID = item.id
+
+        XCTAssertThrowsError(try PersonalAudioImporter(storage: storage).delete(itemID: itemID, in: container)) {
+            XCTAssertEqual($0 as? PersonalAudioDeletionFailure, .cleanupFailed)
+        }
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<PersonalAudioItem>()), 0)
+        XCTAssertThrowsError(try PersonalAudioImporter(storage: storage).delete(itemID: itemID, in: container)) {
+            XCTAssertEqual($0 as? PersonalAudioDeletionFailure, .itemNotFound)
+        }
+        XCTAssertNotEqual(
+            PersonalAudioLibraryPresentation.deletionFailureMessage(.persistenceFailed),
+            PersonalAudioLibraryPresentation.deletionFailureMessage(.cleanupFailed)
+        )
+    }
+
     func testImporterExtractsFallbackTitleAndDurationAndAllowsFilesWithoutChapters() async throws {
         let source = try makePlayableAudioFile(name: "  Field recording.caf", durationSeconds: 1)
         let container = try ModelContainerFactory.makeInMemory()
