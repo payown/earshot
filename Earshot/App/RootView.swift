@@ -264,6 +264,7 @@ struct RootView: View {
     @State private var showOPMLPaywall = false
     @State private var resumeImportAfterPaywall = false
     @State private var confirmOPMLReplacement = false
+    @State private var confirmUnreadableOPMLReplacement = false
     @State private var rootServicesActivated = false
 
     /// Which tab is selected. Optional so the first paint can resolve the saved
@@ -415,6 +416,7 @@ struct RootView: View {
         .onChange(of: opmlImportCoordinator.state) { _, state in
             if case .readyToImport = state, rootServicesActivated { continuePendingOPMLImport() }
             if case .replacementRequested = state { confirmOPMLReplacement = true }
+            if case .unreadableReplacementRequested = state { confirmUnreadableOPMLReplacement = true }
         }
         .confirmationDialog(
             "Replace pending OPML import?",
@@ -429,6 +431,26 @@ struct RootView: View {
             }
         } message: {
             Text("Earshot can keep one OPML file ready to continue. Replacing it discards the currently pending file.")
+        }
+        .confirmationDialog(
+            "Can't continue the saved OPML import",
+            isPresented: $confirmUnreadableOPMLReplacement,
+            titleVisibility: .visible
+        ) {
+            Button("Import the new file") {
+                Task {
+                    do {
+                        try await opmlImportCoordinator.confirmReplacement()
+                    } catch {
+                        Announcer.announce("Earshot couldn't preserve the previous import or save the new file. Try again.", assertive: true)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                opmlImportCoordinator.cancelReplacement()
+            }
+        } message: {
+            Text("The saved import is damaged or uses an unsupported format. Earshot will keep a protected copy of it before importing the new file.")
         }
         // Appearance preferences (#461): theme override, accent tint, and layout
         // density, applied at the root so every tab, push, and sheet follows.

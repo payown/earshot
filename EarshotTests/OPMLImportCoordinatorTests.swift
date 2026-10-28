@@ -182,6 +182,130 @@ final class OPMLImportCoordinatorTests: XCTestCase {
         XCTAssertEqual(staged?.data, Data("second".utf8))
     }
 
+    func testCorruptManifestRequiresConsentAndPreservesOriginalBeforeReplacement() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appending(path: "Pending OPML Import")
+        let store = PendingOPMLImportStore(rootURL: root)
+        let original = Data("original content".utf8)
+        let metadata = try await store.stage(original, displayName: "original.opml")
+        let brokenManifest = Data("{broken".utf8)
+        try brokenManifest.write(to: root.appending(path: "pending.json"))
+        let coordinator = OPMLImportCoordinator(store: store)
+        await coordinator.restorePendingImport()
+        XCTAssertEqual(coordinator.state, .failed(pending: nil, reason: .damagedPendingImport))
+
+        try await coordinator.requestStage(Data("replacement".utf8), displayName: "replacement.opml")
+        guard case .unreadableReplacementRequested = coordinator.state else {
+            return XCTFail("Expected explicit consent")
+        }
+        XCTAssertEqual(try Data(contentsOf: root.appending(path: "pending.json")), brokenManifest)
+        coordinator.cancelReplacement()
+        XCTAssertEqual(try Data(contentsOf: root.appending(path: "Documents/\(metadata.contentFileName)")), original)
+
+        try await coordinator.requestStage(Data("replacement".utf8), displayName: "replacement.opml")
+        try await coordinator.confirmReplacement()
+        let archiveRoot = parent.appending(path: "Pending OPML Recovery")
+        let archives = try FileManager.default.contentsOfDirectory(at: archiveRoot, includingPropertiesForKeys: nil)
+        let archive = try XCTUnwrap(archives.first)
+        XCTAssertEqual(try Data(contentsOf: archive.appending(path: "pending.json")), brokenManifest)
+        XCTAssertEqual(try Data(contentsOf: archive.appending(path: "Documents/\(metadata.contentFileName)")), original)
+        let replacement = try await store.load()
+        XCTAssertEqual(replacement?.data, Data("replacement".utf8))
+    }
+
+    func testDamageAfterRestoreUsesProtectedRecoveryInsteadOfNormalReplacement() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appending(path: "Pending OPML Import")
+        let store = PendingOPMLImportStore(rootURL: root)
+        let metadata = try await store.stage(Data("original".utf8), displayName: "old.opml")
+        let coordinator = OPMLImportCoordinator(store: store)
+        await coordinator.restorePendingImport()
+        let damaged = Data("tampered".utf8)
+        try damaged.write(to: root.appending(path: "Documents/\(metadata.contentFileName)"))
+        try await coordinator.requestStage(Data("new".utf8), displayName: "new.opml")
+        guard case .unreadableReplacementRequested = coordinator.state else {
+            return XCTFail("Damage since restore must use the protected recovery path")
+        }
+        try await coordinator.confirmReplacement()
+        let archiveRoot = parent.appending(path: "Pending OPML Recovery")
+        let archive = try XCTUnwrap(try FileManager.default.contentsOfDirectory(at: archiveRoot, includingPropertiesForKeys: nil).first)
+        XCTAssertEqual(try Data(contentsOf: archive.appending(path: "Documents/\(metadata.contentFileName)")), damaged)
+    }
+
+    func testPreservationFailureLeavesOriginalAndDoesNotStageReplacement() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appending(path: "Pending OPML Import")
+        let store = PendingOPMLImportStore(rootURL: root)
+        let metadata = try await store.stage(Data("original".utf8), displayName: "old.opml")
+        let broken = Data("broken".utf8)
+        try broken.write(to: root.appending(path: "pending.json"))
+        try Data("not a directory".utf8).write(to: parent.appending(path: "Pending OPML Recovery"))
+        let coordinator = OPMLImportCoordinator(store: store)
+        try await coordinator.requestStage(Data("new".utf8), displayName: "new.opml")
+        do {
+            try await coordinator.confirmReplacement()
+            XCTFail("Must not replace without a preserved copy")
+        } catch {}
+        XCTAssertEqual(coordinator.state, .failed(pending: nil, reason: .storageUnavailable))
+        XCTAssertEqual(try Data(contentsOf: root.appending(path: "pending.json")), broken)
+        XCTAssertEqual(try Data(contentsOf: root.appending(path: "Documents/\(metadata.contentFileName)")), Data("original".utf8))
+    }
+
+    func testUnknownManifestVersionIsPreservedAndDistinguishedFromCorruption() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appending(path: "Pending OPML Import")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let future = Data("{\"formatVersion\":99,\"futureFields\":true}".utf8)
+        try future.write(to: root.appending(path: "pending.json"))
+        let coordinator = OPMLImportCoordinator(store: PendingOPMLImportStore(rootURL: root))
+        await coordinator.restorePendingImport()
+        XCTAssertEqual(coordinator.state, .failed(pending: nil, reason: .unsupportedPendingImport))
+        try await coordinator.requestStage(Data("new".utf8), displayName: "new.opml")
+        try await coordinator.confirmReplacement()
+        let archiveRoot = parent.appending(path: "Pending OPML Recovery")
+        let archive = try XCTUnwrap(try FileManager.default.contentsOfDirectory(at: archiveRoot, includingPropertiesForKeys: nil).first)
+        XCTAssertEqual(try Data(contentsOf: archive.appending(path: "pending.json")), future)
+    }
+
+    func testStorageReadFailureIsNotTreatedAsPermissionToReplace() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appending(path: "Pending OPML Import")
+        // A directory in place of the manifest produces a real filesystem I/O error.
+        try FileManager.default.createDirectory(at: root.appending(path: "pending.json"), withIntermediateDirectories: true)
+        let coordinator = OPMLImportCoordinator(store: PendingOPMLImportStore(rootURL: root))
+        await coordinator.restorePendingImport()
+        XCTAssertEqual(coordinator.state, .failed(pending: nil, reason: .storageUnavailable))
+        do {
+            try await coordinator.requestStage(Data("new".utf8), displayName: "new.opml")
+            XCTFail("A temporary storage failure must not permit replacement")
+        } catch {}
+        XCTAssertEqual(coordinator.state, .failed(pending: nil, reason: .storageUnavailable))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appending(path: "pending.json").path))
+    }
+
+    func testOrphanedContentWithoutManifestRequiresConsent() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appending(path: "Pending OPML Import")
+        let store = PendingOPMLImportStore(rootURL: root)
+        let metadata = try await store.stage(Data("orphan".utf8), displayName: "old.opml")
+        try FileManager.default.removeItem(at: root.appending(path: "pending.json"))
+        let coordinator = OPMLImportCoordinator(store: store)
+        try await coordinator.requestStage(Data("new".utf8), displayName: "new.opml")
+        guard case .unreadableReplacementRequested = coordinator.state else {
+            return XCTFail("Expected consent before replacing orphaned content")
+        }
+        try await coordinator.confirmReplacement()
+        let archiveRoot = parent.appending(path: "Pending OPML Recovery")
+        let archive = try XCTUnwrap(try FileManager.default.contentsOfDirectory(at: archiveRoot, includingPropertiesForKeys: nil).first)
+        XCTAssertEqual(try Data(contentsOf: archive.appending(path: "Documents/\(metadata.contentFileName)")), Data("orphan".utf8))
+    }
+
     private func waitForGate(_ gate: OPMLCoordinatorTestGate) async throws {
         for _ in 0..<500 {
             if await gate.started { return }
