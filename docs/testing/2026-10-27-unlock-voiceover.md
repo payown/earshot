@@ -122,3 +122,45 @@ Core Data/SQLite samples are present. This is neither a kill report nor evidence
 of a main-thread unlock stall; it does not establish the missing recorder's cause
 or attribute its aggregate writes to diagnostic instrumentation. Raw report is
 kept locally with the investigation data, not copied into an issue as user data.
+
+## Build 281 paired unlock result
+
+Michael reports the same delay in both repeated tests: the earlier approximate
+six-second player delay and four-to-six-second Library sluggishness recur.
+The final report now contains the actual full-player appearance/disappearance
+and both foreground returns in process 7717, with VoiceOver enabled. Five
+captures are present: two controlled startup checks, one 87-ms lock-transition
+activation blip, the actual full-player return, and the Library return. The
+startup checks and activation blip are excluded from unlock comparisons.
+
+| Metric | Full player | Library |
+| --- | ---: | ---: |
+| Captured interval | 12.445 s, including dismissal and next lock | 20.000 s |
+| Will-enter-foreground to scene-active | 838 ms | 891 ms |
+| Scene-active to first focus notification | 3,034 ms | 2,606 ms |
+| Protected-data-available to first focus | 5,170 ms | 3,378 ms |
+| Main-actor ticks in first six seconds after active | 308 | 174 |
+| Median tick interval in that window | 11.10 ms | 31.61 ms |
+| Largest tick interval in that window | 512 ms | 86 ms |
+
+The player capture's first 7.276 seconds are the full player; its remaining
+time includes closing it and beginning the Library lock test. Largest complete
+tick intervals over the entire recorded returns were 512 ms and 532 ms; the
+Library maximum occurred approximately 14.57 seconds after foreground entry,
+outside the reported initial sluggish period. There were no one-second gaps.
+
+In both returns, first focus notification precedes the delayed foreground cloud
+retry/feed refresh. Cloud retry took approximately 0.02/0.01 ms; feed refresh
+took approximately 4.6/133 ms elapsed. Inbox badge loads took approximately
+189/172 ms elapsed; Queue badge loads approximately 66/31 ms. These async spans
+include suspended time and are not direct blocking measurements. Neither
+search-index operations nor audio-route/interruption events occurred during the
+paired returns.
+
+The recordings do not show a continuous four-to-six-second main-actor stall.
+They support investigating the unlock/accessibility transition, while leaving
+cooperative UI/accessibility work and OS behavior unresolved. No gesture or
+spoken-output timestamp is recorded, so first focus is not a direct measurement
+of VoiceOver speech latency or the instant the user unlocked. Requested a
+same-sequence test in Apple's Settings as an independent system-app control.
+No production fix is justified yet; the issue remains in progress.
