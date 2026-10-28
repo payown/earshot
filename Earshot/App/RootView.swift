@@ -182,6 +182,8 @@ private struct InboxTabBadge: View {
         let modelContainer = context.container
         let requestedOptInOnly = optInOnly
         reloadTask = Task { @MainActor in
+            let probe = UnlockResponsivenessProbe.shared.begin("badge.inboxReload")
+            defer { UnlockResponsivenessProbe.shared.end("badge.inboxReload", probe) }
             let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
             let loaded = await TabBadgeSnapshotLoader.inboxCount(
                 modelContainer: modelContainer,
@@ -238,6 +240,8 @@ private struct QueueTabBadge: View {
         reloadTask?.cancel()
         let modelContainer = context.container
         reloadTask = Task { @MainActor in
+            let probe = UnlockResponsivenessProbe.shared.begin("badge.queueReload")
+            defer { UnlockResponsivenessProbe.shared.end("badge.queueReload", probe) }
             let loaded = await TabBadgeSnapshotLoader.queueCount(
                 modelContainer: modelContainer
             )

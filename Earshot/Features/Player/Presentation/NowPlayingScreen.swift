@@ -169,6 +169,8 @@ struct NowPlayingScreen: View {
                 ChapterListView()
             }
         }
+        .onAppear { UnlockResponsivenessProbe.shared.event("screen.fullPlayer.appear") }
+        .onDisappear { UnlockResponsivenessProbe.shared.event("screen.fullPlayer.disappear") }
         // Deleting the loaded episode clears the player's observed identity
         // before SwiftData performs the cascade. Close this modal at that same
         // boundary instead of leaving a stale, empty Now Playing destination on

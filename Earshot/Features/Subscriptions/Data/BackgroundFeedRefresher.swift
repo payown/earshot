@@ -118,6 +118,8 @@ enum BackgroundFeedRefresher {
         notifier: NotificationService = NotificationService(),
         feed: FeedFetching = FeedService()
     ) async -> Bool {
+        let probe = UnlockResponsivenessProbe.shared.begin("feeds.refresh")
+        defer { UnlockResponsivenessProbe.shared.end("feeds.refresh", probe) }
         guard activeRefreshTask == nil else {
             AppLog.networking.info("Feed refresh already in progress; skipping overlap")
             return false

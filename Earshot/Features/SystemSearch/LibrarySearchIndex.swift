@@ -163,16 +163,20 @@ final class LibrarySearchIndex {
                     status = "Updating searchable episodes…"
                     // A fresh context sees deletions and sync changes from other
                     // contexts, without retaining a stale registered model graph.
+                    let snapshotProbe = UnlockResponsivenessProbe.shared.begin("search.snapshot")
                     let store = await SearchContentStore.make(container: container)
                     let content = try await store.snapshot()
+                    UnlockResponsivenessProbe.shared.end("search.snapshot", snapshotProbe, value: content.count)
                     try Task.checkCancellation()
                     guard Self.isEnabled else { needsClear = true; requestRefresh(); continue }
+                    let diffProbe = UnlockResponsivenessProbe.shared.begin("search.diffAndDonate")
                     let next = Dictionary(uniqueKeysWithValues: content.map { ($0.id, $0) })
                     try await donations.reconcile(content)
                     let removed = previous.keys.filter { next[$0] == nil }
                     if !removed.isEmpty { try await index.deleteSearchableItems(withIdentifiers: removed) }
                     let renew = now().timeIntervalSince(lastRenewal) >= 86_400
                     let changed = content.filter { renew || previous[$0.id] != $0 }
+                    UnlockResponsivenessProbe.shared.end("search.diffAndDonate", diffProbe, value: changed.count)
                     for start in stride(from: 0, to: changed.count, by: 50) {
                         try Task.checkCancellation()
                         guard Self.isEnabled else { throw CancellationError() }
