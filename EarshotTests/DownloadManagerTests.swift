@@ -942,6 +942,120 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, .failed)
     }
 
+    func testUnreadableJournalAutomaticallyResumesDeferredReconciliation() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "journal-recovered", title: "Pending",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        let reader = JournalReadProbe()
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let journal = DownloadEventJournal(url: url, read: reader.read)
+        let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [])
+        delegate.installTerminalHandler { _, _ in }
+
+        await manager.reconcileStuckDownloads(journalDelegate: delegate) {
+            await DownloadManager.liveTaskKeys(taskDescriptions: { [] }, pendingKeys: { delegate.pendingTaskKeys() })
+        }
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+        reader.allowReads()
+        // This is the same entry point used on foreground and protected-data availability.
+        delegate.retryPendingEvents()
+        for _ in 0..<100 where episode.downloadStatus == .downloading {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(episode.downloadStatus, .failed)
+    }
+
+    func testDeferredReconciliationDoesNotUseReplacedContext() async throws {
+        let oldContext = TestStore.freshContext()
+        let episode = Episode(guid: "journal-old-context", title: "Pending",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: oldContext)
+        let manager = makeManager(oldContext)
+        DownloadManager.setContainerForTesting(oldContext.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        let reader = JournalReadProbe()
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let delegate = DownloadSessionDelegate(journal: DownloadEventJournal(url: url, read: reader.read), retryDelays: [])
+        delegate.installTerminalHandler { _, _ in }
+        await manager.reconcileStuckDownloads(journalDelegate: delegate) {
+            await DownloadManager.liveTaskKeys(taskDescriptions: { [] }, pendingKeys: { delegate.pendingTaskKeys() })
+        }
+        let replacement = TestStore.freshContext()
+        manager.configureForTesting(context: replacement, isOnWifi: true)
+        DownloadManager.setContainerForTesting(replacement.container)
+        reader.allowReads()
+        delegate.retryPendingEvents()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+    }
+
+    func testDeferredReconciliationSurvivesStaleReadableCallback() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "journal-stale-callback", title: "Pending",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        let reader = JournalReadProbe()
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let delegate = DownloadSessionDelegate(journal: DownloadEventJournal(url: url, read: reader.read), retryDelays: [])
+        delegate.installTerminalHandler { _, _ in }
+        let oldGeneration = delegate.handlerGenerationForTesting()
+        await manager.reconcileStuckDownloads(journalDelegate: delegate) {
+            await DownloadManager.liveTaskKeys(taskDescriptions: { [] }, pendingKeys: { delegate.pendingTaskKeys() })
+        }
+        delegate.installTerminalHandler { _, _ in }
+        // Model the main-actor callback queued by the previous handler.
+        await manager.resumeDeferredReconciliation(journalDelegate: delegate, generation: oldGeneration)
+        reader.allowReads()
+        delegate.retryPendingEvents()
+        for _ in 0..<100 where episode.downloadStatus == .downloading {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(episode.downloadStatus, .failed)
+    }
+
+    func testDeferredReconciliationRetriesWhenHandlerChangesDuringTaskLookup() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "journal-stale-lookup", title: "Pending",
+                              audioURL: "https://h/a.mp3", downloadStatus: .downloading)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        let reader = JournalReadProbe()
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let delegate = DownloadSessionDelegate(journal: DownloadEventJournal(url: url, read: reader.read), retryDelays: [])
+        delegate.installTerminalHandler { _, _ in }
+        let gate = JournalRetryGate()
+        let waiting = expectation(description: "resumed task lookup is waiting")
+        var calls = 0
+        await manager.reconcileStuckDownloads(journalDelegate: delegate) {
+            calls += 1
+            if calls == 1 { return nil }
+            if calls == 2 {
+                waiting.fulfill()
+                await gate.wait()
+            }
+            return []
+        }
+        reader.allowReads()
+        delegate.retryPendingEvents()
+        await fulfillment(of: [waiting], timeout: 2)
+        delegate.installTerminalHandler { _, _ in }
+        await gate.release()
+        for _ in 0..<100 where episode.downloadStatus == .downloading {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(episode.downloadStatus, .failed)
+        XCTAssertGreaterThanOrEqual(calls, 3)
+    }
+
     func testReconciliationDoesNotOverwriteCompletionDuringTaskEnumeration() async throws {
         let context = TestStore.freshContext()
         let episode = Episode(guid: "finished-during-reconciliation", title: "Finished",
@@ -1597,6 +1711,67 @@ final class DownloadEventRetrierTests: XCTestCase {
         XCTAssertEqual(attempts, 4)
         retrier.cancelAll()
     }
+
+    func testReplayRequestedDuringRetriesIsResubmittedAfterTheyExhaust() async {
+        let retrier = DownloadEventRetrier(delays: [.zero], sleep: { _ in await Task.yield() })
+        let event = PendingDownloadTerminalEvent(taskKey: "episode", outcome: .failed)
+        var attempts = 0
+        let handle: @MainActor (PendingDownloadTerminalEvent) -> Bool = { _ in
+            attempts += 1
+            return attempts == 3
+        }
+        retrier.submit(event, handle: handle)
+        retrier.submit(event, handle: handle)
+        for _ in 0..<100 where attempts < 3 { await Task.yield() }
+        XCTAssertEqual(attempts, 3)
+        retrier.cancelAll()
+    }
+
+    func testRecoveredJournalResubmitsAfterEarlierRetriesExhausted() async throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("journal-replay-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reader = JournalReadProbe()
+        let journal = DownloadEventJournal(url: directory.appendingPathComponent("events.json"), read: reader.read)
+        let event = journal.record(taskKey: "live", outcome: .failed)
+        let gate = JournalRetryGate()
+        let retryStarted = expectation(description: "journal retry waiting")
+        let exhausted = expectation(description: "earlier acknowledgement retries exhausted")
+        let recovered = expectation(description: "event acknowledged after recovery")
+        let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [.zero]) { _ in
+            retryStarted.fulfill()
+            await gate.wait()
+        }
+        let retrier = DownloadEventRetrier(delays: [.zero], sleep: { _ in await Task.yield() })
+        let attempts = JournalAttemptProbe()
+        delegate.installTerminalHandler { event, generation in
+            Task { @MainActor in
+                guard delegate.isCurrentNormalHandler(generation) else { return }
+                DownloadManager.submitJournalEvent(event, delegate: delegate, retrier: retrier) { event in
+                    attempts.count += 1
+                    let acknowledged = journal.acknowledge(event.id)
+                    if attempts.count == 2 { exhausted.fulfill() }
+                    if acknowledged { recovered.fulfill() }
+                    return acknowledged
+                }
+            }
+        }
+        await fulfillment(of: [retryStarted, exhausted], timeout: 3)
+        reader.allowReads()
+        await gate.release()
+        await fulfillment(of: [recovered], timeout: 3)
+        XCTAssertEqual(attempts.count, 3)
+        XCTAssertTrue(journal.pendingEvents().isEmpty)
+
+        // A stale replay snapshot must not apply an acknowledged event again.
+        DownloadManager.submitJournalEvent(event, delegate: delegate, retrier: retrier) { _ in
+            attempts.count += 1
+            return true
+        }
+        XCTAssertEqual(attempts.count, 3)
+        retrier.cancelAll()
+    }
 }
 
 private enum DownloadEventTestError: Error { case injected }
@@ -1827,12 +2002,143 @@ final class DownloadEventJournalTests: XCTestCase {
         let delegate = DownloadSessionDelegate(journal: journal)
         nonisolated(unsafe) var handled = 0
 
-        delegate.installTerminalHandler(replayingPendingEvents: false) { _ in
+        delegate.installTerminalHandler(replayingPendingEvents: false) { _, _ in
             handled += 1
         }
 
         XCTAssertEqual(handled, 0)
         XCTAssertEqual(journal.pendingEvents().count, 1)
+    }
+
+    func testDelayedReadableJournalReplaysEvenIfAnotherReaderLoadsIt() async throws {
+        let persisted = DownloadEventJournal(url: journalURL)
+        let oldEvent = persisted.record(taskKey: "old", outcome: .failed)
+        let reader = JournalReadProbe()
+        let journal = DownloadEventJournal(url: journalURL, read: reader.read)
+        let liveEvent = journal.record(taskKey: "live", outcome: .failed)
+        let delivered = JournalDeliveryProbe()
+        let replayed = expectation(description: "previously unreadable event replayed")
+        let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [.zero]) { _ in
+            reader.allowReads()
+            // Reconciliation can load the journal before the retry's own read.
+            _ = journal.pendingEventsIfReadable()
+        }
+        delegate.installTerminalHandler { event, _ in
+            delivered.record(event)
+            if event.id == oldEvent.id { replayed.fulfill() }
+        }
+        await fulfillment(of: [replayed], timeout: 2)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(delivered.events, [liveEvent, oldEvent, liveEvent])
+        XCTAssertEqual(journal.pendingEvents(), [oldEvent, liveEvent])
+    }
+
+    func testForegroundRetryCanReadJournalAfterInitialRetryWindow() async throws {
+        let persisted = DownloadEventJournal(url: journalURL)
+        let oldEvent = persisted.record(taskKey: "old", outcome: .failed)
+        let reader = JournalReadProbe()
+        let journal = DownloadEventJournal(url: journalURL, read: reader.read)
+        let delivered = expectation(description: "event recovered on foreground retry")
+        let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [])
+        delegate.installTerminalHandler { event, _ in
+            if event.id == oldEvent.id { delivered.fulfill() }
+        }
+        for _ in 0..<100 where delegate.replayInProgressForTesting() {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(delegate.replayInProgressForTesting())
+        reader.allowReads()
+        delegate.retryPendingEvents()
+        await fulfillment(of: [delivered], timeout: 2)
+    }
+
+    func testRecoveryHandlerReplacementCancelsDelayedReplay() async throws {
+        let persisted = DownloadEventJournal(url: journalURL)
+        _ = persisted.record(taskKey: "old", outcome: .failed)
+        let reader = JournalReadProbe()
+        let journal = DownloadEventJournal(url: journalURL, read: reader.read)
+        let started = expectation(description: "retry started")
+        let unexpected = expectation(description: "old handler must not receive replay")
+        unexpected.isInverted = true
+        let gate = JournalRetryGate()
+        let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [.zero]) { _ in
+            started.fulfill()
+            await gate.wait()
+        }
+        delegate.installTerminalHandler { _, _ in unexpected.fulfill() }
+        await fulfillment(of: [started], timeout: 2)
+        delegate.installRecoverySuppressionHandler()
+        reader.allowReads()
+        await gate.release()
+        await fulfillment(of: [unexpected], timeout: 0.2)
+        XCTAssertEqual(journal.pendingEvents().count, 1)
+    }
+
+    func testReplayDeliversEveryEventAcrossMultipleBatches() async {
+        let journal = DownloadEventJournal(url: journalURL)
+        let events = (0..<40).map { journal.record(taskKey: "episode-\($0)", outcome: .failed) }
+        let delivered = JournalDeliveryProbe()
+        let replayed = expectation(description: "all pending events delivered")
+        replayed.expectedFulfillmentCount = events.count
+        let delegate = DownloadSessionDelegate(journal: journal)
+        delegate.installTerminalHandler { event, _ in
+            delivered.record(event)
+            replayed.fulfill()
+        }
+        await fulfillment(of: [replayed], timeout: 3)
+        XCTAssertEqual(delivered.events, events)
+    }
+
+    func testReplayWaitsForEachDeliveryBeforeSchedulingTheNext() async throws {
+        let journal = DownloadEventJournal(url: journalURL)
+        let first = journal.record(taskKey: "one", outcome: .failed)
+        let second = journal.record(taskKey: "two", outcome: .failed)
+        let gate = JournalRetryGate()
+        let started = expectation(description: "first delivery started")
+        let completed = expectation(description: "both deliveries completed")
+        completed.expectedFulfillmentCount = 2
+        let delivered = JournalDeliveryProbe()
+        let delegate = DownloadSessionDelegate(journal: journal)
+        delegate.installTerminalHandler(replayHandler: { event, _ in
+            delivered.record(event)
+            if event.id == first.id {
+                started.fulfill()
+                await gate.wait()
+            }
+            completed.fulfill()
+        }) { _, _ in XCTFail("Replay should use the awaited delivery") }
+        await fulfillment(of: [started], timeout: 2)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(delivered.events, [first])
+        await gate.release()
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertEqual(delivered.events, [first, second])
+    }
+}
+
+@MainActor
+private final class JournalAttemptProbe { var count = 0 }
+
+private final class JournalDeliveryProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [PendingDownloadTerminalEvent] = []
+    var events: [PendingDownloadTerminalEvent] { lock.withLock { values } }
+    func record(_ value: PendingDownloadTerminalEvent) { lock.withLock { values.append(value) } }
+}
+
+private actor JournalRetryGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 

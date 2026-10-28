@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Observation
 import SwiftData
+import UIKit
 
 struct DownloadBatchReport: Equatable, Sendable {
     let eligible: Int
@@ -74,6 +75,7 @@ struct DownloadStorageSummary: Equatable, Sendable {
 @MainActor
 final class DownloadEventRetrier {
     private var tasks: [UUID: Task<Void, Never>] = [:]
+    private var requestedAgain: Set<UUID> = []
     private let delays: [Duration]
     private let sleep: @MainActor (Duration) async throws -> Void
 
@@ -85,11 +87,21 @@ final class DownloadEventRetrier {
 
     func submit(_ event: PendingDownloadTerminalEvent,
                 handle: @escaping @MainActor (PendingDownloadTerminalEvent) -> Bool) {
-        guard tasks[event.id] == nil else { return }
+        guard tasks[event.id] == nil else {
+            requestedAgain.insert(event.id)
+            return
+        }
         if handle(event) { return }
         tasks[event.id] = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { if !Task.isCancelled { self.tasks[event.id] = nil } }
+            defer {
+                if !Task.isCancelled {
+                    self.tasks[event.id] = nil
+                    if self.requestedAgain.remove(event.id) != nil {
+                        self.submit(event, handle: handle)
+                    }
+                }
+            }
             for delay in self.delays {
                 do { try await self.sleep(delay) } catch { return }
                 guard !Task.isCancelled else { return }
@@ -101,6 +113,7 @@ final class DownloadEventRetrier {
     func cancelAll() {
         let running = Array(tasks.values)
         tasks.removeAll()
+        requestedAgain.removeAll()
         for task in running { task.cancel() }
     }
 }
@@ -178,6 +191,9 @@ final class DownloadManager {
     @ObservationIgnored private var hasReceivedNetworkPath = false
 
     @ObservationIgnored private var context: ModelContext?
+    @ObservationIgnored private weak var deferredReconciliationContext: ModelContext?
+    @ObservationIgnored private var deferredReconciliationKeys: (@MainActor () async -> Set<String>?)?
+    @ObservationIgnored private let journalWaiterID = UUID()
     @ObservationIgnored private var settings: AppSettingsStore?
     @ObservationIgnored private let monitor = NWPathMonitor()
     /// Observer for `.earshotQueueDidChange`, so queued episodes auto-download.
@@ -194,6 +210,10 @@ final class DownloadManager {
 
     #if DEBUG
     func configureForTesting(context: ModelContext, isOnWifi: Bool) {
+        if self.context !== context {
+            deferredReconciliationContext = nil
+            deferredReconciliationKeys = nil
+        }
         self.context = context
         self.settings = AppSettingsStore(context: context)
         self.isOnWifi = isOnWifi
@@ -208,6 +228,7 @@ final class DownloadManager {
 
     @ObservationIgnored private static let delegate = DownloadSessionDelegate()
     @ObservationIgnored private static let terminalRetrier = DownloadEventRetrier()
+    @ObservationIgnored private static var replayObservers: [NSObjectProtocol] = []
     /// Store effects already committed in this process but not yet removed
     /// from the journal. Retry only the acknowledgement, since a newer
     /// download may have started after the first application.
@@ -242,11 +263,45 @@ final class DownloadManager {
     static func activate(container: ModelContainer) {
         terminalRetrier.cancelAll()
         self.container = container
-        delegate.installTerminalHandler { event in
-            Task { @MainActor in terminalRetrier.submit(event) { handle($0) } }
+        delegate.installTerminalHandler(replayHandler: { event, generation in
+            await MainActor.run { processDelegateEvent(event, generation: generation) }
+        }) { event, generation in
+            Task { @MainActor in
+                processDelegateEvent(event, generation: generation)
+            }
         }
+        installReplayObserversIfNeeded()
         installEventsFinishedHandler()
         _ = session
+    }
+
+    private static func processDelegateEvent(_ event: PendingDownloadTerminalEvent, generation: UInt64) {
+        guard delegate.isCurrentNormalHandler(generation) else { return }
+        submitJournalEvent(event, delegate: delegate, retrier: terminalRetrier) { handle($0) }
+    }
+
+    static func submitJournalEvent(
+        _ event: PendingDownloadTerminalEvent,
+        delegate: DownloadSessionDelegate,
+        retrier: DownloadEventRetrier,
+        handle: @escaping @MainActor (PendingDownloadTerminalEvent) -> Bool
+    ) {
+        retrier.submit(event) { event in
+            guard let pending = delegate.containsPendingEvent(event) else { return false }
+            guard pending else { return true }
+            return handle(event)
+        }
+    }
+
+    private static func installReplayObserversIfNeeded() {
+        guard replayObservers.isEmpty else { return }
+        for name in [UIApplication.didBecomeActiveNotification,
+                     UIApplication.protectedDataDidBecomeAvailableNotification] {
+            let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { _ in
+                Task { @MainActor in delegate.retryPendingEvents() }
+            }
+            replayObservers.append(observer)
+        }
     }
 
     /// Connects the delegate while the durable marker still suppresses terminal
@@ -333,6 +388,10 @@ final class DownloadManager {
     }
 
     func configure(context: ModelContext) {
+        if self.context !== context {
+            deferredReconciliationContext = nil
+            deferredReconciliationKeys = nil
+        }
         self.context = context
         self.settings = AppSettingsStore(context: context)
         monitor.pathUpdateHandler = { [weak self] path in
@@ -372,6 +431,8 @@ final class DownloadManager {
 
     /// Releases the old SwiftData graph before Settings reset unlinks its files.
     func releasePersistence() async {
+        deferredReconciliationContext = nil
+        deferredReconciliationKeys = nil
         Self.terminalRetrier.cancelAll()
         _ = await Self.cancelAllTasksAndWaitForRecovery()
         context = nil
@@ -575,13 +636,31 @@ final class DownloadManager {
     /// The candidate rows now come from the bounded ``ActiveDownload`` table
     /// rather than a whole-`Episode`-table fetch on the main actor (#701); the
     /// orphan comparison itself is unchanged.
-    func reconcileStuckDownloads(liveKeys: @MainActor () async -> Set<String>? = { await DownloadManager.liveTaskKeys() }) async {
+    func reconcileStuckDownloads(
+        journalDelegate: DownloadSessionDelegate = DownloadManager.delegate,
+        requiredGeneration: UInt64? = nil,
+        liveKeys: @escaping @MainActor () async -> Set<String>? = { await DownloadManager.liveTaskKeys() }
+    ) async {
         guard let context else { return }
         let markedDownloading = await activeEpisodes(state: .downloading, in: context)
         guard !markedDownloading.isEmpty else { return }
 
-        guard let liveKeys = await liveKeys(), !Task.isCancelled, self.context === context,
+        let keys = await liveKeys()
+        guard !Task.isCancelled, self.context === context,
               !RecoveryDownloadRemoval.isPending else { return }
+        if let requiredGeneration {
+            guard Self.container === context.container else { return }
+            guard journalDelegate.isCurrentNormalHandler(requiredGeneration) else {
+                deferReconciliation(context: context, journalDelegate: journalDelegate, liveKeys: liveKeys)
+                return
+            }
+        }
+        guard let liveKeys = keys else {
+            deferReconciliation(context: context, journalDelegate: journalDelegate, liveKeys: liveKeys)
+            return
+        }
+        deferredReconciliationContext = nil
+        deferredReconciliationKeys = nil
         let identities = markedDownloading.map { episode in
             (composite: DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
              bare: episode.guid)
@@ -602,6 +681,36 @@ final class DownloadManager {
         }
         save()
         AppLog.networking.info("Reconciled \(failed) stuck download(s) to failed")
+    }
+
+    private func deferReconciliation(
+        context: ModelContext, journalDelegate: DownloadSessionDelegate,
+        liveKeys: @escaping @MainActor () async -> Set<String>?
+    ) {
+        deferredReconciliationContext = context
+        deferredReconciliationKeys = liveKeys
+        journalDelegate.whenJournalReadable(id: journalWaiterID) { [weak self, weak journalDelegate] generation in
+            Task { @MainActor [weak self, weak journalDelegate] in
+                guard let self, let journalDelegate else { return }
+                await self.resumeDeferredReconciliation(journalDelegate: journalDelegate, generation: generation)
+            }
+        }
+    }
+
+    func resumeDeferredReconciliation(journalDelegate: DownloadSessionDelegate, generation: UInt64) async {
+        guard let context = deferredReconciliationContext,
+              self.context === context, Self.container === context.container,
+              !RecoveryDownloadRemoval.isPending,
+              let retryKeys = deferredReconciliationKeys else { return }
+        guard journalDelegate.isCurrentNormalHandler(generation) else {
+            deferReconciliation(context: context, journalDelegate: journalDelegate, liveKeys: retryKeys)
+            return
+        }
+        await reconcileStuckDownloads(
+            journalDelegate: journalDelegate,
+            requiredGeneration: generation,
+            liveKeys: retryKeys
+        )
     }
 
     /// The episodes whose download is currently in `state`, resolved on the
