@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe checks a name from a paused interview outside a client visit and tests
+  VoiceOver after unlocking before going inside (Chapter 101).
+
 - Kashe keeps a few interviews unplayed as reminders and uses episode selection
   to clear the rest of a show's backlog (Chapter 98).
 
@@ -3616,3 +3619,39 @@ Kashe liked the interview, but the last minute always broke into an ad she did n
 On her next walk, the interview ended, the ad stayed unheard, and the next episode began where she expected. Later she moved the playhead back toward the end to catch a line she had missed. Earshot let her listen all the way through.
 
 “Better,” she said, slipping the phone back into her pocket.
+
+---
+
+Chapter 101 - Build 284
+
+What to try first:
+
+This build fixes a VoiceOver delay after unlocking Earshot that could leave the paused player unresponsive, or Library sluggish, for several seconds.
+
+With VoiceOver on, play an episode, pause it, and leave the full player open. Lock the phone, wait five seconds, unlock, then immediately flick through the controls. Repeat three times. Try again from Library and Queue with the episode paused, then with audio playing. Check that speech and navigation respond promptly and that playback, your saved place, and Queue order still behave as expected. If a delay returns, tell us the screen, whether audio was paused or playing, your iOS version, and roughly how long it lasted.
+
+We also confirmed earlier fixes already present in build 279: descriptions read on episodes from podcasts you don't follow, affected BBC episodes play and download, and folder backlog playback works. If you revisit these, try Off, Brief, and Full descriptions in Settings, Accessibility, and a BBC playback/download. Very large folder backlogs can still offer thousands of episodes; improving that experience is future work.
+
+Builds 280-283 were local investigation and verification builds. This TestFlight build includes the accepted unlock fix without the temporary diagnostic recorder.
+
+Kashe's story:
+
+Kashe paused an interview outside her next visit, locked the phone, and put it in her coat pocket. Then she remembered the name she'd meant to check.
+
+She unlocked and flicked. VoiceOver answered. She moved back to Library, locked the phone again, and tried once more.
+
+Renata called while she was still standing there.
+
+“Are you coming in?”
+
+“I'm checking something.”
+
+“What?”
+
+“Whether I have time to be annoyed before the phone answers.”
+
+“And?”
+
+“Apparently not today.”
+
+She found the name, put the phone away, and went inside. For once, the pause had taken exactly as long as she needed.
