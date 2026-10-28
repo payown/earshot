@@ -328,6 +328,61 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Retry download for Failed test episode"].exists)
     }
 
+    func testDownloadActivityWithLargeLibrarySupportsFilteringPagingAndNavigation() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "settings",
+                               "-largeDownloadActivityTest"]
+        app.launch()
+        let activity = app.buttons["Download activity"].firstMatch
+        for _ in 0..<8 where !activity.isHittable { app.swipeUp() }
+        XCTAssertTrue(activity.waitForExistence(timeout: 30), app.debugDescription)
+        activity.tap()
+
+        let summary = app.staticTexts["downloadActivitySummary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 30), app.debugDescription)
+        let totals = NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@",
+                                 "Downloading 500", "waiting for Wi-Fi 500", "failed 500", "downloaded 500")
+        expectation(for: totals, evaluatedWith: summary)
+        waitForExpectations(timeout: 30)
+
+        let completed = app.switches["Include completed downloads"]
+        XCTAssertTrue(completed.waitForExistence(timeout: 10), app.debugDescription)
+        let firstFailed = app.staticTexts["Large Failed episode 0000"]
+        let firstCompleted = app.staticTexts["Large Completed episode 0000"]
+        XCTAssertTrue(firstFailed.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertFalse(firstCompleted.exists)
+        // SwiftUI exposes a labeled wrapper around the native switch. Tap the
+        // nested control: the wrapper's center is over the text, not the switch.
+        let completedControl = completed.switches.firstMatch
+        XCTAssertTrue(completedControl.exists, app.debugDescription)
+        completedControl.tap()
+        expectation(for: NSPredicate(format: "value == %@", "1"), evaluatedWith: completed)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(firstCompleted.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertFalse(firstFailed.exists)
+        completedControl.tap()
+        expectation(for: NSPredicate(format: "value == %@", "0"), evaluatedWith: completed)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(firstFailed.waitForExistence(timeout: 20), app.debugDescription)
+
+        let showMore = app.buttons["Show more download requests"]
+        for _ in 0..<30 where !showMore.isHittable { app.swipeUp() }
+        XCTAssertTrue(showMore.isHittable, app.debugDescription)
+        showMore.tap()
+        let nextPage = app.staticTexts["Large Failed episode 0050"]
+        for _ in 0..<5 where !nextPage.exists { app.swipeUp() }
+        XCTAssertTrue(nextPage.waitForExistence(timeout: 20), app.debugDescription)
+
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(activity.waitForExistence(timeout: 15), app.debugDescription)
+        activity.tap()
+        XCTAssertTrue(summary.waitForExistence(timeout: 30), app.debugDescription)
+        let retry = app.buttons["Retry failed downloads"]
+        XCTAssertTrue(retry.isHittable, app.debugDescription)
+        retry.tap()
+        XCTAssertTrue(app.buttons["Retry 50 downloads"].waitForExistence(timeout: 10), app.debugDescription)
+    }
+
     func testWorkflowGuideIsAvailableFromDownloadSettingsAtLargestText() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "settings",

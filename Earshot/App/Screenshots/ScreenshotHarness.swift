@@ -71,6 +71,8 @@ enum ScreenshotHarness {
         case .downloads:
             if CommandLine.arguments.contains("-downloadActivityTest") {
                 seedDownloadActivity(in: context)
+            } else if CommandLine.arguments.contains("-largeDownloadActivityTest") {
+                seedLargeDownloadActivity(in: context)
             }
             selectTab(.downloads)
         case .feedRefresh:
@@ -90,6 +92,9 @@ enum ScreenshotHarness {
         case .settings:
             // RootView renders DownloadsSettingsView as the Settings-tab root in
             // screenshot mode, so selecting the tab is all that's needed.
+            if CommandLine.arguments.contains("-largeDownloadActivityTest") {
+                seedLargeDownloadActivity(in: context)
+            }
             selectTab(.settings)
         case .episodeList:
             selectTab(.library)
@@ -136,6 +141,46 @@ enum ScreenshotHarness {
             try? await Task.sleep(for: .seconds(8))
             ActiveDownload.setDownloadStatus(.failed, on: delayed, in: context)
             try? context.save()
+        }
+    }
+
+    /// Populate local state directly, avoiding one fetch per episode while
+    /// creating a large, deterministic library for the activity UI test.
+    @MainActor
+    private static func seedLargeDownloadActivity(in context: ModelContext) {
+        let feed = "https://large-activity.test/feed"
+        let podcast = Podcast(feedURL: feed, title: "Large activity test")
+        context.insert(podcast)
+        let completedPath = "large-activity-test.mp3"
+        if let directory = try? DownloadPaths.downloadsDirectory() {
+            let url = directory.appendingPathComponent(completedPath)
+            if !FileManager.default.fileExists(atPath: url.path) {
+                FileManager.default.createFile(atPath: url.path, contents: Data())
+            }
+        }
+        let groups: [(String, String, DownloadStatus)] = [
+            ("a-completed", "Completed", .downloaded),
+            ("b-failed", "Failed", .failed),
+            ("c-waiting", "Waiting", .pending),
+            ("d-downloading", "Downloading", .downloading)
+        ]
+        for (prefix, title, status) in groups {
+            for index in 0..<500 {
+                let number = String(format: "%04d", index)
+                let guid = "\(prefix)-\(number)"
+                let path = status == .downloaded ? completedPath : nil
+                let episode = Episode(guid: guid, title: "Large \(title) episode \(number)",
+                                      audioURL: "", downloadStatus: status, downloadPath: path)
+                episode.podcast = podcast
+                context.insert(episode)
+                context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: guid,
+                                                 downloadStatus: status, downloadPath: path))
+            }
+        }
+        do {
+            try context.save()
+        } catch {
+            preconditionFailure("Could not seed large download activity fixture: \(error)")
         }
     }
 

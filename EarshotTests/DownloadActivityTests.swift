@@ -159,6 +159,160 @@ final class DownloadActivityTests: XCTestCase {
         XCTAssertEqual(result.failed, 0)
     }
 
+    func testSnapshotHandlesLargeLibraryDuplicatesNamesAndPaginationOffMain() async throws {
+        let context = TestStore.freshContext()
+        let first = Podcast(feedURL: "https://activity.test/a", title: "Original")
+        let second = Podcast(feedURL: "https://activity.test/b", title: "Other",
+                             subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue)
+        context.insert(first)
+        context.insert(second)
+        for index in 0..<300 {
+            let guid = String(format: "episode-%04d", index)
+            let episode = Episode(guid: guid, title: "A \(index)", audioURL: "https://activity.test/a.mp3")
+            episode.podcast = first
+            context.insert(episode)
+            context.insert(LocalEpisodeState(podcastFeedURL: first.feedURL, episodeGUID: guid,
+                                             downloadStatus: index < 200 ? .failed : .downloaded,
+                                             downloadPath: index < 200 ? nil : "audio.mp3"))
+        }
+        let sameGUID = Episode(guid: "episode-0000", title: "B zero", audioURL: "https://activity.test/b.mp3")
+        sameGUID.podcast = second
+        context.insert(sameGUID)
+        context.insert(LocalEpisodeState(podcastFeedURL: second.feedURL, episodeGUID: sameGUID.guid,
+                                         downloadStatus: .pending))
+        // A duplicate must not alter counts or consume a page slot.
+        context.insert(LocalEpisodeState(podcastFeedURL: first.feedURL, episodeGUID: "episode-0000",
+                                         downloadStatus: .failed))
+        context.insert(LocalEpisodeState(podcastFeedURL: first.feedURL, episodeGUID: "missing-file",
+                                         downloadStatus: .downloaded))
+        try context.save()
+        let names = [EpisodeLocalKey(feedURL: first.feedURL, guid: "").feedURL: "Personal Name",
+                     EpisodeLocalKey(feedURL: second.feedURL, guid: "").feedURL: "Ignored Name"]
+        let snapshot = try await DownloadActivitySnapshotLoader.load(
+            container: context.container, showCompleted: false, limit: 50, podcastNames: names
+        )
+        XCTAssertFalse(snapshot.executedStoreWorkOnMainThread)
+        XCTAssertEqual(snapshot.summary.failed, 200)
+        XCTAssertEqual(snapshot.summary.completed, 100)
+        XCTAssertEqual(snapshot.summary.waiting, 1)
+        XCTAssertEqual(snapshot.visibleCount, 201)
+        XCTAssertEqual(snapshot.entries.count, 50)
+        XCTAssertEqual(snapshot.failedKeys.count, 50)
+        XCTAssertEqual(snapshot.entries.first?.title, "A 0")
+        XCTAssertEqual(snapshot.entries.first?.podcast, "Personal Name")
+        let all = try await DownloadActivitySnapshotLoader.load(
+            container: context.container, showCompleted: true, limit: 500, podcastNames: names
+        )
+        XCTAssertEqual(all.visibleCount, 301)
+        XCTAssertEqual(all.entries.count, 301)
+        XCTAssertEqual(all.entries.last?.title, "B zero")
+        XCTAssertEqual(all.entries.last?.podcast, "Other")
+    }
+
+    func testSnapshotRefreshSeesOtherContextSavesAndHonorsCancellation() async throws {
+        let context = TestStore.freshContext()
+        let items = try episodes(1, context: context)
+        let key = try XCTUnwrap(LocalStateStore.key(for: items[0]))
+        context.insert(LocalEpisodeState(podcastFeedURL: key.feedURL, episodeGUID: key.guid,
+                                         downloadStatus: .pending))
+        try context.save()
+        let first = try await DownloadActivitySnapshotLoader.load(
+            container: context.container, showCompleted: false, limit: 50, podcastNames: [:]
+        )
+        XCTAssertEqual(first.summary.waiting, 1)
+        let other = ModelContext(context.container)
+        let row = try XCTUnwrap(other.fetch(FetchDescriptor<LocalEpisodeState>()).first)
+        row.downloadStatus = .failed
+        try other.save()
+        let updated = try await DownloadActivitySnapshotLoader.load(
+            container: context.container, showCompleted: false, limit: 50, podcastNames: [:]
+        )
+        XCTAssertEqual(updated.summary.failed, 1)
+        XCTAssertEqual(updated.entries.first?.status, .failed)
+        let cancelled = Task {
+            try await DownloadActivitySnapshotLoader.load(
+                container: context.container, showCompleted: false, limit: 50, podcastNames: [:]
+            )
+        }
+        cancelled.cancel()
+        do {
+            _ = try await cancelled.value
+            XCTFail("Cancelled snapshot must not return a result")
+        } catch is CancellationError {
+            // Expected.
+        }
+    }
+
+    func testOlderRefreshCannotReplaceNewerSnapshot() async throws {
+        let context = TestStore.freshContext()
+        let gate = ActivitySnapshotGate()
+        let controller = DownloadActivityLoadController { _, _, limit, _ in
+            if limit == 1 { await gate.pause() }
+            var summary = DownloadActivitySummary(records: [])
+            summary.failed = limit
+            return DownloadActivitySnapshot(summary: summary, entries: [], failedKeys: [],
+                                            visibleCount: 0, executedStoreWorkOnMainThread: false)
+        }
+        controller.schedule(container: context.container, showCompleted: false, limit: 1,
+                            names: [:], immediate: true)
+        let first = try XCTUnwrap(controller.currentTaskForTesting())
+        await gate.waitUntilStarted()
+        controller.schedule(container: context.container, showCompleted: false, limit: 2,
+                            names: [:], immediate: true)
+        await controller.waitUntilIdle()
+        XCTAssertEqual(controller.snapshot?.summary.failed, 2)
+        await gate.release()
+        await first.value
+        XCTAssertEqual(controller.snapshot?.summary.failed, 2)
+    }
+
+    func testDataRefreshesCoalesceWithoutStarvingInitialSnapshot() async throws {
+        let context = TestStore.freshContext()
+        let gate = ActivityCoalescingGate()
+        let controller = DownloadActivityLoadController { _, _, _, _ in
+            let generation = await gate.pause()
+            var summary = DownloadActivitySummary(records: [])
+            summary.failed = generation
+            return DownloadActivitySnapshot(summary: summary, entries: [], failedKeys: [],
+                                            visibleCount: 0, executedStoreWorkOnMainThread: false)
+        }
+        controller.schedule(container: context.container, showCompleted: false, limit: 50,
+                            names: [:], immediate: true)
+        await gate.waitUntilStarted(1)
+        for _ in 0..<20 {
+            controller.schedule(container: context.container, showCompleted: false, limit: 50, names: [:])
+        }
+        await gate.release(1)
+        await gate.waitUntilStarted(2)
+        XCTAssertEqual(controller.snapshot?.summary.failed, 1, "The first read must publish despite ongoing saves")
+        await gate.release(2)
+        await controller.waitUntilIdle()
+        XCTAssertEqual(controller.snapshot?.summary.failed, 2)
+        let started = await gate.startedCount()
+        XCTAssertEqual(started, 2, "Concurrent saves should coalesce into one follow-up")
+    }
+
+    func testFailedRefreshClearsPreviouslyActionableSnapshot() async throws {
+        enum SnapshotFailure: Error { case failed }
+        let context = TestStore.freshContext()
+        let controller = DownloadActivityLoadController { _, _, limit, _ in
+            if limit == 2 { throw SnapshotFailure.failed }
+            var summary = DownloadActivitySummary(records: [])
+            summary.failed = 1
+            return DownloadActivitySnapshot(summary: summary, entries: [], failedKeys: [],
+                                            visibleCount: 0, executedStoreWorkOnMainThread: false)
+        }
+        controller.schedule(container: context.container, showCompleted: false, limit: 1,
+                            names: [:], immediate: true)
+        await controller.waitUntilIdle()
+        XCTAssertEqual(controller.snapshot?.summary.failed, 1)
+        controller.schedule(container: context.container, showCompleted: false, limit: 2,
+                            names: [:], immediate: true)
+        await controller.waitUntilIdle()
+        XCTAssertNil(controller.snapshot)
+        XCTAssertEqual(controller.loadError, "Could not load download details. Reopen Download activity to try again.")
+    }
+
     func testWorkflowGuideShipsOfflineWithUniqueReadableSections() {
         let sections = WorkflowGuideSection.bundled
         XCTAssertGreaterThanOrEqual(sections.count, 7, "The canonical guide must be bundled with the app")
@@ -170,4 +324,54 @@ final class DownloadActivityTests: XCTestCase {
             $0.contains("If Delete downloads when done is on, Clear inbox also removes those episodes' downloaded audio.")
         })
     }
+}
+
+private actor ActivitySnapshotGate {
+    private var started = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func pause() async {
+        started = true
+        for waiter in startWaiters { waiter.resume() }
+        startWaiters.removeAll()
+        await withCheckedContinuation { releaseContinuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+private actor ActivityCoalescingGate {
+    private var started = 0
+    private var startWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private var releases: [Int: CheckedContinuation<Void, Never>] = [:]
+
+    func pause() async -> Int {
+        started += 1
+        let number = started
+        let ready = startWaiters.filter { $0.0 <= number }
+        startWaiters.removeAll { $0.0 <= number }
+        for (_, continuation) in ready { continuation.resume() }
+        await withCheckedContinuation { releases[number] = $0 }
+        return number
+    }
+
+    func waitUntilStarted(_ number: Int) async {
+        if started >= number { return }
+        await withCheckedContinuation { startWaiters.append((number, $0)) }
+    }
+
+    func release(_ number: Int) {
+        releases.removeValue(forKey: number)?.resume()
+    }
+
+    func startedCount() -> Int { started }
 }
