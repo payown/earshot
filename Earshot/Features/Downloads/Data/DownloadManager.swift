@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Observation
 import SwiftData
+import UIKit
 
 struct DownloadBatchReport: Equatable, Sendable {
     let eligible: Int
@@ -74,6 +75,7 @@ struct DownloadStorageSummary: Equatable, Sendable {
 @MainActor
 final class DownloadEventRetrier {
     private var tasks: [UUID: Task<Void, Never>] = [:]
+    private var requestedAgain: Set<UUID> = []
     private let delays: [Duration]
     private let sleep: @MainActor (Duration) async throws -> Void
 
@@ -85,11 +87,21 @@ final class DownloadEventRetrier {
 
     func submit(_ event: PendingDownloadTerminalEvent,
                 handle: @escaping @MainActor (PendingDownloadTerminalEvent) -> Bool) {
-        guard tasks[event.id] == nil else { return }
+        guard tasks[event.id] == nil else {
+            requestedAgain.insert(event.id)
+            return
+        }
         if handle(event) { return }
         tasks[event.id] = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { if !Task.isCancelled { self.tasks[event.id] = nil } }
+            defer {
+                if !Task.isCancelled {
+                    self.tasks[event.id] = nil
+                    if self.requestedAgain.remove(event.id) != nil {
+                        self.submit(event, handle: handle)
+                    }
+                }
+            }
             for delay in self.delays {
                 do { try await self.sleep(delay) } catch { return }
                 guard !Task.isCancelled else { return }
@@ -101,6 +113,7 @@ final class DownloadEventRetrier {
     func cancelAll() {
         let running = Array(tasks.values)
         tasks.removeAll()
+        requestedAgain.removeAll()
         for task in running { task.cancel() }
     }
 }
@@ -208,6 +221,7 @@ final class DownloadManager {
 
     @ObservationIgnored private static let delegate = DownloadSessionDelegate()
     @ObservationIgnored private static let terminalRetrier = DownloadEventRetrier()
+    @ObservationIgnored private static var replayObservers: [NSObjectProtocol] = []
     /// Store effects already committed in this process but not yet removed
     /// from the journal. Retry only the acknowledgement, since a newer
     /// download may have started after the first application.
@@ -242,14 +256,45 @@ final class DownloadManager {
     static func activate(container: ModelContainer) {
         terminalRetrier.cancelAll()
         self.container = container
-        delegate.installTerminalHandler { event, generation in
+        delegate.installTerminalHandler(replayHandler: { event, generation in
+            await MainActor.run { processDelegateEvent(event, generation: generation) }
+        }) { event, generation in
             Task { @MainActor in
-                guard delegate.isCurrentNormalHandler(generation) else { return }
-                terminalRetrier.submit(event) { handle($0) }
+                processDelegateEvent(event, generation: generation)
             }
         }
+        installReplayObserversIfNeeded()
         installEventsFinishedHandler()
         _ = session
+    }
+
+    private static func processDelegateEvent(_ event: PendingDownloadTerminalEvent, generation: UInt64) {
+        guard delegate.isCurrentNormalHandler(generation) else { return }
+        submitJournalEvent(event, delegate: delegate, retrier: terminalRetrier) { handle($0) }
+    }
+
+    static func submitJournalEvent(
+        _ event: PendingDownloadTerminalEvent,
+        delegate: DownloadSessionDelegate,
+        retrier: DownloadEventRetrier,
+        handle: @escaping @MainActor (PendingDownloadTerminalEvent) -> Bool
+    ) {
+        retrier.submit(event) { event in
+            guard let pending = delegate.containsPendingEvent(event) else { return false }
+            guard pending else { return true }
+            return handle(event)
+        }
+    }
+
+    private static func installReplayObserversIfNeeded() {
+        guard replayObservers.isEmpty else { return }
+        for name in [UIApplication.didBecomeActiveNotification,
+                     UIApplication.protectedDataDidBecomeAvailableNotification] {
+            let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { _ in
+                Task { @MainActor in delegate.retryPendingEvents() }
+            }
+            replayObservers.append(observer)
+        }
     }
 
     /// Connects the delegate while the durable marker still suppresses terminal

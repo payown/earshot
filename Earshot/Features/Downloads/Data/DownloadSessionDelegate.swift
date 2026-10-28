@@ -115,7 +115,7 @@ final class DownloadEventJournal: @unchecked Sendable {
     /// An unreadable journal is not evidence that there are no pending events.
     /// Reconciliation must preserve downloading rows until all keys are known.
     func pendingEventsIfReadable() -> [PendingDownloadTerminalEvent]? {
-        lock.lock()
+        guard lock.try() else { return nil }
         defer { lock.unlock() }
         do {
             try loadIfNeededLocked()
@@ -127,7 +127,7 @@ final class DownloadEventJournal: @unchecked Sendable {
 
     @discardableResult
     func acknowledge(_ id: UUID) -> Bool {
-        lock.lock()
+        guard lock.try() else { return false }
         defer { lock.unlock() }
         do {
             try loadIfNeededLocked()
@@ -146,6 +146,14 @@ final class DownloadEventJournal: @unchecked Sendable {
             )
             return false
         }
+    }
+
+    /// A queued delivery is obsolete if another delivery already committed and
+    /// acknowledged it. A contended journal is unknown and should be retried.
+    func containsPendingEvent(_ id: UUID) -> Bool? {
+        guard lock.try() else { return nil }
+        defer { lock.unlock() }
+        return events.contains { $0.id == id }
     }
 
     func acknowledgeAllForRecovery() throws {
@@ -241,11 +249,13 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     private let handlerLock = NSLock()
     private var terminalHandler:
         (@Sendable (PendingDownloadTerminalEvent, UInt64) -> Void)?
+    private var replayHandler:
+        (@Sendable (PendingDownloadTerminalEvent, UInt64) async -> Void)?
     private var handlerGeneration: UInt64 = 0
     private var normalHandler = false
-    private var deduplicateDuringReplay = false
-    private var replayedIDs: Set<UUID> = []
     private var replayTask: Task<Void, Never>?
+    private var replayID: UUID?
+    private var replayRequested = false
     private let retryDelays: [Duration]
     private let retrySleep: @Sendable (Duration) async throws -> Void
     private var eventsFinishedHandler: (@Sendable () -> Void)?
@@ -263,43 +273,56 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     /// the real ModelContainer became available.
     func installTerminalHandler(
         replayingPendingEvents: Bool = true,
+        replayHandler: (@Sendable (PendingDownloadTerminalEvent, UInt64) async -> Void)? = nil,
         _ handler: @escaping @Sendable (PendingDownloadTerminalEvent, UInt64) -> Void
     ) {
         handlerLock.lock()
         replayTask?.cancel()
         replayTask = nil
+        replayID = nil
+        replayRequested = false
         handlerGeneration &+= 1
-        let generation = handlerGeneration
         normalHandler = replayingPendingEvents
-        deduplicateDuringReplay = replayingPendingEvents
-        replayedIDs.removeAll()
         terminalHandler = handler
+        self.replayHandler = replayHandler
         handlerLock.unlock()
-        if replayingPendingEvents {
-            if let events = journal.pendingEventsIfReadable() {
-                for event in events { dispatch(event, generation: generation) }
-                finishReplay(generation: generation)
-            } else {
-                // Live events still need delivery while the old file is locked.
-                for event in journal.pendingEvents() { dispatch(event, generation: generation) }
-                let task = Task.detached { [weak self] in
-                    guard let self else { return }
-                    defer { self.finishReplay(generation: generation) }
-                    for delay in self.retryDelays {
-                        do { try await self.retrySleep(delay) } catch { return }
-                        guard !Task.isCancelled, self.isCurrentNormalHandler(generation) else { return }
-                        if let events = self.journal.pendingEventsIfReadable() {
-                            for event in events { self.dispatch(event, generation: generation) }
-                            break
-                        }
-                    }
+        if replayingPendingEvents { retryPendingEvents() }
+    }
+
+    /// Re-triggered when the app becomes active or protected data is unlocked.
+    /// Coalesce overlapping requests; each run does bounded background retries.
+    func retryPendingEvents() {
+        handlerLock.lock()
+        guard normalHandler else { handlerLock.unlock(); return }
+        guard replayTask == nil else {
+            replayRequested = true
+            handlerLock.unlock()
+            return
+        }
+        let generation = handlerGeneration
+        let id = UUID()
+        replayID = id
+        let task = Task.detached { [weak self] in
+            guard let self else { return }
+            defer { self.finishReplay(generation: generation, id: id) }
+            if let events = self.journal.pendingEventsIfReadable() {
+                await self.deliverReplay(events, generation: generation)
+                return
+            }
+            // Deliver newly arrived in-memory events even if older bytes are
+            // unreadable; never modify the unreadable journal during this scan.
+            await self.deliverReplay(self.journal.pendingEvents(), generation: generation)
+            for delay in self.retryDelays {
+                do { try await self.retrySleep(delay) } catch { return }
+                guard !Task.isCancelled, self.isCurrentNormalHandler(generation) else { return }
+                if let events = self.journal.pendingEventsIfReadable() {
+                    await self.deliverReplay(events, generation: generation)
+                    return
                 }
-                handlerLock.lock()
-                if handlerGeneration == generation && normalHandler { replayTask = task }
-                else { task.cancel() }
-                handlerLock.unlock()
             }
         }
+        replayTask = task
+        handlerLock.unlock()
     }
 
     func isCurrentNormalHandler(_ generation: UInt64) -> Bool {
@@ -308,22 +331,60 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         return handlerGeneration == generation && normalHandler
     }
 
-    private func finishReplay(generation: UInt64) {
+    func containsPendingEvent(_ event: PendingDownloadTerminalEvent) -> Bool? {
+        journal.containsPendingEvent(event.id)
+    }
+
+    #if DEBUG
+    func replayInProgressForTesting() -> Bool {
         handlerLock.lock()
         defer { handlerLock.unlock() }
-        guard handlerGeneration == generation else { return }
-        deduplicateDuringReplay = false
+        return replayTask != nil
+    }
+    #endif
+
+    private func finishReplay(generation: UInt64, id: UUID) {
+        handlerLock.lock()
+        guard handlerGeneration == generation, replayID == id else { handlerLock.unlock(); return }
+        let repeatRequested = replayRequested
         replayTask = nil
+        replayID = nil
+        replayRequested = false
+        handlerLock.unlock()
+        if repeatRequested { retryPendingEvents() }
+    }
+
+    /// Bound the number of main-actor deliveries posted in a single burst.
+    private func deliverReplay(_ events: [PendingDownloadTerminalEvent], generation: UInt64) async {
+        for (index, event) in events.enumerated() {
+            guard !Task.isCancelled, isCurrentNormalHandler(generation) else { return }
+            if index > 0 && index.isMultiple(of: 16) {
+                do { try await Task.sleep(for: .milliseconds(10)) } catch { return }
+                guard !Task.isCancelled, isCurrentNormalHandler(generation) else { return }
+            }
+            if let handler = replayHandlerForGeneration(generation) {
+                await handler(event, generation)
+            } else {
+                dispatch(event, generation: generation)
+            }
+        }
+    }
+
+    private func replayHandlerForGeneration(
+        _ generation: UInt64
+    ) -> (@Sendable (PendingDownloadTerminalEvent, UInt64) async -> Void)? {
+        handlerLock.lock()
+        defer { handlerLock.unlock() }
+        guard handlerGeneration == generation, normalHandler else { return nil }
+        return replayHandler
     }
 
     private func dispatch(_ event: PendingDownloadTerminalEvent, generation: UInt64) {
         handlerLock.lock()
-        guard handlerGeneration == generation, let handler = terminalHandler,
-              !replayedIDs.contains(event.id) else {
+        guard handlerGeneration == generation, let handler = terminalHandler else {
             handlerLock.unlock()
             return
         }
-        if deduplicateDuringReplay { replayedIDs.insert(event.id) }
         handlerLock.unlock()
         handler(event, generation)
     }
