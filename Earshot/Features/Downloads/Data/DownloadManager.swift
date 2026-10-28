@@ -242,8 +242,11 @@ final class DownloadManager {
     static func activate(container: ModelContainer) {
         terminalRetrier.cancelAll()
         self.container = container
-        delegate.installTerminalHandler { event in
-            Task { @MainActor in terminalRetrier.submit(event) { handle($0) } }
+        delegate.installTerminalHandler { event, generation in
+            Task { @MainActor in
+                guard delegate.isCurrentNormalHandler(generation) else { return }
+                terminalRetrier.submit(event) { handle($0) }
+            }
         }
         installEventsFinishedHandler()
         _ = session

@@ -240,11 +240,22 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     private let journal: DownloadEventJournal
     private let handlerLock = NSLock()
     private var terminalHandler:
-        (@Sendable (PendingDownloadTerminalEvent) -> Void)?
+        (@Sendable (PendingDownloadTerminalEvent, UInt64) -> Void)?
+    private var handlerGeneration: UInt64 = 0
+    private var normalHandler = false
+    private var deduplicateDuringReplay = false
+    private var replayedIDs: Set<UUID> = []
+    private var replayTask: Task<Void, Never>?
+    private let retryDelays: [Duration]
+    private let retrySleep: @Sendable (Duration) async throws -> Void
     private var eventsFinishedHandler: (@Sendable () -> Void)?
 
-    init(journal: DownloadEventJournal = .shared) {
+    init(journal: DownloadEventJournal = .shared,
+         retryDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(4), .seconds(8), .seconds(16), .seconds(30)],
+         retrySleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.journal = journal
+        self.retryDelays = retryDelays
+        self.retrySleep = retrySleep
         super.init()
     }
 
@@ -252,14 +263,69 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     /// the real ModelContainer became available.
     func installTerminalHandler(
         replayingPendingEvents: Bool = true,
-        _ handler: @escaping @Sendable (PendingDownloadTerminalEvent) -> Void
+        _ handler: @escaping @Sendable (PendingDownloadTerminalEvent, UInt64) -> Void
     ) {
         handlerLock.lock()
+        replayTask?.cancel()
+        replayTask = nil
+        handlerGeneration &+= 1
+        let generation = handlerGeneration
+        normalHandler = replayingPendingEvents
+        deduplicateDuringReplay = replayingPendingEvents
+        replayedIDs.removeAll()
         terminalHandler = handler
         handlerLock.unlock()
         if replayingPendingEvents {
-            for event in journal.pendingEvents() { handler(event) }
+            if let events = journal.pendingEventsIfReadable() {
+                for event in events { dispatch(event, generation: generation) }
+                finishReplay(generation: generation)
+            } else {
+                // Live events still need delivery while the old file is locked.
+                for event in journal.pendingEvents() { dispatch(event, generation: generation) }
+                let task = Task.detached { [weak self] in
+                    guard let self else { return }
+                    defer { self.finishReplay(generation: generation) }
+                    for delay in self.retryDelays {
+                        do { try await self.retrySleep(delay) } catch { return }
+                        guard !Task.isCancelled, self.isCurrentNormalHandler(generation) else { return }
+                        if let events = self.journal.pendingEventsIfReadable() {
+                            for event in events { self.dispatch(event, generation: generation) }
+                            break
+                        }
+                    }
+                }
+                handlerLock.lock()
+                if handlerGeneration == generation && normalHandler { replayTask = task }
+                else { task.cancel() }
+                handlerLock.unlock()
+            }
         }
+    }
+
+    func isCurrentNormalHandler(_ generation: UInt64) -> Bool {
+        handlerLock.lock()
+        defer { handlerLock.unlock() }
+        return handlerGeneration == generation && normalHandler
+    }
+
+    private func finishReplay(generation: UInt64) {
+        handlerLock.lock()
+        defer { handlerLock.unlock() }
+        guard handlerGeneration == generation else { return }
+        deduplicateDuringReplay = false
+        replayTask = nil
+    }
+
+    private func dispatch(_ event: PendingDownloadTerminalEvent, generation: UInt64) {
+        handlerLock.lock()
+        guard handlerGeneration == generation, let handler = terminalHandler,
+              !replayedIDs.contains(event.id) else {
+            handlerLock.unlock()
+            return
+        }
+        if deduplicateDuringReplay { replayedIDs.insert(event.id) }
+        handlerLock.unlock()
+        handler(event, generation)
     }
 
     /// Recovery cannot queue store-aware MainActor work that might execute after
@@ -267,7 +333,7 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     /// the delegate caller, and leaves old journal entries for the transaction's
     /// explicit acknowledgement after its store save.
     func installRecoverySuppressionHandler() {
-        installTerminalHandler(replayingPendingEvents: false) { [weak self] event in
+        installTerminalHandler(replayingPendingEvents: false) { [weak self] event, _ in
             if case .finished(let fileName) = event.outcome,
                let url = DownloadPaths.resolveLocalURL(storedValue: fileName) {
                 try? FileManager.default.removeItem(at: url)
@@ -301,9 +367,9 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     ) {
         let event = journal.record(taskKey: taskKey, outcome: outcome)
         handlerLock.lock()
-        let handler = terminalHandler
+        let generation = handlerGeneration
         handlerLock.unlock()
-        handler?(event)
+        dispatch(event, generation: generation)
     }
 
     func urlSession(

@@ -1827,12 +1827,80 @@ final class DownloadEventJournalTests: XCTestCase {
         let delegate = DownloadSessionDelegate(journal: journal)
         nonisolated(unsafe) var handled = 0
 
-        delegate.installTerminalHandler(replayingPendingEvents: false) { _ in
+        delegate.installTerminalHandler(replayingPendingEvents: false) { _, _ in
             handled += 1
         }
 
         XCTAssertEqual(handled, 0)
         XCTAssertEqual(journal.pendingEvents().count, 1)
+    }
+
+    func testDelayedReadableJournalReplaysOnceEvenIfAnotherReaderLoadsIt() async throws {
+        let persisted = DownloadEventJournal(url: journalURL)
+        let oldEvent = persisted.record(taskKey: "old", outcome: .failed)
+        let reader = JournalReadProbe()
+        let journal = DownloadEventJournal(url: journalURL, read: reader.read)
+        let liveEvent = journal.record(taskKey: "live", outcome: .failed)
+        let delivered = JournalDeliveryProbe()
+        let replayed = expectation(description: "previously unreadable event replayed")
+        let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [.zero]) { _ in
+            reader.allowReads()
+            // Reconciliation can load the journal before the retry's own read.
+            _ = journal.pendingEventsIfReadable()
+        }
+        delegate.installTerminalHandler { event, _ in
+            delivered.record(event)
+            if event.id == oldEvent.id { replayed.fulfill() }
+        }
+        await fulfillment(of: [replayed], timeout: 2)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(delivered.events, [liveEvent, oldEvent])
+        XCTAssertEqual(journal.pendingEvents(), [oldEvent, liveEvent])
+    }
+
+    func testRecoveryHandlerReplacementCancelsDelayedReplay() async throws {
+        let persisted = DownloadEventJournal(url: journalURL)
+        _ = persisted.record(taskKey: "old", outcome: .failed)
+        let reader = JournalReadProbe()
+        let journal = DownloadEventJournal(url: journalURL, read: reader.read)
+        let started = expectation(description: "retry started")
+        let unexpected = expectation(description: "old handler must not receive replay")
+        unexpected.isInverted = true
+        let gate = JournalRetryGate()
+        let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [.zero]) { _ in
+            started.fulfill()
+            await gate.wait()
+        }
+        delegate.installTerminalHandler { _, _ in unexpected.fulfill() }
+        await fulfillment(of: [started], timeout: 2)
+        delegate.installRecoverySuppressionHandler()
+        reader.allowReads()
+        await gate.release()
+        await fulfillment(of: [unexpected], timeout: 0.2)
+        XCTAssertEqual(journal.pendingEvents().count, 1)
+    }
+}
+
+private final class JournalDeliveryProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [PendingDownloadTerminalEvent] = []
+    var events: [PendingDownloadTerminalEvent] { lock.withLock { values } }
+    func record(_ value: PendingDownloadTerminalEvent) { lock.withLock { values.append(value) } }
+}
+
+private actor JournalRetryGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 
