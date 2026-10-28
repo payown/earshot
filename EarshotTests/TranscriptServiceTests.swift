@@ -56,6 +56,38 @@ final class TranscriptServiceTests: XCTestCase {
         }
     }
 
+    func testTranscriptDiagnosticsHideAddressAndErrorTextWithoutChangingReturnedError() async {
+        let capture = NetworkLogCapture()
+        let url = "https://private.example/signed-path.vtt?token=query-secret"
+        let transport = URLError(.timedOut, userInfo: [NSLocalizedDescriptionKey: "transport-secret \(url)"])
+        MockURLProtocol.setOutcomes([.failure(transport)])
+        let client = HTTPClient(session: MockURLProtocol.makeSession(), retryPolicy: .singleAttempt,
+                                log: { _, _ in })
+        let service = TranscriptService(http: client, log: { _, message in capture.append(message) })
+
+        let result = await service.load(from: url)
+        XCTAssertEqual(result, .failure(.network(transport.localizedDescription)))
+        XCTAssertEqual(capture.messages, ["Transcript fetch failed for HTTPS request: transport error"])
+        let logged = capture.messages.joined()
+        for secret in ["private.example", "signed-path", "query-secret", "transport-secret", url] {
+            XCTAssertFalse(logged.contains(secret))
+        }
+    }
+
+    func testTranscriptSuccessDiagnosticsHideSignedURL() async {
+        let capture = NetworkLogCapture()
+        let url = "https://private.example/signed-path.vtt?token=query-secret"
+        let client = HTTPClient(session: MockURLProtocol.makeSession(), retryPolicy: .singleAttempt,
+                                log: { _, _ in })
+        let service = TranscriptService(http: client, log: { _, message in capture.append(message) })
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: Data("WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nHello\n".utf8))])
+        let result = await service.load(from: url)
+        guard case .success = result else { return XCTFail("Expected a parsed transcript") }
+        XCTAssertEqual(capture.messages, ["Parsed 1 transcript segments (webVTT) from HTTPS request"])
+        XCTAssertFalse(capture.messages.joined().contains("query-secret"))
+        XCTAssertFalse(capture.messages.joined().contains("signed-path"))
+    }
+
     // MARK: Empty body
 
     func test_load_emptyBody_returnsEmpty() async {

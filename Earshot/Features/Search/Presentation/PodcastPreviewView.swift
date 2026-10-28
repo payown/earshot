@@ -458,7 +458,7 @@ struct PodcastPreviewView: View {
                     }
                 } catch {
                     AppLog.networking.error(
-                        "Follow from preview failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        "Follow from preview failed: \(NetworkDiagnostic.reason(error), privacy: .public)"
                     )
                     // Curated, VoiceOver-safe message — never the raw transport
                     // string (#688). The title is safe via the Announcer language-pin.

@@ -64,7 +64,7 @@ private struct EpisodeTranscriptExportModifier: ViewModifier {
                 }
             case .failure(let error):
                 AppLog.data.error(
-                    "Transcript export load failed: \(error.localizedDescription, privacy: .public)"
+                    "Transcript export load failed: \(NetworkDiagnostic.reason(error), privacy: .public)"
                 )
                 Announcer.announce("Could not export transcript")
             }

@@ -121,7 +121,7 @@ struct ChapterService {
             }
             return chapters
         } catch {
-            AppLog.player.info("No embedded chapters for \(url.absoluteString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            AppLog.player.info("No embedded chapters for \(NetworkDiagnostic.endpoint(url), privacy: .public): \(NetworkDiagnostic.reason(error), privacy: .public)")
             return nil
         }
     }

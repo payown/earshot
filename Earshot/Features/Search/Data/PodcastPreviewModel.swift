@@ -314,7 +314,7 @@ final class PodcastPreviewModel {
             )
         } catch {
             AppLog.networking.error(
-                "Podcast preview feed load failed for \(feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Podcast preview feed load failed: \(NetworkDiagnostic.reason(error), privacy: .public)"
             )
             state = .failed
         }
