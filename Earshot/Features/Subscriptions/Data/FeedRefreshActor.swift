@@ -30,6 +30,8 @@ actor FeedRefreshActor {
 
 #if DEBUG
     private var forcedSaveFailuresForTesting = 0
+    private var forcedFollowedFetchFailureForTesting = false
+    private var forcedFeedProcessingFailuresForTesting: Set<String> = []
 
     /// Direct executor assertion used by the regression test for the device-
     /// measured main-thread refresh stall.
@@ -39,7 +41,19 @@ actor FeedRefreshActor {
         forcedSaveFailuresForTesting += 1
     }
 
+    func forceFollowedFetchFailureForTesting() {
+        forcedFollowedFetchFailureForTesting = true
+    }
+
+    func forceFeedProcessingFailureForTesting(feedURL: String) {
+        forcedFeedProcessingFailuresForTesting.insert(FeedURLIdentity.canonical(feedURL))
+    }
+
     func hasPendingChangesForTesting() -> Bool { modelContext.hasChanges }
+
+    nonisolated static func diagnosticErrorDetailForTesting(_ error: Error) -> String {
+        errorDetail(error)
+    }
 #endif
 
     /// How many feeds are processed between `ModelContext.save()` calls. The old
@@ -71,6 +85,8 @@ actor FeedRefreshActor {
             refreshFetchConcurrency
         }
     }
+
+    private enum RefreshApplyError: Error { case priorCheckpointFailed }
 
     private struct FetchCandidate: Sendable {
         let index: Int
@@ -181,7 +197,7 @@ actor FeedRefreshActor {
                                     index: candidate.index,
                                     url: candidate.url,
                                     result: nil,
-                                    errorDescription: error.localizedDescription,
+                                    errorDescription: NetworkDiagnostic.reason(error),
                                     failureReason: FeedCheckFailure.reason(for: error)
                                 )
                             }
@@ -271,6 +287,7 @@ actor FeedRefreshActor {
         let cancelled: Bool
         let intendedInsertions: Int
         let durableInsertions: Int
+        var loadFailed = false
     }
 
     /// The result of subscribing on the background context. Carries only
@@ -352,9 +369,21 @@ actor FeedRefreshActor {
         }
         let correlationID = UUID().uuidString.lowercased()
         let taskCancelledAtEntry = Task.isCancelled
-        let fetchedPodcasts = (
-            try? modelContext.fetch(PodcastQuery.followedDescriptor())
-        ) ?? []
+        let fetchedPodcasts: [Podcast]
+        do {
+#if DEBUG
+            if forcedFollowedFetchFailureForTesting {
+                forcedFollowedFetchFailureForTesting = false
+                throw NSError(domain: "FeedRefreshActor.ForcedFetchFailure", code: 1)
+            }
+#endif
+            fetchedPodcasts = try modelContext.fetch(PodcastQuery.followedDescriptor())
+        } catch {
+            AppLog.subscriptions.error("Could not load subscriptions for refresh: \(Self.errorDetail(error), privacy: .public)")
+            return RefreshRun(results: [], failures: [], attempted: 0, total: 0, failed: 0,
+                              cancelled: false, intendedInsertions: 0, durableInsertions: 0,
+                              loadFailed: true)
+        }
         let refreshDatePairs: [(String, Date)] =
             (try? modelContext.fetch(FetchDescriptor<LocalPodcastState>()))?.compactMap {
                 guard let refreshedAt = $0.refreshedAt else { return nil }
@@ -402,9 +431,28 @@ actor FeedRefreshActor {
             )
         }
 
-        func flushPending() -> (madeNewContentDurable: Bool, results: [RefreshProgress]) {
+        func discardPending(reason: String) {
+            failed += pendingByInputIndex.count + pendingUnchangedByInputIndex.count
+            for index in pendingByInputIndex.keys {
+                if let progress = resultByInputIndex[index] {
+                    recordFailure(index: index, feedURL: progress.feedURL,
+                                  title: progress.podcastTitle, reason: reason)
+                }
+                resultByInputIndex.removeValue(forKey: index)
+            }
+            for (index, progress) in pendingUnchangedByInputIndex {
+                recordFailure(index: index, feedURL: progress.feedURL,
+                              title: progress.podcastTitle, reason: reason)
+                resultByInputIndex.removeValue(forKey: index)
+            }
+            pendingByInputIndex.removeAll()
+            pendingUnchangedByInputIndex.removeAll()
+            sinceLastSave = 0
+        }
+
+        func flushPending() -> (madeNewContentDurable: Bool, results: [RefreshProgress], succeeded: Bool) {
             guard !pendingByInputIndex.isEmpty || !pendingUnchangedByInputIndex.isEmpty else {
-                return (false, [])
+                return (false, [], true)
             }
             let pendingIndexes = Set(
                 pendingByInputIndex.keys.map { $0 }
@@ -416,12 +464,13 @@ actor FeedRefreshActor {
             }
             intendedInsertions += batchIntended
             var madeNewContentDurable = false
-            if saveIfNeededOrLog(
+            let succeeded = saveIfNeededOrLog(
                 correlationID: correlationID,
                 batchIndex: batchIndex,
                 feedCount: pendingByInputIndex.count + pendingUnchangedByInputIndex.count,
                 intendedInsertions: batchIntended
-            ) {
+            )
+            if succeeded {
                 durableInsertions += batchIntended
                 madeNewContentDurable = batchIntended > 0
                 for (index, applyOutcome) in pendingByInputIndex {
@@ -433,29 +482,7 @@ actor FeedRefreshActor {
                     resultByInputIndex[index] = progress
                 }
             } else {
-                failed += pendingByInputIndex.count + pendingUnchangedByInputIndex.count
-                for index in pendingByInputIndex.keys {
-                    if let progress = resultByInputIndex[index] {
-                        recordFailure(
-                            index: index,
-                            feedURL: progress.feedURL,
-                            title: progress.podcastTitle,
-                            reason: "Could not save refresh changes."
-                        )
-                    }
-                    resultByInputIndex.removeValue(forKey: index)
-                }
-                for index in pendingUnchangedByInputIndex.keys {
-                    if let progress = resultByInputIndex[index] {
-                        recordFailure(
-                            index: index,
-                            feedURL: progress.feedURL,
-                            title: progress.podcastTitle,
-                            reason: "Could not save refresh changes."
-                        )
-                    }
-                    resultByInputIndex.removeValue(forKey: index)
-                }
+                discardPending(reason: "Could not save refresh changes.")
             }
             pendingByInputIndex.removeAll()
             pendingUnchangedByInputIndex.removeAll()
@@ -463,7 +490,7 @@ actor FeedRefreshActor {
             let checkpointResults = pendingIndexes.sorted().compactMap {
                 resultByInputIndex[$0]
             }
-            return (madeNewContentDurable, checkpointResults)
+            return (madeNewContentDurable, checkpointResults, succeeded)
         }
 
         let cancelledAtFirstSchedule = isCancelled()
@@ -520,6 +547,11 @@ actor FeedRefreshActor {
                 let feedID = Self.opaqueFeedID(url, salt: correlationID)
                 if let fetchResult = fetched.result {
                     do {
+#if DEBUG
+                        if forcedFeedProcessingFailuresForTesting.remove(FeedURLIdentity.canonical(url)) != nil {
+                            throw NSError(domain: "FeedRefreshActor.ForcedProcessingFailure", code: 1)
+                        }
+#endif
                         if case let .notModified(validators) = fetchResult {
                             let dismissed = try enforceInboxLimits(for: podcast, now: .now)
                             LocalStateStore.setRefreshedAt(.now, on: podcast, in: modelContext)
@@ -564,7 +596,18 @@ actor FeedRefreshActor {
                         ).map(\.guid)
                         let repair = try IdentityRepairService(context: modelContext)
                             .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
-                        if repair.didChange { try saveWithSignpost() }
+                        if repair.didChange {
+                            if !pendingByInputIndex.isEmpty || !pendingUnchangedByInputIndex.isEmpty {
+                                // Repair saves the whole context. Publish any
+                                // earlier feeds as a durable batch first, so a
+                                // later error cannot misclassify committed work.
+                                let checkpoint = flushPending()
+                                guard checkpoint.succeeded else { throw RefreshApplyError.priorCheckpointFailed }
+                                if !checkpoint.results.isEmpty { await onCheckpoint(checkpoint.results) }
+                            } else {
+                                try saveWithSignpost()
+                            }
+                        }
                         let applyInterval = PerformanceSignposts.signposter.beginInterval(
                             "ActorApply",
                             "inputIndex=\(inputIndex) candidateCount=\(repairGUIDs.count)"
@@ -616,7 +659,12 @@ actor FeedRefreshActor {
                             }
                         }
                     } catch {
+                        // SwiftData rollback affects every uncommitted feed in
+                        // this context, not just the feed that threw. None of
+                        // those earlier pending results may be checkpointed.
+                        intendedInsertions += pendingByInputIndex.values.reduce(0) { $0 + $1.insertedCount }
                         modelContext.rollback()
+                        discardPending(reason: "Could not save refresh changes.")
                         failed += 1
                         recordFailure(
                             index: inputIndex,
@@ -637,7 +685,7 @@ actor FeedRefreshActor {
                         reason: fetched.failureReason ?? "Could not check for new episodes. Try again."
                     )
                     AppLog.subscriptions.error(
-                        "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=fetch-failure error=\(Self.sanitized(fetched.errorDescription ?? "Unknown error"), privacy: .public)"
+                        "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=fetch-failure error=\(fetched.errorDescription ?? "unknown", privacy: .public)"
                     )
                 }
                 completed += 1
@@ -1007,7 +1055,7 @@ actor FeedRefreshActor {
                             }
                             failed += unresolvedFailures
                             AppLog.subscriptions.error(
-                                "OPML import batch failed: \(error.localizedDescription, privacy: .public)"
+                                "OPML import batch failed: \(Self.errorDetail(error), privacy: .public)"
                             )
                         }
                         for input in applyBatch {
@@ -1353,7 +1401,7 @@ actor FeedRefreshActor {
         } catch {
             modelContext.rollback()
             AppLog.subscriptions.error(
-                "Subscription refreshed-state save failed: \(error.localizedDescription, privacy: .public)"
+                "Subscription refreshed-state save failed: \(Self.errorDetail(error), privacy: .public)"
             )
         }
     }
@@ -2299,12 +2347,37 @@ actor FeedRefreshActor {
         return Int64(date.timeIntervalSince1970)
     }
 
-    private static func errorDetail(_ error: Error, depth: Int = 0) -> String {
+    /// Public diagnostics contain controlled categories and numeric codes only.
+    /// Error domains, descriptions, and nested userInfo can contain private feed
+    /// URLs or credentials and must not be emitted to the system log.
+    private nonisolated static func errorDetail(_ error: Error, depth: Int = 0) -> String {
+        if error is CancellationError { return "cancelled" }
+        if let http = error as? HTTPError {
+            switch http {
+            case .badURL: return "http-bad-url"
+            case .server(let status): return "http-status(\(status))"
+            case .transport: return "http-transport"
+            }
+        }
+        if let feed = error as? FeedError {
+            switch feed {
+            case .notFollowed: return "feed-not-followed"
+            case .badURL: return "feed-bad-url"
+            case .network: return "feed-network"
+            case .parse: return "feed-parse"
+            }
+        }
         let nsError = error as NSError
-        var pieces = [
-            "\(nsError.domain)(\(nsError.code)): \(sanitized(nsError.localizedDescription))"
-        ]
-        guard depth < 4 else { return pieces.joined(separator: " | ") }
+        let category: String
+        switch nsError.domain {
+        case NSCocoaErrorDomain: category = "cocoa"
+        case NSURLErrorDomain: category = "url"
+        case NSPOSIXErrorDomain: category = "posix"
+        case "NSSQLiteErrorDomain": category = "sqlite"
+        default: category = "other"
+        }
+        var pieces = ["\(category)(\(nsError.code))"]
+        guard depth < 4 else { return pieces[0] }
         if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
             pieces.append("underlying=\(errorDetail(underlying, depth: depth + 1))")
         }
@@ -2314,24 +2387,6 @@ actor FeedRefreshActor {
             })
         }
         return pieces.joined(separator: " | ")
-    }
-
-    private static func sanitized(_ text: String) -> String {
-        var value = text
-        let patterns = [
-            #"https?://[^\s]+"#,
-            #"file://[^\s]+"#,
-            #"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+"#,
-            #"[0-9A-Fa-f]{8}-[0-9A-Fa-f-]{27,}"#,
-        ]
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            let range = NSRange(value.startIndex..., in: value)
-            value = regex.stringByReplacingMatches(
-                in: value, range: range, withTemplate: "<redacted>"
-            )
-        }
-        return value
     }
 
     // MARK: Pure helpers (mirror SubscriptionRepository)

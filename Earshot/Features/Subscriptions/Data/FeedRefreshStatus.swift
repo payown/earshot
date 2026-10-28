@@ -27,11 +27,12 @@ struct FeedRefreshStatusSnapshot: Codable, Equatable, Sendable {
     var unchangedFeeds = 0
     var failedFeeds = 0
     var failureDetails: [FeedRefreshFailure] = []
+    var loadFailed = false
 
     private enum CodingKeys: String, CodingKey {
         case state, trigger, scheduledAt, startedAt, endedAt, lastCompletedAt, lastRetryAt
         case lastSkippedAt, lastSkippedTrigger, checked, total, newEpisodes
-        case unchangedFeeds, failedFeeds, failureDetails
+        case unchangedFeeds, failedFeeds, failureDetails, loadFailed
     }
 
     init() {}
@@ -53,6 +54,7 @@ struct FeedRefreshStatusSnapshot: Codable, Equatable, Sendable {
         unchangedFeeds = try values.decodeIfPresent(Int.self, forKey: .unchangedFeeds) ?? 0
         failedFeeds = try values.decodeIfPresent(Int.self, forKey: .failedFeeds) ?? 0
         failureDetails = try values.decodeIfPresent([FeedRefreshFailure].self, forKey: .failureDetails) ?? []
+        loadFailed = try values.decodeIfPresent(Bool.self, forKey: .loadFailed) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -72,6 +74,7 @@ struct FeedRefreshStatusSnapshot: Codable, Equatable, Sendable {
         try values.encode(unchangedFeeds, forKey: .unchangedFeeds)
         try values.encode(failedFeeds, forKey: .failedFeeds)
         try values.encode(failureDetails, forKey: .failureDetails)
+        try values.encode(loadFailed, forKey: .loadFailed)
     }
 }
 
@@ -206,7 +209,10 @@ final class FeedRefreshStatusMonitor {
         snapshot.newEpisodes = report.newEpisodes
         snapshot.unchangedFeeds = report.unchangedFeeds
         snapshot.failedFeeds = report.failed
-        snapshot.failureDetails = report.failures
+        snapshot.loadFailed = report.loadFailed
+        // No feed was checked when the subscription list could not be loaded.
+        // Keep earlier actionable failures until a real pass replaces them.
+        if !report.loadFailed { snapshot.failureDetails = report.failures }
         persist()
     }
 
@@ -220,7 +226,7 @@ final class FeedRefreshStatusMonitor {
             snapshot.failureDetails.remove(at: index)
             snapshot.failedFeeds = max(0, snapshot.failedFeeds - 1)
             snapshot.newEpisodes += outcome.added
-            if snapshot.state == .failed || snapshot.state == .completedWithErrors {
+            if !snapshot.loadFailed && (snapshot.state == .failed || snapshot.state == .completedWithErrors) {
                 if snapshot.checked < snapshot.total {
                     snapshot.state = .interrupted
                 } else {
@@ -326,6 +332,7 @@ enum FeedRefreshStatusPresentation {
             let when = snapshot.endedAt.map(dateText) ?? "at an unknown time"
             return "Last \(automatic) refresh was interrupted \(when). Checked \(snapshot.checked) of \(snapshot.total) podcasts. Found \(snapshot.newEpisodes) new episodes. Earshot will resume with the least recently checked podcasts."
         case .failed:
+            if snapshot.loadFailed { return SubscriptionRefreshReport.loadFailureMessage }
             let when = snapshot.endedAt.map(dateText) ?? "at an unknown time"
             return "Last \(automatic) refresh failed \(when). Checked \(snapshot.checked) of \(snapshot.total) podcasts. \(snapshot.failedFeeds) feeds failed."
         }

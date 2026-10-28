@@ -64,8 +64,60 @@ private actor OneFailedRefreshFeed: FeedFetching {
     }
 }
 
+private actor CountingRefreshFeed: FeedFetching {
+    private let feed: ParsedFeed
+    private var requests = 0
+    init(feed: ParsedFeed) { self.feed = feed }
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        requests += 1
+        return feed
+    }
+    func requestCount() -> Int { requests }
+}
+
 @MainActor
 final class FeedRefreshResetRaceTests: XCTestCase {
+    func testFollowedStoreLoadFailureDoesNotAdvanceRefreshTimestamp() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(Podcast(feedURL: "https://example.com/feed.xml", title: "Show"))
+        let settings = AppSettingsStore(context: container.mainContext)
+        let previous = Date(timeIntervalSince1970: 1_700_000_000)
+        settings.setDate(previous, for: SettingsKey.lastFeedRefresh)
+        try container.mainContext.save()
+        let parsed = ParsedFeed(title: "Unexpected", artworkURL: nil, description: nil, author: nil,
+                                websiteURL: nil, language: nil, category: nil, episodes: [])
+        let fetcher = CountingRefreshFeed(feed: parsed)
+
+        let didComplete = await BackgroundFeedRefresher.runRefresh(
+            container: container, trigger: .backgroundTask, force: true, feed: fetcher,
+            refreshActorFactory: { container in
+                let actor = await FeedRefreshActor.makeBackground(modelContainer: container)
+                await actor.forceFollowedFetchFailureForTesting()
+                return actor
+            }
+        )
+
+        XCTAssertFalse(didComplete)
+        XCTAssertEqual(settings.date(SettingsKey.lastFeedRefresh), previous)
+        let requests = await fetcher.requestCount()
+        XCTAssertEqual(requests, 0)
+        XCTAssertEqual(FeedRefreshStatusMonitor.shared.snapshot.state, .failed)
+    }
+
+    func testEmptyLibraryRemainsSuccessfulAndAdvancesRefreshTimestamp() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let parsed = ParsedFeed(title: "Unexpected", artworkURL: nil, description: nil, author: nil,
+                                websiteURL: nil, language: nil, category: nil, episodes: [])
+        let fetcher = CountingRefreshFeed(feed: parsed)
+        let didComplete = await BackgroundFeedRefresher.runRefresh(
+            container: container, trigger: .backgroundTask, force: true, feed: fetcher
+        )
+        XCTAssertTrue(didComplete)
+        XCTAssertNotNil(AppSettingsStore(context: container.mainContext).date(SettingsKey.lastFeedRefresh))
+        let requests = await fetcher.requestCount()
+        XCTAssertEqual(requests, 0)
+    }
+
     func testCompletedPassWithOneFeedErrorStillStampsThrottle() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         container.mainContext.insert(Podcast(
@@ -248,6 +300,70 @@ final class FeedRefreshResetRaceTests: XCTestCase {
 
         let result = await refresh.value
         XCTAssertFalse(result)
+    }
+
+    func testCancellingAutomaticRefreshCallerStopsItsOwnedWorkAndReleasesGate() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(Podcast(feedURL: "https://example.com/feed.xml", title: "Example"))
+        try container.mainContext.save()
+        let feed = ParsedFeed(
+            title: "Example", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: []
+        )
+        let fetcher = InFlightFeedFetcher(feed: feed)
+        let refresh = Task { @MainActor in
+            await BackgroundFeedRefresher.runRefresh(
+                container: container, trigger: .backgroundTask, force: true,
+                isCancelled: { false }, notifier: NotificationService(), feed: fetcher
+            )
+        }
+        await fetcher.waitUntilStarted()
+
+        refresh.cancel()
+        let result = await refresh.value
+        let cancelled = await fetcher.wasCancelledByOwner()
+        XCTAssertFalse(result)
+        XCTAssertTrue(cancelled)
+        XCTAssertFalse(BackgroundFeedRefresher.isRefreshInProgress)
+
+        let subsequent = await BackgroundFeedRefresher.runUserInitiatedRefresh(
+            trigger: .manualToolbar, total: 0
+        ) {
+            SubscriptionRefreshReport(
+                notifications: [], attempted: 0, total: 0, succeeded: 0,
+                failed: 0, cancelled: false, intendedInsertions: 0, durableInsertions: 0
+            )
+        }
+        XCTAssertNotNil(subsequent)
+    }
+
+    func testCancellingOverlappingCallerDoesNotCancelActiveRefresh() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(Podcast(feedURL: "https://example.com/feed.xml", title: "Example"))
+        try container.mainContext.save()
+        let feed = ParsedFeed(
+            title: "Example", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: []
+        )
+        let fetcher = InFlightFeedFetcher(feed: feed)
+        let owner = Task { @MainActor in
+            await BackgroundFeedRefresher.runRefresh(
+                container: container, trigger: .backgroundTask, force: true,
+                isCancelled: { false }, notifier: NotificationService(), feed: fetcher
+            )
+        }
+        await fetcher.waitUntilStarted()
+        let overlap = Task { @MainActor in
+            await BackgroundFeedRefresher.runRefresh(container: container, force: true)
+        }
+        overlap.cancel()
+        let overlapResult = await overlap.value
+        let cancelled = await fetcher.wasCancelledByOwner()
+        XCTAssertFalse(overlapResult)
+        XCTAssertFalse(cancelled)
+        XCTAssertTrue(BackgroundFeedRefresher.isRefreshInProgress)
+        await BackgroundFeedRefresher.cancelAndWait()
+        _ = await owner.value
     }
 
     func testSceneBackgroundCancellationPreservesOSBackgroundRefresh() async throws {

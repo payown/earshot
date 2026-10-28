@@ -144,6 +144,8 @@ struct FeedRefreshFailure: Codable, Identifiable, Sendable, Equatable {
 }
 
 struct SubscriptionRefreshReport: Sendable {
+    static let loadFailureMessage = "Earshot couldn't load your followed podcasts. No feeds were checked. Try refreshing again."
+
     enum Completion: Sendable, Equatable {
         case full
         case completedWithErrors(succeeded: Int, total: Int, failed: Int)
@@ -163,8 +165,10 @@ struct SubscriptionRefreshReport: Sendable {
     var newEpisodes = 0
     var unchangedFeeds = 0
     var failures: [FeedRefreshFailure] = []
+    var loadFailed = false
 
     var completion: Completion {
+        if loadFailed { return .failure }
         if !cancelled, failed == 0, succeeded == total { return .full }
         if !cancelled, attempted == total, failed > 0, succeeded > 0 {
             return .completedWithErrors(succeeded: succeeded, total: total, failed: failed)
@@ -174,6 +178,7 @@ struct SubscriptionRefreshReport: Sendable {
     }
 
     var announcement: String {
+        if loadFailed { return Self.loadFailureMessage }
         let completionText = switch completion {
         case .full:
             "Library refreshed"
@@ -218,6 +223,7 @@ final class SubscriptionRepository {
     /// pass this, matching how `downloader: EpisodeDownloading? = nil` already
     /// works in this type.
     private let isEntitled: Bool?
+    private let refreshActorFactory: @Sendable (ModelContainer) async -> FeedRefreshActor
 
     init(
         context: ModelContext,
@@ -225,7 +231,10 @@ final class SubscriptionRepository {
         downloader: EpisodeDownloading? = nil,
         queue: QueueRepository? = nil,
         isEntitled: Bool? = nil,
-        onMerge: (() -> Void)? = nil
+        onMerge: (() -> Void)? = nil,
+        refreshActorFactory: @escaping @Sendable (ModelContainer) async -> FeedRefreshActor = {
+            await FeedRefreshActor.makeBackground(modelContainer: $0)
+        }
     ) {
         self.context = context
         self.feed = feed
@@ -233,6 +242,7 @@ final class SubscriptionRepository {
         self.autoQueueEnabled = queue != nil
         self.isEntitled = isEntitled
         self.onMerge = onMerge
+        self.refreshActorFactory = refreshActorFactory
     }
 
     /// Subscribes to a feed URL. If already subscribed, returns the existing
@@ -749,7 +759,7 @@ extension SubscriptionRepository {
         // background `@ModelActor` so none of it runs on the main thread and
         // starves VoiceOver (#382). The actor returns lightweight value-type
         // results; only the cheap progress callback hops back to the main actor.
-        let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
+        let actor = await refreshActorFactory(context.container)
         let progress = onProgress
         let actorReport = await actor.refreshAllReport(
             feed: feed,
@@ -840,7 +850,8 @@ extension SubscriptionRepository {
             },
             newEpisodes: results.reduce(0) { $0 + $1.outcome.added },
             unchangedFeeds: results.filter(\.wasNotModified).count,
-            failures: actorReport.failures
+            failures: actorReport.failures,
+            loadFailed: actorReport.loadFailed
         )
     }
 

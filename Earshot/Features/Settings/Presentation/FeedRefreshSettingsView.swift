@@ -58,7 +58,9 @@ struct FeedRefreshInlineStatus: View {
         case .interrupted:
             "Refresh was interrupted after checking \(snapshot.checked) of \(snapshot.total) podcasts."
         case .failed:
-            "Refresh failed. \(snapshot.failedFeeds) \(snapshot.failedFeeds == 1 ? "feed" : "feeds") failed."
+            snapshot.loadFailed
+                ? SubscriptionRefreshReport.loadFailureMessage
+                : "Refresh failed. \(snapshot.failedFeeds) \(snapshot.failedFeeds == 1 ? "feed" : "feeds") failed."
         case .never, .completed:
             ""
         }
