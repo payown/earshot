@@ -132,13 +132,14 @@ enum RecoveryDownloadRemoval {
     static func reconcileStoreIfNeeded(
         container: ModelContainer,
         markerURL: URL = markerURL,
-        journal: DownloadEventJournal = .shared
+        journal: DownloadEventJournal = .shared,
+        resolveDownloadURL: (String) -> URL? = { DownloadPaths.resolveLocalURL(storedValue: $0) }
     ) throws {
         guard isPending(at: markerURL) else { return }
         let context = container.mainContext
         for row in try context.fetch(FetchDescriptor<LocalEpisodeState>()) {
             if let name = DownloadPaths.storedFileName(row.downloadPath),
-               let url = DownloadPaths.resolveLocalURL(storedValue: name),
+               let url = resolveDownloadURL(name),
                FileManager.default.fileExists(atPath: url.path) {
                 row.downloadPath = name
                 row.downloadStatus = .downloaded

@@ -233,7 +233,8 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
             try RecoveryDownloadRemoval.begin(at: marker)
             RecoveryDownloadRemoval.injectedFailurePoint = .afterStoreSave
             XCTAssertThrowsError(try RecoveryDownloadRemoval.reconcileStoreIfNeeded(
-                container: container, markerURL: marker, journal: journal
+                container: container, markerURL: marker, journal: journal,
+                resolveDownloadURL: { directory.appending(path: $0) }
             )) {
                 XCTAssertEqual($0 as? RecoveryDownloadRemoval.InjectedFailure, .init(point: .afterStoreSave))
             }
@@ -242,7 +243,10 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
         RecoveryDownloadRemoval.injectedFailurePoint = nil
         let reopened = try open()
         let journal = DownloadEventJournal(url: journalURL)
-        try RecoveryDownloadRemoval.reconcileStoreIfNeeded(container: reopened, markerURL: marker, journal: journal)
+        try RecoveryDownloadRemoval.reconcileStoreIfNeeded(
+            container: reopened, markerURL: marker, journal: journal,
+            resolveDownloadURL: { directory.appending(path: $0) }
+        )
         let context = ModelContext(reopened)
         let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
         let byGUID = Dictionary(uniqueKeysWithValues: rows.map { ($0.episodeGUID, $0) })
