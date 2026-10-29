@@ -213,12 +213,16 @@ enum DownloadPaths {
     static func resolveLocalURL(storedValue: String?) -> URL? {
         guard let name = storedFileName(storedValue),
               let directory = try? downloadsDirectory() else { return nil }
-        return resolveLocalURL(storedValue: name, inDirectory: directory)
+        return resolvedName(name, inDirectory: directory)
     }
 
     /// Shares the same name resolution with callers using an isolated directory.
     static func resolveLocalURL(storedValue: String?, inDirectory directory: URL) -> URL? {
         guard let name = storedFileName(storedValue) else { return nil }
+        return resolvedName(name, inDirectory: directory)
+    }
+
+    private static func resolvedName(_ name: String, inDirectory directory: URL) -> URL {
         return directory.appendingPathComponent(name)
     }
 

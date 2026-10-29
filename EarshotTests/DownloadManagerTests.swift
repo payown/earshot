@@ -782,7 +782,7 @@ final class DownloadManagerTests: XCTestCase {
 
     func testTerminalEventsKeepExistingParentlessBehavior() throws {
         for outcome in [PendingDownloadTerminalEvent.Outcome.failed, .finished(fileName: "\(UUID().uuidString).mp3")] {
-            let context = TestStore.freshContext()
+            let context = try ModelContainerFactory.makeInMemory().mainContext
             let episode = Episode(guid: UUID().uuidString, title: "Episode", audioURL: "https://h/a.mp3",
                                   downloadStatus: .downloading)
             context.insert(episode)
