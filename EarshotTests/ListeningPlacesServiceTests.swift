@@ -279,19 +279,19 @@ final class ListeningPlacesServiceTests: XCTestCase {
         next.mainContext.insert(nextPodcast)
         next.mainContext.insert(nextEpisode)
         try next.mainContext.save()
+        AppSettingsStore(context: next.mainContext).setRawValue(file.deletingPathExtension().lastPathComponent, for: SettingsKey.listeningPlacesDeviceID)
         service.configure(context: next.mainContext)
         await service.chooseFolder(directory)
+        await service.setIncludeLabels(true)
+        guard case .failed = service.status else { return XCTFail("The new binding must have an actual write failure") }
         let attemptsWhileHeld = await confirmation.attempts()
         XCTAssertEqual(attemptsWhileHeld, 1, "Rebinding must not abandon ownership of a held provider check")
         await confirmation.resume()
-        await confirmation.waitUntilFinished()
         await write.value
-        for _ in 0..<100 where service.isOlderConfirmationInFlightForTesting { await Task.yield() }
-        XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
-        XCTAssertTrue(announcements.isEmpty, "The old binding must not speak after release")
-        await service.writeNow()
         for _ in 0..<100 where announcements.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertEqual(announcements, ["Could not write listening places."], "A later failure can be checked after the old provider returns")
+        let finalAttempts = await confirmation.attempts()
+        XCTAssertEqual(finalAttempts, 2, "The new binding gets its own confirmation after the old one returns")
+        XCTAssertEqual(announcements, ["Could not write listening places."], "Only the current binding's actual failure may speak")
         service.releasePersistence()
     }
 
@@ -339,6 +339,104 @@ final class ListeningPlacesServiceTests: XCTestCase {
         for _ in 0..<10 { await Task.yield() }
         XCTAssertTrue(announcements.isEmpty, "A confirmed write or removal invalidates the old failure")
         service.releasePersistence()
+    }
+
+    func testHeldConfirmationCoalescesLatestFailureWithoutThirdWrite() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "coalesced-failure", title: "Episode", audioURL: "https://example.com/audio", positionSeconds: 30)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let initial = ListeningPlacesService()
+        initial.configure(context: container.mainContext)
+        await initial.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        initial.releasePersistence()
+        try setSelfReportedApp("earshot/0.0.1", in: file)
+        let writer = LegacyFailureWriter()
+        let confirmation = LegacyConfirmationProbe()
+        await confirmation.holdNext()
+        var announcements: [String] = []
+        let service = ListeningPlacesService(
+            writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
+            canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) },
+            confirmOlderFile: { bookmark, deviceID, contents in try await confirmation.confirm(bookmark: bookmark, deviceID: deviceID, contents: contents) }
+        )
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        await service.setIncludeLabels(true)
+        await confirmation.waitUntilHeld()
+        for _ in 0..<5 { await service.writeNow() }
+        guard case .failed = service.status else { return XCTFail("The latest write must have failed") }
+        let heldAttempts = await confirmation.attempts()
+        XCTAssertEqual(heldAttempts, 1)
+        await confirmation.resume()
+        for _ in 0..<100 where announcements.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        let finalAttempts = await confirmation.attempts()
+        XCTAssertEqual(finalAttempts, 2, "Only one follow-up confirmation is needed")
+        XCTAssertEqual(announcements, ["Could not write listening places."])
+        service.releasePersistence()
+    }
+
+    func testOversizedOldFileIsNotRetainedForAnnouncement() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "large-old-file", title: "Episode", audioURL: "https://example.com/audio", positionSeconds: 30)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let initial = ListeningPlacesService()
+        initial.configure(context: container.mainContext)
+        await initial.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        initial.releasePersistence()
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        json["app"] = "earshot/0.0.1"
+        json["padding"] = String(repeating: "x", count: 1_048_576)
+        try JSONSerialization.data(withJSONObject: json).write(to: file, options: .atomic)
+        let writer = LegacyFailureWriter()
+        let confirmation = LegacyConfirmationProbe()
+        var announcements: [String] = []
+        let service = ListeningPlacesService(
+            writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
+            canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) },
+            confirmOlderFile: { bookmark, deviceID, contents in try await confirmation.confirm(bookmark: bookmark, deviceID: deviceID, contents: contents) }
+        )
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        await service.setIncludeLabels(true)
+        guard case .failed = service.status else { return XCTFail("The injected write must fail") }
+        let attempts = await confirmation.attempts()
+        XCTAssertEqual(attempts, 0)
+        XCTAssertTrue(announcements.isEmpty)
+        service.releasePersistence()
+    }
+
+    func testCoordinatedConfirmationRejectsLargeReplacement() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transport = ListeningPlacesFileTransport()
+        let bookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let expected = Data("original".utf8)
+        try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", data: expected)
+        let exact = try await transport.confirmsDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", expected: expected)
+        XCTAssertTrue(exact)
+        let file = try deviceFile(in: directory)
+        var replacement = expected
+        replacement.append(Data(repeating: 120, count: 1_048_576))
+        try replacement.write(to: file, options: .atomic)
+        let matches = try await transport.confirmsDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", expected: expected)
+        XCTAssertFalse(matches)
     }
 
     private func setSelfReportedApp(_ app: String, in file: URL) throws {

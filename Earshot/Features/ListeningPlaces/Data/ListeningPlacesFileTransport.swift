@@ -45,7 +45,20 @@ actor ListeningPlacesFileTransport {
             var coordinationError: NSError?
             var matches = false
             NSFileCoordinator().coordinate(readingItemAt: target, options: [], error: &coordinationError) { url in
-                matches = (try? Data(contentsOf: url)) == expected
+                do {
+                    let handle = try FileHandle(forReadingFrom: url)
+                    defer { try? handle.close() }
+                    var actual = Data()
+                    // One extra byte distinguishes an exact match from a longer file.
+                    while actual.count <= expected.count {
+                        guard let chunk = try handle.read(upToCount: min(64 * 1024, expected.count + 1 - actual.count)),
+                              !chunk.isEmpty else { break }
+                        actual.append(chunk)
+                    }
+                    matches = actual == expected
+                } catch {
+                    matches = false
+                }
             }
             if let coordinationError { throw coordinationError }
             return matches

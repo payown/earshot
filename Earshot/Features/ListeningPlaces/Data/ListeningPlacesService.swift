@@ -261,6 +261,14 @@ final class ListeningPlacesService {
         let contents: Data
         var announcedFailure = false
     }
+    private struct ConfirmationCandidate: Sendable {
+        let generation: Int
+        let bookmark: Data
+        let deviceID: String
+        let bindingID: UUID
+        let contents: Data
+    }
+    private static let maximumConfirmationBytes = 1_048_576
     enum Status: Equatable {
         case notConfigured
         case off
@@ -285,6 +293,7 @@ final class ListeningPlacesService {
     @ObservationIgnored private var olderFileObservation: OlderFileObservation?
     // Keep the slot until the provider really returns, including across rebinds.
     @ObservationIgnored private var olderConfirmationInFlight: UUID?
+    @ObservationIgnored private var pendingOlderFileConfirmation: ConfirmationCandidate?
     @ObservationIgnored private var inFlightFileWrite: Task<Void, Error>?
     @ObservationIgnored private var inFlightFileWriteID: UUID?
     @ObservationIgnored private var diskMayDifferFromKnownSnapshot = false
@@ -329,6 +338,7 @@ final class ListeningPlacesService {
         guard self.context == nil else { return }
         bindingID = UUID()
         olderFileObservation = nil
+        pendingOlderFileConfirmation = nil
         self.context = context
         let store = AppSettingsStore(context: context)
         self.store = store
@@ -372,6 +382,7 @@ final class ListeningPlacesService {
     func releasePersistence() {
         bindingID = UUID()
         olderFileObservation = nil
+        pendingOlderFileConfirmation = nil
         writeGeneration += 1
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
@@ -388,6 +399,7 @@ final class ListeningPlacesService {
     }
 
     func chooseFolder(_ url: URL) async {
+        pendingOlderFileConfirmation = nil
         writeGeneration += 1
         let generation = writeGeneration
         let accessed = url.startAccessingSecurityScopedResource()
@@ -403,6 +415,7 @@ final class ListeningPlacesService {
             guard generation == writeGeneration else { return }
             bindingID = UUID()
             olderFileObservation = nil
+            pendingOlderFileConfirmation = nil
             bookmarkData = bookmark
             folderName = url.lastPathComponent
             enabled = true
@@ -421,6 +434,7 @@ final class ListeningPlacesService {
     }
 
     func setEnabled(_ value: Bool) async {
+        pendingOlderFileConfirmation = nil
         guard bookmarkData != nil else {
             enabled = false
             olderFileObservation = nil
@@ -439,6 +453,7 @@ final class ListeningPlacesService {
     }
 
     func setIncludeLabels(_ value: Bool) async {
+        pendingOlderFileConfirmation = nil
         writeGeneration += 1
         includeLabels = value
         store?.setBool(value, for: SettingsKey.listeningPlacesIncludeLabels)
@@ -453,6 +468,7 @@ final class ListeningPlacesService {
 
     func stopSharingAndRemoveDeviceFile() async {
         guard let bookmarkData, !removingDeviceFile else { return }
+        pendingOlderFileConfirmation = nil
         removingDeviceFile = true
         defer { removingDeviceFile = false }
         writeGeneration += 1
@@ -480,6 +496,7 @@ final class ListeningPlacesService {
             folderName = nil
             self.bookmarkData = nil
             olderFileObservation = nil
+            pendingOlderFileConfirmation = nil
             store?.setBool(false, for: SettingsKey.listeningPlacesEnabled)
             store?.setBool(false, for: SettingsKey.listeningPlacesIncludeLabels)
             store?.setRawValue("", for: SettingsKey.listeningPlacesBookmark)
@@ -520,7 +537,8 @@ final class ListeningPlacesService {
                 guard generation == writeGeneration,
                       enabled,
                       self.bookmarkData == bookmarkData else { return }
-                if restored.isOlderEarshotFile(deviceID: deviceID, currentVersion: AppInfo.version) {
+                if data.count <= Self.maximumConfirmationBytes,
+                   restored.isOlderEarshotFile(deviceID: deviceID, currentVersion: AppInfo.version) {
                     if olderFileObservation?.bookmark != bookmarkData
                         || olderFileObservation?.deviceID != deviceID
                         || olderFileObservation?.bindingID != bindingID
@@ -558,6 +576,7 @@ final class ListeningPlacesService {
             await restoreExistingAndWrite()
             return
         }
+        pendingOlderFileConfirmation = nil
         writeGeneration += 1
         let generation = writeGeneration
         let capturedPendingZeroSnapshots = pendingZeroSnapshots
@@ -633,6 +652,7 @@ final class ListeningPlacesService {
                observation.bookmark == bookmarkData, observation.deviceID == capturedDeviceID,
                observation.bindingID == capturedBindingID, contextIsCurrent(capturedBindingID) {
                 olderFileObservation = nil
+                pendingOlderFileConfirmation = nil
             }
             guard generation == writeGeneration, enabled, self.bookmarkData == bookmarkData else {
                 return
@@ -667,37 +687,54 @@ final class ListeningPlacesService {
 
     private func scheduleOlderFileFailureConfirmation(error: Error, generation: Int, bookmark: Data, deviceID: String, bindingID: UUID) {
         guard !Self.isCancellation(error), !Task.isCancelled,
-              generation == writeGeneration, enabled, contextIsCurrent(bindingID),
-              bookmarkData == bookmark, self.deviceID == deviceID,
-              let observed = olderFileObservation,
-              observed.bookmark == bookmark, observed.deviceID == deviceID,
-              observed.bindingID == bindingID, !observed.announcedFailure,
-              olderConfirmationInFlight == nil, canAnnounce() else { return }
+              let observed = olderFileObservation else { return }
+        let candidate = ConfirmationCandidate(generation: generation, bookmark: bookmark,
+                                              deviceID: deviceID, bindingID: bindingID,
+                                              contents: observed.contents)
+        guard isEligibleOlderConfirmation(candidate) else { return }
+        if olderConfirmationInFlight != nil {
+            // Keep only the latest eligible failure. The prior provider owns its
+            // slot until it actually returns, even if its binding is released.
+            pendingOlderFileConfirmation = candidate
+            return
+        }
+        startOlderFileConfirmation(candidate)
+    }
+
+    private func isEligibleOlderConfirmation(_ candidate: ConfirmationCandidate) -> Bool {
+        guard candidate.generation == writeGeneration, enabled,
+              contextIsCurrent(candidate.bindingID), bookmarkData == candidate.bookmark,
+              deviceID == candidate.deviceID,
+              let observed = olderFileObservation, observed.bookmark == candidate.bookmark,
+              observed.deviceID == candidate.deviceID, observed.bindingID == candidate.bindingID,
+              observed.contents == candidate.contents, !observed.announcedFailure,
+              case .failed = status, canAnnounce() else { return false }
+        return true
+    }
+
+    private func startOlderFileConfirmation(_ candidate: ConfirmationCandidate) {
         let confirm = confirmOlderFile
-        let contents = observed.contents
         let confirmationID = UUID()
         olderConfirmationInFlight = confirmationID
         Task.detached(priority: .utility) { [weak self] in
-            let matches = (try? await confirm(bookmark, deviceID, contents)) == true && !Task.isCancelled
-            await self?.finishOlderFileFailureConfirmation(
-                generation: generation, bookmark: bookmark, deviceID: deviceID,
-                bindingID: bindingID, contents: contents, confirmationID: confirmationID, matches: matches
-            )
+            let matches = (try? await confirm(candidate.bookmark, candidate.deviceID, candidate.contents)) == true
+            await self?.finishOlderFileFailureConfirmation(candidate, confirmationID: confirmationID, matches: matches)
         }
     }
 
-    private func finishOlderFileFailureConfirmation(generation: Int, bookmark: Data, deviceID: String, bindingID: UUID, contents: Data, confirmationID: UUID, matches: Bool) {
+    private func finishOlderFileFailureConfirmation(_ candidate: ConfirmationCandidate, confirmationID: UUID, matches: Bool) {
         guard olderConfirmationInFlight == confirmationID else { return }
         olderConfirmationInFlight = nil
-        guard matches, generation == writeGeneration, enabled,
-              contextIsCurrent(bindingID), bookmarkData == bookmark, self.deviceID == deviceID,
-              var current = olderFileObservation, current.bookmark == bookmark,
-              current.deviceID == deviceID, current.bindingID == bindingID,
-              current.contents == contents, !current.announcedFailure,
-              case .failed = status, canAnnounce() else { return }
-        current.announcedFailure = true
-        olderFileObservation = current
-        announceOlderFileFailure("Could not write listening places.")
+        if matches, isEligibleOlderConfirmation(candidate), var current = olderFileObservation {
+            current.announcedFailure = true
+            olderFileObservation = current
+            announceOlderFileFailure("Could not write listening places.")
+        }
+        let pending = pendingOlderFileConfirmation
+        pendingOlderFileConfirmation = nil
+        if let pending, isEligibleOlderConfirmation(pending) {
+            startOlderFileConfirmation(pending)
+        }
     }
 
     private static func isCancellation(_ error: Error) -> Bool {
