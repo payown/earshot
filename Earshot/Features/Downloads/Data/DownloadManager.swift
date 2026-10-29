@@ -1015,6 +1015,9 @@ final class DownloadManager {
     /// impossible — and it only ever fired on rows that were already internally
     /// inconsistent. An empty-string path is still caught (`"" != nil`).
     func reconcileDownloadPaths(
+        verifyBatch: ([DownloadPathReconciliation.Correction]) -> DownloadPathReconciliation.BatchVerification = {
+            DownloadPathReconciliation.verifyBatch($0)
+        },
         scan: @MainActor (ModelContainer) async throws -> [DownloadPathReconciliation.Correction] = {
             try await DownloadPathReconciliation.scan(container: $0)
         }
@@ -1032,18 +1035,19 @@ final class DownloadManager {
                       !RecoveryDownloadRemoval.isPending else { return }
                 let batch = corrections[start..<min(start + 50, corrections.count)]
                 let episodes = try LocalStateStore.episodes(matching: batch.map(\.key), in: context)
+                let verified = verifyBatch(Array(batch))
                 for correction in batch {
                     guard let episode = episodes[correction.key],
                           episode.downloadPath == correction.originalPath,
                           episode.downloadStatus.rawValue == correction.originalStatus else { continue }
+                    if correction.checkedURL != nil, !verified.directoryValid { continue }
                     if let name = correction.replacementName {
                         LocalStateStore.setDownloadPath(name, on: episode, in: context)
                         rewritten += 1
                     } else {
                         // A transfer may have finished while the worker scanned.
                         // Recheck only missing-file candidates before clearing.
-                        if let url = correction.checkedURL,
-                           FileManager.default.fileExists(atPath: url.path) { continue }
+                        if let url = correction.checkedURL, !verified.missing.contains(url) { continue }
                         episode.downloadPath = nil
                         ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
                         reset += 1

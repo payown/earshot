@@ -1,42 +1,103 @@
+import Darwin
 import Foundation
 import SwiftData
 
 /// Reads device-local scalars and checks files away from the UI executor. No
 /// SwiftData models cross back, and healthy downloads require no main-store fetch.
 enum DownloadPathReconciliation {
+    struct DirectoryIdentity: Equatable, Sendable {
+        let device: dev_t
+        let inode: ino_t
+    }
+
+    enum FilePresence: Equatable { case present, missing, unknown }
+
+    /// Holds an existing directory open without creating or modifying it.
+    private struct DirectoryProbe {
+        let url: URL
+        let descriptor: Int32
+        let identity: DirectoryIdentity
+
+        init?(_ url: URL) {
+            let descriptor = open(url.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+            guard descriptor >= 0 else { return nil }
+            var info = stat()
+            guard fstat(descriptor, &info) == 0, info.st_nlink > 0 else {
+                close(descriptor)
+                return nil
+            }
+            self.url = url
+            self.descriptor = descriptor
+            self.identity = DirectoryIdentity(device: info.st_dev, inode: info.st_ino)
+        }
+
+        func isStillCurrent() -> Bool {
+            var openInfo = stat()
+            var pathInfo = stat()
+            guard fstat(descriptor, &openInfo) == 0, openInfo.st_nlink > 0,
+                  stat(url.path, &pathInfo) == 0 else { return false }
+            return identity == DirectoryIdentity(device: openInfo.st_dev, inode: openInfo.st_ino)
+                && identity == DirectoryIdentity(device: pathInfo.st_dev, inode: pathInfo.st_ino)
+        }
+
+        func presence(name: String) -> FilePresence {
+            guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else { return .unknown }
+            var info = stat()
+            if fstatat(descriptor, name, &info, AT_SYMLINK_NOFOLLOW) == 0 { return .present }
+            return DownloadPathReconciliation.classifyFailedLookup(errno: errno)
+        }
+
+        func closeDescriptor() { close(descriptor) }
+    }
+
+    static func classifyFailedLookup(errno: Int32) -> FilePresence {
+        errno == ENOENT ? .missing : .unknown
+    }
+
     struct Correction: Sendable {
         let key: EpisodeLocalKey
         let originalPath: String
         let originalStatus: String
         let replacementName: String?
         let checkedURL: URL?
+        let directoryIdentity: DirectoryIdentity?
+    }
+
+    private static func existingDownloadsDirectory() -> URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Downloads", isDirectory: true)
     }
 
     @concurrent
-    static func scan(container: ModelContainer) async throws -> [Correction] {
+    static func scan(
+        container: ModelContainer,
+        directoryURL: URL? = existingDownloadsDirectory(),
+        presenceOverride: @Sendable (String) -> FilePresence? = { _ in nil }
+    ) async throws -> [Correction] {
         try Task.checkCancellation()
         let context = ModelContext(container)
         let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>(
             predicate: #Predicate { $0.downloadPath != nil }
         ))
-        // Directory creation and backup exclusion only need doing once per scan.
-        let directory = try? DownloadPaths.downloadsDirectory()
+        let directory = directoryURL.flatMap(DirectoryProbe.init)
+        defer { directory?.closeDescriptor() }
         var corrections: [Correction] = []
         for row in rows {
             try Task.checkCancellation()
             guard let path = row.downloadPath else { continue }
-            let name = DownloadPaths.storedFileName(path)
             let url: URL?
             let replacement: String?
-            if let name {
+            if let name = DownloadPaths.storedFileName(path) {
                 guard let directory else { continue }
-                let candidate = directory.appendingPathComponent(name)
-                url = candidate
-                if FileManager.default.fileExists(atPath: candidate.path) {
+                url = directory.url.appendingPathComponent(name)
+                switch presenceOverride(name) ?? directory.presence(name: name) {
+                case .present:
                     guard path != name else { continue }
                     replacement = name
-                } else {
+                case .missing:
                     replacement = nil
+                case .unknown:
+                    continue
                 }
             } else {
                 url = nil
@@ -47,9 +108,47 @@ enum DownloadPathReconciliation {
                 originalPath: path,
                 originalStatus: row.downloadStatusRaw,
                 replacementName: replacement,
-                checkedURL: url
+                checkedURL: url,
+                directoryIdentity: url == nil ? nil : directory?.identity
             ))
         }
+        // A folder replaced or removed during the scan cannot prove anything
+        // about its former contents. Empty-path repairs do not depend on it.
+        if let directory, !directory.isStillCurrent() {
+            corrections.removeAll { $0.checkedURL != nil }
+        }
         return corrections
+    }
+
+    struct BatchVerification {
+        let directoryValid: Bool
+        let missing: Set<URL>
+    }
+
+    /// Recheck missing candidates in one bounded batch on the caller's executor.
+    /// The opened folder must match the worker's folder and its current path.
+    static func verifyBatch(
+        _ corrections: [Correction], beforeFinalValidation: () -> Void = {}
+    ) -> BatchVerification {
+        let candidates = corrections.filter { $0.checkedURL != nil }
+        guard let first = candidates.first, let firstURL = first.checkedURL,
+              let expected = first.directoryIdentity,
+              let directory = DirectoryProbe(firstURL.deletingLastPathComponent()) else {
+            return BatchVerification(directoryValid: false, missing: [])
+        }
+        defer { directory.closeDescriptor() }
+        guard directory.identity == expected, directory.isStillCurrent(),
+              candidates.allSatisfy({ candidate in
+                  candidate.checkedURL?.deletingLastPathComponent() == directory.url
+                      && candidate.directoryIdentity == expected
+              }) else { return BatchVerification(directoryValid: false, missing: []) }
+        var missing: Set<URL> = []
+        for candidate in candidates where candidate.replacementName == nil {
+            guard let url = candidate.checkedURL else { continue }
+            if directory.presence(name: url.lastPathComponent) == .missing { missing.insert(url) }
+        }
+        beforeFinalValidation()
+        guard directory.isStillCurrent() else { return BatchVerification(directoryValid: false, missing: []) }
+        return BatchVerification(directoryValid: true, missing: missing)
     }
 }
