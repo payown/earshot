@@ -142,6 +142,11 @@ enum RecoveryDownloadRemoval {
                FileManager.default.fileExists(atPath: url.path) {
                 row.downloadPath = name
                 row.downloadStatus = .downloaded
+            } else if row.volumeBoostRaw != nil {
+                // Download recovery must retain this episode's independent
+                // volume setting, including raw values a newer app may know.
+                row.downloadPath = nil
+                row.downloadStatus = .none
             } else {
                 context.delete(row)
             }

@@ -135,6 +135,53 @@ final class RecoveryDownloadRemovalTests: XCTestCase {
         try context.save()
     }
 
+    func testRecoveryPreservesEpisodeBoostWhenDownloadIsMissingOrPending() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let feed = "https://example.com/feed"
+        let show = Podcast(feedURL: feed, title: "Show")
+        let episode = Episode(guid: "missing", title: "Episode", audioURL: "https://example.com/audio")
+        episode.podcast = show
+        context.insert(show)
+        context.insert(episode)
+        context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "missing",
+                                         downloadStatus: .downloaded, downloadPath: "missing-\(UUID().uuidString).mp3",
+                                         volumeBoost: .off))
+        context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "pending",
+                                         downloadStatus: .pending, volumeBoost: .medium))
+        context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "no-download",
+                                         volumeBoost: .high))
+        let future = LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "future", downloadStatus: .downloading)
+        future.volumeBoostRaw = "future-value"
+        context.insert(future)
+        context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "no-boost", downloadStatus: .pending))
+        try context.save()
+        let journal = DownloadEventJournal(url: journalURL)
+        journal.record(taskKey: "feed|missing", outcome: .failed)
+        try RecoveryDownloadRemoval.begin(at: markerURL)
+        RecoveryDownloadRemoval.injectedFailurePoint = .afterStoreSave
+        XCTAssertThrowsError(try RecoveryDownloadRemoval.reconcileStoreIfNeeded(
+            container: container, markerURL: markerURL, journal: journal
+        ))
+        XCTAssertTrue(RecoveryDownloadRemoval.isPending(at: markerURL))
+        RecoveryDownloadRemoval.injectedFailurePoint = nil
+        try RecoveryDownloadRemoval.reconcileStoreIfNeeded(container: container, markerURL: markerURL, journal: journal)
+        let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
+        let byGUID = Dictionary(uniqueKeysWithValues: rows.map { ($0.episodeGUID, $0) })
+        XCTAssertEqual(Set(byGUID.keys), Set(["missing", "pending", "no-download", "future"]))
+        XCTAssertEqual(byGUID["missing"]?.volumeBoostRaw, "off")
+        XCTAssertEqual(byGUID["pending"]?.volumeBoostRaw, "medium")
+        XCTAssertEqual(byGUID["no-download"]?.volumeBoostRaw, "high")
+        XCTAssertEqual(byGUID["future"]?.volumeBoostRaw, "future-value")
+        for row in rows {
+            XCTAssertEqual(row.downloadStatus, .none)
+            XCTAssertNil(row.downloadPath)
+        }
+        XCTAssertEqual(LocalStateStore.volumeBoost(for: episode, in: context), .off)
+        XCTAssertFalse(RecoveryDownloadRemoval.isPending(at: markerURL))
+        XCTAssertTrue(journal.pendingEvents().isEmpty)
+    }
+
     func testForceQuitAfterStoreSaveRetriesJournalAndMarkerCommit() throws {
         let container = try ModelContainerFactory.makeInMemory()
         container.mainContext.insert(LocalEpisodeState(
