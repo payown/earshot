@@ -203,6 +203,12 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertEqual(notificationsBeforeRelease, 1)
         XCTAssertEqual(notifications.withLock { $0 }, 1)
         XCTAssertEqual(fileResets.withLock { $0 }, 1)
+        XCTAssertFalse(runtime.isResettingLocalData)
+        let retry = await runtime.resetLocalData()
+        XCTAssertFalse(retry, "The test reset operation intentionally fails")
+        XCTAssertEqual(notifications.withLock { $0 }, 2, "A later reset can begin after failure")
+        XCTAssertEqual(fileResets.withLock { $0 }, 2)
+        XCTAssertFalse(runtime.isResettingLocalData)
     }
 
     func testDirtyCloudResetFailurePresentsAlertWithoutTouchingLocalFiles() async throws {
