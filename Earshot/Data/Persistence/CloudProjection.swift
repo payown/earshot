@@ -455,6 +455,9 @@ actor CloudProjectionCoordinator: ModelActor {
     private let remoteSubscriptionSave: @Sendable (ModelContext) throws -> Void
     private let queueApplicationCheckpoint: (@Sendable (String) async throws -> Void)?
     private var isApplyingRemote = false
+    #if DEBUG
+    private var resetSaveCheckpointForTesting: (@Sendable () -> Void)?
+    #endif
 
     private init(
         applicationContainer: ModelContainer,
@@ -564,6 +567,10 @@ actor CloudProjectionCoordinator: ModelActor {
 
     func saveProjectionContextForTesting() throws {
         try projectionContext.save()
+    }
+
+    func setResetSaveCheckpointForTesting(_ checkpoint: @escaping @Sendable () -> Void) {
+        resetSaveCheckpointForTesting = checkpoint
     }
 
     nonisolated static func makeForTesting(
@@ -2481,7 +2488,12 @@ actor CloudProjectionCoordinator: ModelActor {
             row.deletedAt = now
             row.modifiedAt = now
         }
-        if context.hasChanges { try context.save() }
+        if context.hasChanges {
+            #if DEBUG
+            resetSaveCheckpointForTesting?()
+            #endif
+            try context.save()
+        }
         knownLocalFeedURLs.removeAll()
         knownLocalBookmarkIDs.removeAll()
         knownLocalSessionIDs.removeAll()

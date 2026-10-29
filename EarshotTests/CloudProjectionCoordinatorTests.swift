@@ -1688,10 +1688,13 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             applicationContainer: app, projectionContainer: readonly,
             center: NotificationCenter(), deviceID: "phone"
         )
+        let reachedSave = Mutex(false)
+        await coordinator.setResetSaveCheckpointForTesting { reachedSave.withLock { $0 = true } }
         do {
             try await coordinator.markAllSubscriptionsDeleted()
             XCTFail("A read-only store must reject the deletion save")
         } catch { }
+        XCTAssertTrue(reachedSave.withLock { $0 }, "Failure must occur at the save boundary")
         let state = try await coordinator.projectionStateForTesting(feedURL: feed)
         XCTAssertFalse(state.0)
         XCTAssertEqual(state.1, "Saved")
