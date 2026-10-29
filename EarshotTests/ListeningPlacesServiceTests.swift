@@ -106,7 +106,10 @@ final class ListeningPlacesServiceTests: XCTestCase {
         )
         service.configure(context: container.mainContext)
         await service.chooseFolder(directory)
+        let writeAttemptsBefore = await writer.attempts()
         await service.setIncludeLabels(true)
+        let writeAttemptsAfter = await writer.attempts()
+        XCTAssertGreaterThan(writeAttemptsAfter, writeAttemptsBefore, "The injected writer must be called")
         guard case .failed = service.status else { return XCTFail("The injected write must fail") }
         let confirmationAttempts = await confirmation.attempts()
         XCTAssertEqual(confirmationAttempts, 0, "Foreign metadata must not schedule a confirmation")
@@ -151,6 +154,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
             await write.value
             let attempts = await confirmation.attempts()
             XCTAssertEqual(attempts, 0, "Canceled or superseded writes must not schedule confirmation")
+            XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
             XCTAssertTrue(announcements.isEmpty)
             service.releasePersistence()
         }
@@ -240,7 +244,10 @@ final class ListeningPlacesServiceTests: XCTestCase {
             )
             service.configure(context: container.mainContext)
             await service.chooseFolder(directory)
+            let writeAttemptsBefore = await writer.attempts()
             await service.setIncludeLabels(true)
+            let writeAttemptsAfter = await writer.attempts()
+            XCTAssertGreaterThan(writeAttemptsAfter, writeAttemptsBefore, "The injected writer must be called")
             guard case .failed = service.status else { return XCTFail("The injected provider error must reach the write failure path") }
             let confirmationAttempts = await confirmation.attempts()
             XCTAssertEqual(confirmationAttempts, 0, "Cancellation must not schedule a confirmation")
@@ -438,6 +445,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         guard case .failed = service.status else { return XCTFail("The injected write must fail") }
         let attempts = await confirmation.attempts()
         XCTAssertEqual(attempts, 0)
+        XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
         XCTAssertTrue(announcements.isEmpty)
         service.releasePersistence()
     }
@@ -1177,12 +1185,14 @@ private actor SuspendedListeningPlacesRemover {
 private actor LegacyFailureWriter {
     private let transport = ListeningPlacesFileTransport()
     private var failing = true
+    private var count = 0
     private var failure = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
     private var hold = false
     private var isHeld = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var continuation: CheckedContinuation<Void, Never>?
 
+    func attempts() -> Int { count }
     func setFailing(_ value: Bool) { failing = value }
     func setFailure(_ value: NSError) { failure = value }
     func holdNextWrite() { hold = true }
@@ -1192,6 +1202,7 @@ private actor LegacyFailureWriter {
     }
     func resumeWrite() { continuation?.resume(); continuation = nil }
     func write(bookmark: Data, deviceID: String, data: Data) async throws {
+        count += 1
         if hold {
             hold = false
             isHeld = true
