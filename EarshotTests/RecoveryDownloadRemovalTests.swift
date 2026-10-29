@@ -191,6 +191,16 @@ final class RecoveryDownloadRemovalTests: XCTestCase {
 @MainActor
 final class RecoveryVolumeSettingsTests: XCTestCase {
     func testRecoveryKeepsEpisodeBoostAfterStoreSaveInterruptionAndReopen() throws {
+        try exerciseRecovery(realHydration: false)
+    }
+
+    // Run alone in a disposable test-host process: real hydration clears the
+    // process-wide LocalRuntimeState before populating it from this store.
+    func testRecoveryWithRealHydrationInDisposableHost() throws {
+        try exerciseRecovery(realHydration: true)
+    }
+
+    private func exerciseRecovery(realHydration: Bool) throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "RecoveryBoost-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -219,8 +229,11 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
             let show = Podcast(feedURL: feed, title: "Show")
             let episode = Episode(guid: "missing", title: "Episode", audioURL: "https://example.com/audio")
             episode.podcast = show
+            let keptEpisode = Episode(guid: "kept", title: "Kept", audioURL: "https://example.com/kept")
+            keptEpisode.podcast = show
             context.insert(show)
             context.insert(episode)
+            context.insert(keptEpisode)
             context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "missing",
                                              downloadStatus: .downloaded, downloadPath: "missing-\(UUID().uuidString).mp3",
                                              volumeBoost: .off))
@@ -241,7 +254,10 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
             XCTAssertThrowsError(try RecoveryDownloadRemoval.reconcileStoreIfNeeded(
                 container: container, markerURL: marker, journal: journal,
                 resolveDownloadURL: { directory.appending(path: $0) },
-                hydrate: { _ in hydrateCalls += 1 }
+                hydrate: { context in
+                    hydrateCalls += 1
+                    if realHydration { try LocalStateStore.hydrate(in: context, repairing: false) }
+                }
             )) {
                 XCTAssertEqual($0 as? RecoveryDownloadRemoval.InjectedFailure, .init(point: .afterStoreSave))
             }
@@ -250,10 +266,26 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
         RecoveryDownloadRemoval.injectedFailurePoint = nil
         let reopened = try open()
         let journal = DownloadEventJournal(url: journalURL)
+        let pendingBeforeRetry = journal.pendingEvents()
+        XCTAssertEqual(pendingBeforeRetry.count, 1)
+        XCTAssertEqual(pendingBeforeRetry.first?.taskKey, "feed|missing")
+        let interruptedContext = ModelContext(reopened)
+        let interrupted = try interruptedContext.fetch(FetchDescriptor<LocalEpisodeState>())
+        let interruptedByGUID = Dictionary(uniqueKeysWithValues: interrupted.map { ($0.episodeGUID, $0) })
+        XCTAssertEqual(interruptedByGUID["missing"]?.volumeBoostRaw, "off")
+        XCTAssertEqual(interruptedByGUID["pending"]?.volumeBoostRaw, "medium")
+        XCTAssertEqual(interruptedByGUID["future"]?.volumeBoostRaw, "future-value")
+        XCTAssertEqual(interruptedByGUID["missing"]?.downloadStatus, .none)
+        XCTAssertNil(interruptedByGUID["missing"]?.downloadPath)
+        XCTAssertNil(interruptedByGUID["no-boost"])
+        XCTAssertEqual(interruptedByGUID["kept"]?.downloadStatus, .downloaded)
         try RecoveryDownloadRemoval.reconcileStoreIfNeeded(
             container: reopened, markerURL: marker, journal: journal,
             resolveDownloadURL: { directory.appending(path: $0) },
-            hydrate: { _ in hydrateCalls += 1 }
+            hydrate: { context in
+                hydrateCalls += 1
+                if realHydration { try LocalStateStore.hydrate(in: context, repairing: false) }
+            }
         )
         let context = ModelContext(reopened)
         let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
@@ -271,8 +303,15 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
             XCTAssertEqual(row.downloadStatus, .none)
             XCTAssertNil(row.downloadPath)
         }
-        let episode = try XCTUnwrap(context.fetch(FetchDescriptor<Episode>()).first)
+        let episodes = try context.fetch(FetchDescriptor<Episode>())
+        let episode = try XCTUnwrap(episodes.first { $0.guid == "missing" })
         XCTAssertEqual(LocalStateStore.volumeBoost(for: episode, in: context), .off)
+        if realHydration {
+            let keptEpisode = try XCTUnwrap(episodes.first { $0.guid == "kept" })
+            let state = try XCTUnwrap(LocalRuntimeState.shared.episode(keptEpisode.persistentModelID))
+            XCTAssertEqual(state.0, .downloaded)
+            XCTAssertEqual(state.1, "kept.mp3")
+        }
         XCTAssertFalse(RecoveryDownloadRemoval.isPending(at: marker))
         XCTAssertEqual(hydrateCalls, 1)
         XCTAssertTrue(journal.pendingEvents().isEmpty)
