@@ -1771,6 +1771,37 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(excluded, true)
     }
 
+    func testReconciliationPreservesRowsWhenFolderChangesDuringBackupRepair() async throws {
+        let context = TestStore.freshContext()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let directory = root.appendingPathComponent("Downloads", isDirectory: true)
+        let oldDirectory = root.appendingPathComponent("old", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let episode = Episode(guid: "backup-replaced", title: "Download", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: "audio.mp3")
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        await manager.reconcileDownloadPaths { container in
+            try await DownloadPathReconciliation.scan(container: container, directoryURL: directory,
+                excludeFromBackup: { url in
+                    try FileManager.default.moveItem(at: url, to: oldDirectory)
+                    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                    var values = URLResourceValues()
+                    values.isExcludedFromBackup = true
+                    var replacement = url
+                    try replacement.setResourceValues(values)
+                })
+        }
+        XCTAssertEqual(episode.downloadPath, "audio.mp3")
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldDirectory.path))
+        // The metadata API is path-based; the replacement can receive the flag,
+        // but its changed identity must not authorize clearing the old row.
+        let excluded = try directory.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+        XCTAssertEqual(excluded, true)
+    }
+
     func testReconciliationPreservesRowsWhenBackupExclusionFails() async throws {
         let context = TestStore.freshContext()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
