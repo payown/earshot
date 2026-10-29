@@ -88,6 +88,31 @@ enum LocalStateStore {
     static func persist(_ episode: Episode, in context: ModelContext) {
         guard let key = key(for: episode) else { return }
         let rows = episodeRows(for: key, in: context)
+        persist(episode, key: key, rows: rows, in: context)
+    }
+
+    /// Terminal callbacks must not acknowledge an event after interpreting a
+    /// failed local-row fetch as an empty result. Fetch before changing the
+    /// runtime projection and reuse those rows for the staged write.
+    static func setTerminalDownloadState(
+        _ status: DownloadStatus, path: String?, on episode: Episode, in context: ModelContext,
+        fetchRows: (EpisodeLocalKey, ModelContext) throws -> [LocalEpisodeState] = episodeRowsThrowing
+    ) throws {
+        guard let key = key(for: episode) else {
+            // Preserve existing behavior for episodes not attached to a podcast.
+            episode.downloadPath = path
+            episode.downloadStatus = status
+            return
+        }
+        let rows = try fetchRows(key, context)
+        episode.downloadPath = path
+        episode.downloadStatus = status
+        persist(episode, key: key, rows: rows, in: context)
+    }
+
+    private static func persist(
+        _ episode: Episode, key: EpisodeLocalKey, rows: [LocalEpisodeState], in context: ModelContext
+    ) {
         if episode.downloadStatus == .none && episode.downloadPath == nil
             && rows.allSatisfy({ $0.volumeBoost == nil }) {
             LocalRuntimeState.shared.removeEpisode(episode.persistentModelID)
