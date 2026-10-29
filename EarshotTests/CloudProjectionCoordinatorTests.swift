@@ -1602,6 +1602,134 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testFailedResetPreparationDoesNotLeakPartialTombstonesIntoLaterSave() async throws {
+        enum Failure: Error { case fetch }
+        let app = try makeApplicationContainer()
+        let feed = "https://example.com/feed"
+        app.mainContext.insert(Podcast(feedURL: feed, title: "Original"))
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.publishLocalSubscriptionChanges()
+        do {
+            try await coordinator.markAllSubscriptionsDeleted {
+                throw Failure.fetch
+            }
+            XCTFail("A failed fetch must abort the reset")
+        } catch is Failure { } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        let state = try await coordinator.projectionStateForTesting(feedURL: feed)
+        XCTAssertFalse(state.0)
+        XCTAssertNil(state.2)
+        // A later unrelated save must not publish the abandoned deletion.
+        try await coordinator.stageProjectionChangeForTesting(feedURL: feed, title: "Updated")
+        try await coordinator.saveProjectionContextForTesting()
+        let row = try XCTUnwrap(ModelContext(projection).fetch(FetchDescriptor<CloudPodcastProjection>()).first)
+        XCTAssertEqual(row.title, "Updated")
+        XCTAssertNil(row.deletedAt)
+    }
+
+    func testResetPreservesDirtySharedProjectionWorkWithoutPublishingIt() async throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let feed = "https://example.com/feed"
+        let existing = CloudPodcastProjection()
+        existing.feedURL = feed
+        existing.title = "Saved"
+        projection.mainContext.insert(existing)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.stageProjectionChangeForTesting(feedURL: feed, title: "Unsaved")
+        do {
+            try await coordinator.markAllSubscriptionsDeleted()
+            XCTFail("Dirty projection work must block reset preparation")
+        } catch CloudProjectionCoordinator.ResetProjectionError.uncommittedProjectionChanges { } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        let staged = try await coordinator.projectionStateForTesting(feedURL: feed)
+        XCTAssertTrue(staged.0)
+        XCTAssertEqual(staged.1, "Unsaved")
+        XCTAssertNil(staged.2)
+        let saved = try XCTUnwrap(ModelContext(projection).fetch(FetchDescriptor<CloudPodcastProjection>()).first)
+        XCTAssertEqual(saved.title, "Saved")
+        XCTAssertNil(saved.deletedAt)
+        try await coordinator.saveProjectionContextForTesting()
+        let after = try XCTUnwrap(ModelContext(projection).fetch(FetchDescriptor<CloudPodcastProjection>()).first)
+        XCTAssertEqual(after.title, "Unsaved")
+        XCTAssertNil(after.deletedAt)
+    }
+
+    func testResetSaveFailureDoesNotLeakTombstonesIntoLaterWritableContext() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "projection-reset-readonly-\(UUID().uuidString)", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("projection.store")
+        let feed = "https://example.com/feed"
+        try autoreleasepool {
+            let seed = try makeOnDiskProjectionContainer(at: url)
+            let row = CloudPodcastProjection()
+            row.feedURL = feed
+            row.title = "Saved"
+            seed.mainContext.insert(row)
+            try seed.mainContext.save()
+        }
+        let app = try makeApplicationContainer()
+        let readonly = try makeOnDiskProjectionContainer(at: url, readOnly: true)
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: readonly,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        let reachedSave = Mutex(false)
+        await coordinator.setResetSaveCheckpointForTesting { reachedSave.withLock { $0 = true } }
+        do {
+            try await coordinator.markAllSubscriptionsDeleted()
+            XCTFail("A read-only store must reject the deletion save")
+        } catch { }
+        XCTAssertTrue(reachedSave.withLock { $0 }, "Failure must occur at the save boundary")
+        let state = try await coordinator.projectionStateForTesting(feedURL: feed)
+        XCTAssertFalse(state.0)
+        XCTAssertEqual(state.1, "Saved")
+        XCTAssertNil(state.2)
+        let writable = try makeOnDiskProjectionContainer(at: url)
+        let context = ModelContext(writable)
+        let row = try XCTUnwrap(context.fetch(FetchDescriptor<CloudPodcastProjection>()).first)
+        XCTAssertNil(row.deletedAt)
+        row.title = "Later update"
+        try context.save()
+        let after = try XCTUnwrap(ModelContext(writable).fetch(FetchDescriptor<CloudPodcastProjection>()).first)
+        XCTAssertEqual(after.title, "Later update")
+        XCTAssertNil(after.deletedAt)
+    }
+
+    func testResetSuccessfulSaveRefreshesPreviouslyCachedProjection() async throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let row = CloudPodcastProjection()
+        row.feedURL = "https://example.com/feed"
+        projection.mainContext.insert(row)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        let before = try await coordinator.projectionStateForTesting(feedURL: row.feedURL)
+        XCTAssertNil(before.2)
+        let date = Date(timeIntervalSince1970: 1_800_000_004)
+        try await coordinator.markAllSubscriptionsDeleted(now: date)
+        let after = try await coordinator.projectionStateForTesting(feedURL: row.feedURL, refresh: true)
+        XCTAssertFalse(after.0)
+        XCTAssertEqual(after.2, date)
+    }
+
     func testEverywhereDeleteIsIdempotentAndTombstonesEveryLibraryProjection() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
@@ -3713,7 +3841,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    private func makeOnDiskProjectionContainer(at url: URL) throws -> ModelContainer {
+    private func makeOnDiskProjectionContainer(at url: URL, readOnly: Bool = false) throws -> ModelContainer {
         let schema = Schema([
             CloudPodcastProjection.self,
             CloudEpisodeStateProjection.self,
@@ -3729,6 +3857,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 "CloudProjection",
                 schema: schema,
                 url: url,
+                allowsSave: !readOnly,
                 cloudKitDatabase: .none
             )
         )

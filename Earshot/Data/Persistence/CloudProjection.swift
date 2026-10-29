@@ -455,6 +455,9 @@ actor CloudProjectionCoordinator: ModelActor {
     private let remoteSubscriptionSave: @Sendable (ModelContext) throws -> Void
     private let queueApplicationCheckpoint: (@Sendable (String) async throws -> Void)?
     private var isApplyingRemote = false
+    #if DEBUG
+    private var resetSaveCheckpointForTesting: (@Sendable () -> Void)?
+    #endif
 
     private init(
         applicationContainer: ModelContainer,
@@ -543,6 +546,31 @@ actor CloudProjectionCoordinator: ModelActor {
 #if DEBUG
     func executorRunsOnMainThreadForTesting() -> Bool {
         Thread.isMainThread
+    }
+
+    func stageProjectionChangeForTesting(feedURL: String, title: String) throws {
+        let rows = try projectionContext.fetch(FetchDescriptor<CloudPodcastProjection>())
+        let row = rows.first { $0.feedURL == feedURL } ?? CloudPodcastProjection()
+        if row.modelContext == nil {
+            row.feedURL = feedURL
+            projectionContext.insert(row)
+        }
+        row.title = title
+    }
+
+    func projectionStateForTesting(feedURL: String, refresh: Bool = false) throws -> (Bool, String?, Date?) {
+        if refresh { refreshContextsFromStore() }
+        let row = try projectionContext.fetch(FetchDescriptor<CloudPodcastProjection>())
+            .first { $0.feedURL == feedURL }
+        return (projectionContext.hasChanges, row?.title, row?.deletedAt)
+    }
+
+    func saveProjectionContextForTesting() throws {
+        try projectionContext.save()
+    }
+
+    func setResetSaveCheckpointForTesting(_ checkpoint: @escaping @Sendable () -> Void) {
+        resetSaveCheckpointForTesting = checkpoint
     }
 
     nonisolated static func makeForTesting(
@@ -2407,18 +2435,33 @@ actor CloudProjectionCoordinator: ModelActor {
         try publishLocalFolderChanges(now: now, activatingFeedURL: feedURL)
     }
 
-    /// Records the destructive intent before the application-store transaction.
-    /// The projection store remains in place, so a force quit after this save
-    /// restarts from tombstones rather than re-importing the deleted library.
-    func markAllSubscriptionsDeleted(now: Date = .now) throws {
+    /// Marks the library rows currently present in the local projection store.
+    /// The caller coordinates the reset; this save does not prove remote delivery
+    /// or prevent another projection writer from changing the same rows.
+    enum ResetProjectionError: Error {
+        case uncommittedProjectionChanges
+    }
+
+    func markAllSubscriptionsDeleted(
+        now: Date = .now, beforeEpisodeFetch: @Sendable () throws -> Void = {}
+    ) throws {
         refreshContextsFromStore()
-        let context = projectionContext
+        // Preserve unrelated unsaved work rather than committing it as part of
+        // a reset or letting a later shared-context save overwrite tombstones.
+        guard !projectionContext.hasChanges else {
+            throw ResetProjectionError.uncommittedProjectionChanges
+        }
+        // A failing fetch or save must not leave partial tombstones in the
+        // long-lived shared context. All rows live in this one projection store.
+        let context = ModelContext(projectionContainer)
+        context.autosaveEnabled = false
         let podcastRows = try context.fetch(FetchDescriptor<CloudPodcastProjection>())
         for row in podcastRows where row.deletedAt == nil {
             row.deletedAt = now
             row.modifiedAt = now
             row.sourceDeviceID = deviceID
         }
+        try beforeEpisodeFetch()
         let episodeRows = try context.fetch(FetchDescriptor<CloudEpisodeStateProjection>())
         for row in episodeRows where row.deletedAt == nil {
             row.deletedAt = now
@@ -2445,7 +2488,12 @@ actor CloudProjectionCoordinator: ModelActor {
             row.deletedAt = now
             row.modifiedAt = now
         }
-        if context.hasChanges { try context.save() }
+        if context.hasChanges {
+            #if DEBUG
+            resetSaveCheckpointForTesting?()
+            #endif
+            try context.save()
+        }
         knownLocalFeedURLs.removeAll()
         knownLocalBookmarkIDs.removeAll()
         knownLocalSessionIDs.removeAll()

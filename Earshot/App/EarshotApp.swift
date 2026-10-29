@@ -30,6 +30,41 @@ enum BackupRestorePhase: Equatable {
     case failed
 }
 
+enum LibraryResetCloudFailure: Equatable {
+    case pendingChanges
+    case publicationFailed
+
+    var message: String {
+        switch self {
+        case .pendingChanges:
+            "The library reset couldn't finish because some sync changes are still pending. Playback may have stopped. Please try again."
+        case .publicationFailed:
+            "The library reset couldn't finish. Changes may have started syncing, and playback may have stopped. Check your library before trying again."
+        }
+    }
+}
+
+/// Lives above Settings so a cloud-preparation failure is visible and spoken by
+/// the system alert even if navigation changes while the reset is in progress.
+struct LibraryResetCloudFailurePresenter: ViewModifier {
+    let runtime: AppRuntime
+
+    func body(content: Content) -> some View {
+        content.alert(
+            "Library reset incomplete",
+            isPresented: Binding(
+                get: { runtime.libraryResetCloudFailure != nil },
+                set: { if !$0 { runtime.dismissLibraryResetCloudFailure() } }
+            ),
+            presenting: runtime.libraryResetCloudFailure
+        ) { _ in
+            Button("OK") { runtime.dismissLibraryResetCloudFailure() }
+        } message: { failure in
+            Text(failure.message)
+        }
+    }
+}
+
 private enum BackupRestoreResult: Sendable, Equatable {
     case restored
     case failed
@@ -146,6 +181,7 @@ final class AppRuntime {
     private(set) var recoveryStorageState: RecoveryStorageState?
     private(set) var isRemovingRecoveryDownloads = false
     private(set) var recoveryStorageFocusRevision = 0
+    private(set) var libraryResetCloudFailure: LibraryResetCloudFailure?
 
     private let mode: Mode
     private let launchOperation: StoreLaunchOperation
@@ -701,6 +737,7 @@ final class AppRuntime {
     /// the journaled file transaction runs in ``SettingsReset``'s detached task.
     func resetLocalData() async -> Bool {
         guard resetTask == nil else { return false }
+        libraryResetCloudFailure = nil
         resetInFlight = true
         NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
         await BackgroundFeedRefresher.cancelAndWait()
@@ -710,11 +747,16 @@ final class AppRuntime {
         cloudProjectionActivationTask = nil
         do {
             try await cloudProjectionCoordinator?.markAllSubscriptionsDeleted()
+        } catch CloudProjectionCoordinator.ResetProjectionError.uncommittedProjectionChanges {
+            resetInFlight = false
+            libraryResetCloudFailure = .pendingChanges
+            return false
         } catch {
             AppLog.data.error(
                 "Refused local reset because sync tombstones could not be saved: \(error.localizedDescription, privacy: .public)"
             )
             resetInFlight = false
+            libraryResetCloudFailure = .publicationFailed
             return false
         }
         if mode == .normal {
@@ -771,6 +813,16 @@ final class AppRuntime {
         resetInFlight = false
         return result
     }
+
+    func dismissLibraryResetCloudFailure() {
+        libraryResetCloudFailure = nil
+    }
+
+    #if DEBUG
+    func setCloudProjectionCoordinatorForTesting(_ coordinator: CloudProjectionCoordinator?) {
+        cloudProjectionCoordinator = coordinator
+    }
+    #endif
 
     /// Removes device-owned downloads and rendered artwork without changing the
     /// synced library, playback state, folders, history, or preferences.
@@ -1334,6 +1386,7 @@ struct EarshotApp: App {
                 }
             }
             .environment(runtime)
+            .modifier(LibraryResetCloudFailurePresenter(runtime: runtime))
             .task { await runtime.activateProcessServices() }
             .task(id: foregroundMaintenanceRequestID, priority: .utility) {
                 guard foregroundMaintenanceRequestID != nil,
