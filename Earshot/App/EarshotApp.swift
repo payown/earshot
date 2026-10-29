@@ -736,7 +736,7 @@ final class AppRuntime {
     /// limited to quiescing services and publishing the replacement container;
     /// the journaled file transaction runs in ``SettingsReset``'s detached task.
     func resetLocalData() async -> Bool {
-        guard resetTask == nil else { return false }
+        guard resetTask == nil, !resetInFlight else { return false }
         libraryResetCloudFailure = nil
         resetInFlight = true
         NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
