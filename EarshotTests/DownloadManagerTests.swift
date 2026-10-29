@@ -697,8 +697,18 @@ final class DownloadManagerTests: XCTestCase {
         let audio = directory.appendingPathComponent("\(UUID().uuidString).mp3")
         let bytes = Data("synthetic downloaded audio".utf8)
         try bytes.write(to: audio)
+        func openStore(at storeDirectory: URL) throws -> ModelContainer {
+            let schema = Schema(versionedSchema: EarshotSchemaV13.self)
+            return try ModelContainer(for: schema, configurations:
+                ModelConfiguration("FutureMirrored", schema: Schema(EarshotSchemaV13.mirroredModels),
+                                   url: storeDirectory.appendingPathComponent("primary.store"), cloudKitDatabase: .none),
+                ModelConfiguration("DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                                   url: storeDirectory.appendingPathComponent("local.store"), cloudKitDatabase: .none))
+        }
         for outcome in [PendingDownloadTerminalEvent.Outcome.failed, .finished(fileName: audio.lastPathComponent)] {
-            let context = TestStore.freshContext()
+            let storeDirectory = directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
+            let context = try openStore(at: storeDirectory).mainContext
             let episode = Episode(guid: UUID().uuidString, title: "Episode", audioURL: "https://h/a.mp3",
                                   downloadStatus: .downloading)
             try persistLocalDownloadState(for: [episode], in: context)
@@ -731,8 +741,30 @@ final class DownloadManagerTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: audio), bytes)
             XCTAssertEqual(DownloadEventJournal(url: journalURL).pendingEvents(), [event])
 
-            XCTAssertTrue(DownloadManager.handle(event, resolve: { _, _ in episode },
-                                                   acknowledge: { journal.acknowledge($0.id) },
+            XCTAssertTrue(DownloadManager.handle(event, resolve: { _, _ in episode }, acknowledge: { event in
+                do {
+                    // A second container reads the saved local store before the
+                    // journal is allowed to acknowledge this terminal event.
+                    let reopened = try openStore(at: storeDirectory)
+                    let persisted = try ModelContext(reopened).fetch(FetchDescriptor<LocalEpisodeState>())
+                    XCTAssertEqual(persisted.count, 1)
+                    XCTAssertEqual(persisted.first?.volumeBoostRaw, "future-boost")
+                    switch outcome {
+                    case .failed: XCTAssertEqual(persisted.first?.downloadStatus, DownloadStatus.failed)
+                    case .finished:
+                        XCTAssertEqual(persisted.first?.downloadStatus, DownloadStatus.downloaded)
+                        let resolved = try XCTUnwrap(DownloadPaths.resolveLocalURL(
+                            storedValue: persisted.first?.downloadPath, inDirectory: directory
+                        ))
+                        XCTAssertEqual(resolved, audio)
+                        XCTAssertEqual(try Data(contentsOf: resolved), bytes)
+                    }
+                } catch {
+                    XCTFail("Could not reopen synthetic download state: \(error)")
+                    return false
+                }
+                return journal.acknowledge(event.id)
+            },
                                                    isRecoveryPending: { false }))
             XCTAssertEqual(try context.fetch(FetchDescriptor<LocalEpisodeState>()).count, 1)
             XCTAssertEqual(try context.fetch(FetchDescriptor<LocalEpisodeState>()).first?.volumeBoostRaw, "future-boost")
