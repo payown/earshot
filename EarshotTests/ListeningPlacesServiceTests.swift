@@ -145,6 +145,85 @@ final class ListeningPlacesServiceTests: XCTestCase {
         }
     }
 
+    func testOlderFileWriteFailureDoesNotAnnounceIfObservedBytesChangeOrBecomeUnreadable() async throws {
+        for replaceWithDirectory in [false, true] {
+            let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let container = try makeContainer()
+            let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+            let episode = Episode(guid: "old-replaced", title: "Episode", audioURL: "https://example.com/audio", positionSeconds: 30)
+            episode.podcast = podcast
+            container.mainContext.insert(podcast)
+            container.mainContext.insert(episode)
+            try container.mainContext.save()
+            let initial = ListeningPlacesService()
+            initial.configure(context: container.mainContext)
+            await initial.chooseFolder(directory)
+            let file = try deviceFile(in: directory)
+            initial.releasePersistence()
+            try setSelfReportedApp("earshot/0.0.1", in: file)
+            let writer = LegacyFailureWriter()
+            var announcements: [String] = []
+            let service = ListeningPlacesService(
+                writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
+                canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) }
+            )
+            service.configure(context: container.mainContext)
+            await service.chooseFolder(directory)
+            await writer.holdNextWrite()
+            let write = Task { await service.setIncludeLabels(true) }
+            await writer.waitUntilHeld()
+            if replaceWithDirectory {
+                try FileManager.default.removeItem(at: file)
+                try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            } else {
+                try Data("foreign replacement".utf8).write(to: file, options: .atomic)
+            }
+            await writer.resumeWrite()
+            await write.value
+            guard case .failed = service.status else { return XCTFail("The injected write must fail") }
+            XCTAssertTrue(announcements.isEmpty, "Changed or unreadable bytes must not be identified as the old file")
+            service.releasePersistence()
+        }
+    }
+
+    func testProviderCancellationDoesNotAnnounceOldFileFailure() async throws {
+        for error in [NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError),
+                      NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled),
+                      NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError,
+                              userInfo: [NSUnderlyingErrorKey: NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)])] {
+            let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let container = try makeContainer()
+            let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+            let episode = Episode(guid: "old-provider-cancel", title: "Episode", audioURL: "https://example.com/audio", positionSeconds: 30)
+            episode.podcast = podcast
+            container.mainContext.insert(podcast)
+            container.mainContext.insert(episode)
+            try container.mainContext.save()
+            let initial = ListeningPlacesService()
+            initial.configure(context: container.mainContext)
+            await initial.chooseFolder(directory)
+            let file = try deviceFile(in: directory)
+            initial.releasePersistence()
+            try setSelfReportedApp("earshot/0.0.1", in: file)
+            let writer = LegacyFailureWriter()
+            await writer.setFailure(error)
+            var announcements: [String] = []
+            let service = ListeningPlacesService(
+                writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
+                canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) }
+            )
+            service.configure(context: container.mainContext)
+            await service.chooseFolder(directory)
+            await service.setIncludeLabels(true)
+            XCTAssertTrue(announcements.isEmpty)
+            service.releasePersistence()
+        }
+    }
+
     private func setSelfReportedApp(_ app: String, in file: URL) throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         json["app"] = app
@@ -862,12 +941,14 @@ private actor SuspendedListeningPlacesRemover {
 private actor LegacyFailureWriter {
     private let transport = ListeningPlacesFileTransport()
     private var failing = true
+    private var failure = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
     private var hold = false
     private var isHeld = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var continuation: CheckedContinuation<Void, Never>?
 
     func setFailing(_ value: Bool) { failing = value }
+    func setFailure(_ value: NSError) { failure = value }
     func holdNextWrite() { hold = true }
     func waitUntilHeld() async {
         if isHeld { return }
@@ -884,7 +965,7 @@ private actor LegacyFailureWriter {
                 waiters.removeAll()
             }
         }
-        if failing { throw CocoaError(.fileWriteNoPermission) }
+        if failing { throw failure }
         try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: deviceID, data: data)
     }
 }

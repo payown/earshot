@@ -258,6 +258,7 @@ final class ListeningPlacesService {
         let bookmark: Data
         let deviceID: String
         let bindingID: UUID
+        let contents: Data
         var announcedFailure = false
     }
     enum Status: Equatable {
@@ -514,8 +515,9 @@ final class ListeningPlacesService {
                 if restored.isOlderEarshotFile(deviceID: deviceID, currentVersion: AppInfo.version) {
                     if olderFileObservation?.bookmark != bookmarkData
                         || olderFileObservation?.deviceID != deviceID
-                        || olderFileObservation?.bindingID != bindingID {
-                        olderFileObservation = OlderFileObservation(bookmark: bookmarkData, deviceID: deviceID, bindingID: bindingID)
+                        || olderFileObservation?.bindingID != bindingID
+                        || olderFileObservation?.contents != data {
+                        olderFileObservation = OlderFileObservation(bookmark: bookmarkData, deviceID: deviceID, bindingID: bindingID, contents: data)
                     }
                 } else {
                     olderFileObservation = nil
@@ -558,6 +560,7 @@ final class ListeningPlacesService {
         let capturedDeviceID = deviceID
         let capturedBindingID = bindingID
         status = .writing
+        var reportedWriteFailure = false
         do {
             let loader = await ListeningPlacesSnapshotLoader.makeBackground(
                 modelContainer: context.container
@@ -607,17 +610,15 @@ final class ListeningPlacesService {
             do {
                 try await write.value
             } catch {
-                if !(error is CancellationError), !Task.isCancelled,
-                   generation == writeGeneration, enabled, contextIsCurrent(capturedBindingID),
-                   self.bookmarkData == bookmarkData, deviceID == capturedDeviceID,
-                   var observation = olderFileObservation,
-                   observation.bookmark == bookmarkData, observation.deviceID == capturedDeviceID,
-                   observation.bindingID == capturedBindingID, !observation.announcedFailure,
-                   canAnnounce() {
-                    observation.announcedFailure = true
-                    olderFileObservation = observation
-                    announceOlderFileFailure("Could not write listening places.")
+                if !(error is CancellationError), generation == writeGeneration, enabled,
+                   self.bookmarkData == bookmarkData {
+                    fail(error)
+                    reportedWriteFailure = true
                 }
+                await announceIfOldFileStillMatches(
+                    error: error, generation: generation, bookmark: bookmarkData,
+                    deviceID: capturedDeviceID, bindingID: capturedBindingID
+                )
                 throw error
             }
             if let observation = olderFileObservation,
@@ -640,7 +641,7 @@ final class ListeningPlacesService {
                 status = .ready
                 return
             }
-            fail(error)
+            if !reportedWriteFailure { fail(error) }
         }
     }
 
@@ -654,6 +655,36 @@ final class ListeningPlacesService {
 
     private func contextIsCurrent(_ capturedBindingID: UUID) -> Bool {
         context != nil && bindingID == capturedBindingID
+    }
+
+    private func announceIfOldFileStillMatches(error: Error, generation: Int, bookmark: Data, deviceID: String, bindingID: UUID) async {
+        guard !Self.isCancellation(error), !Task.isCancelled,
+              generation == writeGeneration, enabled, contextIsCurrent(bindingID),
+              bookmarkData == bookmark, self.deviceID == deviceID,
+              let observed = olderFileObservation,
+              observed.bookmark == bookmark, observed.deviceID == deviceID,
+              observed.bindingID == bindingID, !observed.announcedFailure, canAnnounce() else { return }
+        let matches = (try? await transport.confirmsDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: observed.contents)) == true
+        guard matches, !Task.isCancelled, generation == writeGeneration, enabled,
+              contextIsCurrent(bindingID), bookmarkData == bookmark, self.deviceID == deviceID,
+              var current = olderFileObservation, current.bookmark == bookmark,
+              current.deviceID == deviceID, current.bindingID == bindingID,
+              current.contents == observed.contents, !current.announcedFailure, canAnnounce() else { return }
+        current.announcedFailure = true
+        olderFileObservation = current
+        announceOlderFileFailure("Could not write listening places.")
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        var candidate: NSError? = error as NSError
+        for _ in 0..<8 {
+            guard let current = candidate else { return false }
+            if (current.domain == NSCocoaErrorDomain && current.code == NSUserCancelledError)
+                || (current.domain == NSURLErrorDomain && current.code == NSURLErrorCancelled) { return true }
+            candidate = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 
     private func waitForInFlightFileWrites() async {

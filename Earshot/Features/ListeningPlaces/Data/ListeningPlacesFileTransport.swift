@@ -37,6 +37,21 @@ actor ListeningPlacesFileTransport {
         }
     }
 
+    /// Confirm the observed bytes under a coordinated read. Unreadable or
+    /// changed files must not be identified as the previously observed file.
+    func confirmsDeviceFile(bookmarkData: Data, deviceID: String, expected: Data) throws -> Bool {
+        try withFolder(bookmarkData: bookmarkData) { folder in
+            let target = deviceFile(in: folder, deviceID: deviceID)
+            var coordinationError: NSError?
+            var matches = false
+            NSFileCoordinator().coordinate(readingItemAt: target, options: [], error: &coordinationError) { url in
+                matches = (try? Data(contentsOf: url)) == expected
+            }
+            if let coordinationError { throw coordinationError }
+            return matches
+        }
+    }
+
     func prepareFolder(bookmarkData: Data) throws {
         try withFolder(bookmarkData: bookmarkData) { folder in
             _ = try prepareLayout(in: folder)
