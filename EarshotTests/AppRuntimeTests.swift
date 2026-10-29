@@ -1,4 +1,7 @@
 import SwiftData
+import SwiftUI
+import UIKit
+import Synchronization
 import XCTest
 @testable import Earshot
 
@@ -113,7 +116,134 @@ private final class RecoveryCapacityProbe {
 /// carry no fallback container, and process-lifetime services claim one final
 /// container exactly once.
 @MainActor
+private struct CloudResetAlertHarness: View {
+    let runtime: AppRuntime
+    var body: some View {
+        Text("Settings")
+            .modifier(LibraryResetCloudFailurePresenter(runtime: runtime))
+    }
+}
+
+@MainActor
 final class AppRuntimeTests: XCTestCase {
+    private func projectionContainer(url: URL? = nil, readOnly: Bool = false) throws -> ModelContainer {
+        let schema = Schema([
+            CloudPodcastProjection.self, CloudEpisodeStateProjection.self, CloudQueueItemProjection.self,
+            CloudSettingProjection.self, CloudBookmarkProjection.self, CloudListeningSessionProjection.self,
+            CloudFolderProjection.self,
+        ])
+        let configuration = if let url {
+            ModelConfiguration("ResetProjection", schema: schema, url: url,
+                               allowsSave: !readOnly, cloudKitDatabase: .none)
+        } else {
+            ModelConfiguration("ResetProjection", schema: schema, isStoredInMemoryOnly: true,
+                               cloudKitDatabase: .none)
+        }
+        return try ModelContainer(for: schema, configurations: configuration)
+    }
+
+    private func showCloudResetHarness(_ runtime: AppRuntime) throws -> (UIWindow, UIWindow?, UIViewController) {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first { $0.isKeyWindow }
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: CloudResetAlertHarness(runtime: runtime))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        return (window, previous, host)
+    }
+
+    private func presentedCloudResetAlert(from host: UIViewController) async throws -> UIAlertController {
+        for _ in 0..<100 {
+            if let alert = host.presentedViewController as? UIAlertController { return alert }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("The system alert was not presented in the test-host window")
+        throw CocoaError(.coderInvalidValue)
+    }
+
+    func testDirtyCloudResetFailurePresentsAlertWithoutTouchingLocalFiles() async throws {
+        let app = try ModelContainerFactory.makeInMemory()
+        let projection = try projectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.stageProjectionChangeForTesting(feedURL: "https://example.com/feed", title: "Unsaved")
+        let fileResetCalled = Mutex(false)
+        let preDeleteNotification = Mutex(false)
+        let observer = NotificationCenter.default.addObserver(
+            forName: .earshotWillDeleteEpisodes, object: nil, queue: nil
+        ) { _ in preDeleteNotification.withLock { $0 = true } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let runtime = AppRuntime(load: .ready(app), mode: .testHost, fileResetOperation: {
+            fileResetCalled.withLock { $0 = true }
+            return false
+        })
+        runtime.setCloudProjectionCoordinatorForTesting(coordinator)
+        let (window, previous, host) = try showCloudResetHarness(runtime)
+        defer { window.isHidden = true; previous?.makeKeyAndVisible() }
+
+        let reset = await runtime.resetLocalData()
+        XCTAssertFalse(reset)
+        XCTAssertTrue(preDeleteNotification.withLock { $0 }, "The original pre-delete notification must still be posted")
+        XCTAssertFalse(fileResetCalled.withLock { $0 })
+        XCTAssertTrue(runtime.readyContainer === app)
+        XCTAssertEqual(runtime.libraryResetCloudFailure, .pendingChanges)
+        let alert = try await presentedCloudResetAlert(from: host)
+        XCTAssertEqual(alert.title, "Library reset incomplete")
+        XCTAssertEqual(alert.message, LibraryResetCloudFailure.pendingChanges.message)
+        runtime.dismissLibraryResetCloudFailure()
+        XCTAssertNil(runtime.libraryResetCloudFailure)
+    }
+
+    func testCloudSaveFailurePresentsAlertWithoutTouchingLocalFiles() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "reset-alert-readonly-\(UUID().uuidString)", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("projection.store")
+        try autoreleasepool {
+            let seed = try projectionContainer(url: url)
+            let row = CloudPodcastProjection()
+            row.feedURL = "https://example.com/feed"
+            seed.mainContext.insert(row)
+            try seed.mainContext.save()
+        }
+        let app = try ModelContainerFactory.makeInMemory()
+        let projection = try projectionContainer(url: url, readOnly: true)
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, center: NotificationCenter(), deviceID: "phone"
+        )
+        let reachedSave = Mutex(false)
+        let preDeleteNotification = Mutex(false)
+        let notificationBeforeSave = Mutex(false)
+        let observer = NotificationCenter.default.addObserver(
+            forName: .earshotWillDeleteEpisodes, object: nil, queue: nil
+        ) { _ in preDeleteNotification.withLock { $0 = true } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        await coordinator.setResetSaveCheckpointForTesting {
+            notificationBeforeSave.withLock { $0 = preDeleteNotification.withLock { $0 } }
+            reachedSave.withLock { $0 = true }
+        }
+        let fileResetCalled = Mutex(false)
+        let runtime = AppRuntime(load: .ready(app), mode: .testHost, fileResetOperation: {
+            fileResetCalled.withLock { $0 = true }
+            return false
+        })
+        runtime.setCloudProjectionCoordinatorForTesting(coordinator)
+        let (window, previous, host) = try showCloudResetHarness(runtime)
+        defer { window.isHidden = true; previous?.makeKeyAndVisible() }
+
+        let reset = await runtime.resetLocalData()
+        XCTAssertFalse(reset)
+        XCTAssertTrue(reachedSave.withLock { $0 }, "The real save boundary must be reached")
+        XCTAssertTrue(notificationBeforeSave.withLock { $0 }, "Pre-delete notification must precede the cloud save")
+        XCTAssertFalse(fileResetCalled.withLock { $0 })
+        XCTAssertTrue(runtime.readyContainer === app)
+        XCTAssertEqual(runtime.libraryResetCloudFailure, .publicationFailed)
+        let alert = try await presentedCloudResetAlert(from: host)
+        XCTAssertEqual(alert.message, LibraryResetCloudFailure.publicationFailed.message)
+    }
     func testUnavailableRuntimeCanInstallReadyContainer() throws {
         let runtime = AppRuntime(mode: .testHost)
         XCTAssertNil(runtime.readyContainer)
