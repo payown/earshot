@@ -283,6 +283,8 @@ final class ListeningPlacesService {
     @ObservationIgnored private let confirmOlderFile: @Sendable (Data, String, Data) async throws -> Bool
     @ObservationIgnored private var bindingID = UUID()
     @ObservationIgnored private var olderFileObservation: OlderFileObservation?
+    // Keep the slot until the provider really returns, including across rebinds.
+    @ObservationIgnored private var olderConfirmationInFlight: UUID?
     @ObservationIgnored private var inFlightFileWrite: Task<Void, Error>?
     @ObservationIgnored private var inFlightFileWriteID: UUID?
     @ObservationIgnored private var diskMayDifferFromKnownSnapshot = false
@@ -308,11 +310,12 @@ final class ListeningPlacesService {
         confirmOlderFile: (@Sendable (Data, String, Data) async throws -> Bool)? = nil
     ) {
         let transport = ListeningPlacesFileTransport()
+        let confirmationTransport = ListeningPlacesFileTransport()
         self.transport = transport
         self.canAnnounce = canAnnounce ?? { UIApplication.shared.applicationState == .active && UIAccessibility.isVoiceOverRunning }
         self.announceOlderFileFailure = announceOlderFileFailure ?? { Announcer.announce($0) }
         self.confirmOlderFile = confirmOlderFile ?? { bookmark, deviceID, contents in
-            try await transport.confirmsDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: contents)
+            try await confirmationTransport.confirmsDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: contents)
         }
         self.removeDeviceFile = removeDeviceFile ?? { bookmark, deviceID in
             try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
@@ -668,20 +671,25 @@ final class ListeningPlacesService {
               bookmarkData == bookmark, self.deviceID == deviceID,
               let observed = olderFileObservation,
               observed.bookmark == bookmark, observed.deviceID == deviceID,
-              observed.bindingID == bindingID, !observed.announcedFailure, canAnnounce() else { return }
+              observed.bindingID == bindingID, !observed.announcedFailure,
+              olderConfirmationInFlight == nil, canAnnounce() else { return }
         let confirm = confirmOlderFile
         let contents = observed.contents
+        let confirmationID = UUID()
+        olderConfirmationInFlight = confirmationID
         Task.detached(priority: .utility) { [weak self] in
-            guard (try? await confirm(bookmark, deviceID, contents)) == true, !Task.isCancelled else { return }
+            let matches = (try? await confirm(bookmark, deviceID, contents)) == true && !Task.isCancelled
             await self?.finishOlderFileFailureConfirmation(
                 generation: generation, bookmark: bookmark, deviceID: deviceID,
-                bindingID: bindingID, contents: contents
+                bindingID: bindingID, contents: contents, confirmationID: confirmationID, matches: matches
             )
         }
     }
 
-    private func finishOlderFileFailureConfirmation(generation: Int, bookmark: Data, deviceID: String, bindingID: UUID, contents: Data) {
-        guard generation == writeGeneration, enabled,
+    private func finishOlderFileFailureConfirmation(generation: Int, bookmark: Data, deviceID: String, bindingID: UUID, contents: Data, confirmationID: UUID, matches: Bool) {
+        guard olderConfirmationInFlight == confirmationID else { return }
+        olderConfirmationInFlight = nil
+        guard matches, generation == writeGeneration, enabled,
               contextIsCurrent(bindingID), bookmarkData == bookmark, self.deviceID == deviceID,
               var current = olderFileObservation, current.bookmark == bookmark,
               current.deviceID == deviceID, current.bindingID == bindingID,
@@ -748,5 +756,6 @@ final class ListeningPlacesService {
 
 #if DEBUG
     var isRemovingDeviceFileForTesting: Bool { removingDeviceFile }
+    var isOlderConfirmationInFlightForTesting: Bool { olderConfirmationInFlight != nil }
 #endif
 }

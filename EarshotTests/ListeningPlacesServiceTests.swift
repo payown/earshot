@@ -273,12 +273,71 @@ final class ListeningPlacesServiceTests: XCTestCase {
         guard case .failed = service.status else { return XCTFail("The write failure status must be available immediately") }
         service.releasePersistence()
         let next = try makeContainer()
+        let nextPodcast = Podcast(feedURL: "https://example.com/new-feed", title: "Next Show")
+        let nextEpisode = Episode(guid: "next-binding", title: "Next Episode", audioURL: "https://example.com/next", positionSeconds: 60)
+        nextEpisode.podcast = nextPodcast
+        next.mainContext.insert(nextPodcast)
+        next.mainContext.insert(nextEpisode)
+        try next.mainContext.save()
         service.configure(context: next.mainContext)
+        await service.chooseFolder(directory)
+        let attemptsWhileHeld = await confirmation.attempts()
+        XCTAssertEqual(attemptsWhileHeld, 1, "Rebinding must not abandon ownership of a held provider check")
         await confirmation.resume()
         await confirmation.waitUntilFinished()
         await write.value
-        for _ in 0..<10 { await Task.yield() }
+        for _ in 0..<100 where service.isOlderConfirmationInFlightForTesting { await Task.yield() }
+        XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
         XCTAssertTrue(announcements.isEmpty, "The old binding must not speak after release")
+        await service.writeNow()
+        for _ in 0..<100 where announcements.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(announcements, ["Could not write listening places."], "A later failure can be checked after the old provider returns")
+        service.releasePersistence()
+    }
+
+    func testHeldConfirmationDoesNotMultiplyOrBlockRetryAndRemoval() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "held-confirm-retry", title: "Episode", audioURL: "https://example.com/audio", positionSeconds: 30)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let initial = ListeningPlacesService()
+        initial.configure(context: container.mainContext)
+        await initial.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        initial.releasePersistence()
+        try setSelfReportedApp("earshot/0.0.1", in: file)
+        let writer = LegacyFailureWriter()
+        let confirmation = LegacyConfirmationProbe()
+        await confirmation.holdNext()
+        var announcements: [String] = []
+        let service = ListeningPlacesService(
+            writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
+            canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) },
+            confirmOlderFile: { bookmark, deviceID, contents in try await confirmation.confirm(bookmark: bookmark, deviceID: deviceID, contents: contents) }
+        )
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        await service.setIncludeLabels(true)
+        await confirmation.waitUntilHeld()
+        for _ in 0..<5 { await service.writeNow() }
+        let attempts = await confirmation.attempts()
+        XCTAssertEqual(attempts, 1, "A held provider must not create more confirmation tasks")
+        await writer.setFailing(false)
+        await service.writeNow()
+        guard case .lastWritten = service.status else { return XCTFail("The retry must finish while confirmation is held") }
+        await service.stopSharingAndRemoveDeviceFile()
+        XCTAssertEqual(service.status, .notConfigured)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        await confirmation.resume()
+        await confirmation.waitUntilFinished()
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertTrue(announcements.isEmpty, "A confirmed write or removal invalidates the old failure")
         service.releasePersistence()
     }
 
