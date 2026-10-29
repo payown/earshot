@@ -133,7 +133,8 @@ enum RecoveryDownloadRemoval {
         container: ModelContainer,
         markerURL: URL = markerURL,
         journal: DownloadEventJournal = .shared,
-        resolveDownloadURL: (String) -> URL? = { DownloadPaths.resolveLocalURL(storedValue: $0) }
+        resolveDownloadURL: (String) -> URL? = { DownloadPaths.resolveLocalURL(storedValue: $0) },
+        hydrate: (ModelContext) throws -> Void = { try LocalStateStore.hydrate(in: $0, repairing: false) }
     ) throws {
         guard isPending(at: markerURL) else { return }
         let context = container.mainContext
@@ -155,7 +156,7 @@ enum RecoveryDownloadRemoval {
         try context.save()
         try failIfInjected(at: .afterStoreSave)
         try journal.acknowledgeAllForRecovery()
-        try LocalStateStore.hydrate(in: context, repairing: false)
+        try hydrate(context)
         try failIfInjected(at: .beforeMarkerRemoval)
         try finish(at: markerURL)
     }

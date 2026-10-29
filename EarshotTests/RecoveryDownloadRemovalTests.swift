@@ -212,6 +212,7 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
                                    url: directory.appending(path: "local.store"), cloudKitDatabase: .none))
         }
         let feed = "https://example.com/feed"
+        var hydrateCalls = 0
         do {
             let container = try open()
             let context = container.mainContext
@@ -239,7 +240,8 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
             RecoveryDownloadRemoval.injectedFailurePoint = .afterStoreSave
             XCTAssertThrowsError(try RecoveryDownloadRemoval.reconcileStoreIfNeeded(
                 container: container, markerURL: marker, journal: journal,
-                resolveDownloadURL: { directory.appending(path: $0) }
+                resolveDownloadURL: { directory.appending(path: $0) },
+                hydrate: { _ in hydrateCalls += 1 }
             )) {
                 XCTAssertEqual($0 as? RecoveryDownloadRemoval.InjectedFailure, .init(point: .afterStoreSave))
             }
@@ -250,7 +252,8 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
         let journal = DownloadEventJournal(url: journalURL)
         try RecoveryDownloadRemoval.reconcileStoreIfNeeded(
             container: reopened, markerURL: marker, journal: journal,
-            resolveDownloadURL: { directory.appending(path: $0) }
+            resolveDownloadURL: { directory.appending(path: $0) },
+            hydrate: { _ in hydrateCalls += 1 }
         )
         let context = ModelContext(reopened)
         let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
@@ -271,6 +274,7 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
         let episode = try XCTUnwrap(context.fetch(FetchDescriptor<Episode>()).first)
         XCTAssertEqual(LocalStateStore.volumeBoost(for: episode, in: context), .off)
         XCTAssertFalse(RecoveryDownloadRemoval.isPending(at: marker))
+        XCTAssertEqual(hydrateCalls, 1)
         XCTAssertTrue(journal.pendingEvents().isEmpty)
     }
 }
