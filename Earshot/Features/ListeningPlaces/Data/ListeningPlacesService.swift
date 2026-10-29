@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftData
+import UIKit
 
 struct ListeningPlaceRecordSignature: Equatable, Sendable {
     let positionMilliseconds: Int
@@ -22,6 +23,33 @@ struct ListeningPlacesRestoredSnapshot: Sendable {
     let records: [ListeningPlaceRecord]
     let signatures: [String: ListeningPlaceRecordSignature]
     let updatedAtByID: [String: Date]
+    let fileFormat: String
+    let fileDevice: String
+    let fileApp: String
+
+    /// This classifies self-reported metadata, not file authorship.
+    func isOlderEarshotFile(deviceID: String, currentVersion: String) -> Bool {
+        guard fileFormat == ListeningPlacesFormat.identifier,
+              fileDevice == deviceID,
+              fileApp.hasPrefix("earshot/"),
+              let fileVersion = Self.marketingVersion(String(fileApp.dropFirst("earshot/".count))),
+              let current = Self.marketingVersion(currentVersion) else { return false }
+        return fileVersion.lexicographicallyPrecedes(current)
+    }
+
+    private static func marketingVersion(_ value: String) -> [Int]? {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        var numbers: [Int] = []
+        for part in parts {
+            guard !part.isEmpty,
+                  !(part.count > 1 && part.first == "0"),
+                  part.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+                  let number = Int(part) else { return nil }
+            numbers.append(number)
+        }
+        return numbers
+    }
 }
 
 /// Builds the complete Listening Places payload on a private SwiftData executor.
@@ -56,7 +84,10 @@ actor ListeningPlacesSnapshotLoader {
         return ListeningPlacesRestoredSnapshot(
             records: ListeningPlacesFormat.normalizedRecords(file.records),
             signatures: signatures,
-            updatedAtByID: updatedAtByID
+            updatedAtByID: updatedAtByID,
+            fileFormat: file.format,
+            fileDevice: file.device,
+            fileApp: file.app
         )
     }
 
@@ -223,6 +254,12 @@ actor ListeningPlacesSnapshotLoader {
 @MainActor
 @Observable
 final class ListeningPlacesService {
+    private struct OlderFileObservation {
+        let bookmark: Data
+        let deviceID: String
+        let bindingID: UUID
+        var announcedFailure = false
+    }
     enum Status: Equatable {
         case notConfigured
         case off
@@ -240,6 +277,10 @@ final class ListeningPlacesService {
     @ObservationIgnored private let transport: ListeningPlacesFileTransport
     @ObservationIgnored private let writeDeviceFile: @Sendable (Data, String, Data) async throws -> Void
     @ObservationIgnored private let removeDeviceFile: @Sendable (Data, String) async throws -> Void
+    @ObservationIgnored private let canAnnounce: @MainActor () -> Bool
+    @ObservationIgnored private let announceOlderFileFailure: @MainActor (String) -> Void
+    @ObservationIgnored private var bindingID = UUID()
+    @ObservationIgnored private var olderFileObservation: OlderFileObservation?
     @ObservationIgnored private var inFlightFileWrite: Task<Void, Error>?
     @ObservationIgnored private var inFlightFileWriteID: UUID?
     @ObservationIgnored private var diskMayDifferFromKnownSnapshot = false
@@ -259,10 +300,14 @@ final class ListeningPlacesService {
 
     init(
         removeDeviceFile: (@Sendable (Data, String) async throws -> Void)? = nil,
-        writeDeviceFile: (@Sendable (Data, String, Data) async throws -> Void)? = nil
+        writeDeviceFile: (@Sendable (Data, String, Data) async throws -> Void)? = nil,
+        canAnnounce: (@MainActor () -> Bool)? = nil,
+        announceOlderFileFailure: (@MainActor (String) -> Void)? = nil
     ) {
         let transport = ListeningPlacesFileTransport()
         self.transport = transport
+        self.canAnnounce = canAnnounce ?? { UIApplication.shared.applicationState == .active && UIAccessibility.isVoiceOverRunning }
+        self.announceOlderFileFailure = announceOlderFileFailure ?? { Announcer.announce($0) }
         self.removeDeviceFile = removeDeviceFile ?? { bookmark, deviceID in
             try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
         }
@@ -273,6 +318,8 @@ final class ListeningPlacesService {
 
     func configure(context: ModelContext) {
         guard self.context == nil else { return }
+        bindingID = UUID()
+        olderFileObservation = nil
         self.context = context
         let store = AppSettingsStore(context: context)
         self.store = store
@@ -314,6 +361,8 @@ final class ListeningPlacesService {
     }
 
     func releasePersistence() {
+        bindingID = UUID()
+        olderFileObservation = nil
         writeGeneration += 1
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
@@ -343,6 +392,8 @@ final class ListeningPlacesService {
             )
             try await transport.prepareFolder(bookmarkData: bookmark)
             guard generation == writeGeneration else { return }
+            bindingID = UUID()
+            olderFileObservation = nil
             bookmarkData = bookmark
             folderName = url.lastPathComponent
             enabled = true
@@ -363,6 +414,7 @@ final class ListeningPlacesService {
     func setEnabled(_ value: Bool) async {
         guard bookmarkData != nil else {
             enabled = false
+            olderFileObservation = nil
             status = .notConfigured
             return
         }
@@ -418,6 +470,7 @@ final class ListeningPlacesService {
             includeLabels = false
             folderName = nil
             self.bookmarkData = nil
+            olderFileObservation = nil
             store?.setBool(false, for: SettingsKey.listeningPlacesEnabled)
             store?.setBool(false, for: SettingsKey.listeningPlacesIncludeLabels)
             store?.setRawValue("", for: SettingsKey.listeningPlacesBookmark)
@@ -458,6 +511,15 @@ final class ListeningPlacesService {
                 guard generation == writeGeneration,
                       enabled,
                       self.bookmarkData == bookmarkData else { return }
+                if restored.isOlderEarshotFile(deviceID: deviceID, currentVersion: AppInfo.version) {
+                    if olderFileObservation?.bookmark != bookmarkData
+                        || olderFileObservation?.deviceID != deviceID
+                        || olderFileObservation?.bindingID != bindingID {
+                        olderFileObservation = OlderFileObservation(bookmark: bookmarkData, deviceID: deviceID, bindingID: bindingID)
+                    }
+                } else {
+                    olderFileObservation = nil
+                }
                 lastWrittenRecords = restored.records
                 updatedAtByID = restored.updatedAtByID
                 signatures = restored.signatures
@@ -494,6 +556,7 @@ final class ListeningPlacesService {
         let capturedSignatures = signatures
         let capturedUpdatedAtByID = updatedAtByID
         let capturedDeviceID = deviceID
+        let capturedBindingID = bindingID
         status = .writing
         do {
             let loader = await ListeningPlacesSnapshotLoader.makeBackground(
@@ -541,7 +604,27 @@ final class ListeningPlacesService {
                     inFlightFileWriteID = nil
                 }
             }
-            try await write.value
+            do {
+                try await write.value
+            } catch {
+                if !(error is CancellationError), !Task.isCancelled,
+                   generation == writeGeneration, enabled, contextIsCurrent(capturedBindingID),
+                   self.bookmarkData == bookmarkData, deviceID == capturedDeviceID,
+                   var observation = olderFileObservation,
+                   observation.bookmark == bookmarkData, observation.deviceID == capturedDeviceID,
+                   observation.bindingID == capturedBindingID, !observation.announcedFailure,
+                   canAnnounce() {
+                    observation.announcedFailure = true
+                    olderFileObservation = observation
+                    announceOlderFileFailure("Could not write listening places.")
+                }
+                throw error
+            }
+            if let observation = olderFileObservation,
+               observation.bookmark == bookmarkData, observation.deviceID == capturedDeviceID,
+               observation.bindingID == capturedBindingID, contextIsCurrent(capturedBindingID) {
+                olderFileObservation = nil
+            }
             guard generation == writeGeneration, enabled, self.bookmarkData == bookmarkData else {
                 return
             }
@@ -567,6 +650,10 @@ final class ListeningPlacesService {
         AppLog.data.error(
             "Listening Places write failed [\(cocoaError.domain, privacy: .public) \(cocoaError.code, privacy: .public)]: \(error.localizedDescription, privacy: .public)"
         )
+    }
+
+    private func contextIsCurrent(_ capturedBindingID: UUID) -> Bool {
+        context != nil && bindingID == capturedBindingID
     }
 
     private func waitForInFlightFileWrites() async {
