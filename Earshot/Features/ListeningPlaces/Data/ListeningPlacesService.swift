@@ -280,6 +280,7 @@ final class ListeningPlacesService {
     @ObservationIgnored private let removeDeviceFile: @Sendable (Data, String) async throws -> Void
     @ObservationIgnored private let canAnnounce: @MainActor () -> Bool
     @ObservationIgnored private let announceOlderFileFailure: @MainActor (String) -> Void
+    @ObservationIgnored private let confirmOlderFile: @Sendable (Data, String, Data) async throws -> Bool
     @ObservationIgnored private var bindingID = UUID()
     @ObservationIgnored private var olderFileObservation: OlderFileObservation?
     @ObservationIgnored private var inFlightFileWrite: Task<Void, Error>?
@@ -303,12 +304,16 @@ final class ListeningPlacesService {
         removeDeviceFile: (@Sendable (Data, String) async throws -> Void)? = nil,
         writeDeviceFile: (@Sendable (Data, String, Data) async throws -> Void)? = nil,
         canAnnounce: (@MainActor () -> Bool)? = nil,
-        announceOlderFileFailure: (@MainActor (String) -> Void)? = nil
+        announceOlderFileFailure: (@MainActor (String) -> Void)? = nil,
+        confirmOlderFile: (@Sendable (Data, String, Data) async throws -> Bool)? = nil
     ) {
         let transport = ListeningPlacesFileTransport()
         self.transport = transport
         self.canAnnounce = canAnnounce ?? { UIApplication.shared.applicationState == .active && UIAccessibility.isVoiceOverRunning }
         self.announceOlderFileFailure = announceOlderFileFailure ?? { Announcer.announce($0) }
+        self.confirmOlderFile = confirmOlderFile ?? { bookmark, deviceID, contents in
+            try await transport.confirmsDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: contents)
+        }
         self.removeDeviceFile = removeDeviceFile ?? { bookmark, deviceID in
             try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
         }
@@ -615,7 +620,7 @@ final class ListeningPlacesService {
                     fail(error)
                     reportedWriteFailure = true
                 }
-                await announceIfOldFileStillMatches(
+                scheduleOlderFileFailureConfirmation(
                     error: error, generation: generation, bookmark: bookmarkData,
                     deviceID: capturedDeviceID, bindingID: capturedBindingID
                 )
@@ -657,19 +662,31 @@ final class ListeningPlacesService {
         context != nil && bindingID == capturedBindingID
     }
 
-    private func announceIfOldFileStillMatches(error: Error, generation: Int, bookmark: Data, deviceID: String, bindingID: UUID) async {
+    private func scheduleOlderFileFailureConfirmation(error: Error, generation: Int, bookmark: Data, deviceID: String, bindingID: UUID) {
         guard !Self.isCancellation(error), !Task.isCancelled,
               generation == writeGeneration, enabled, contextIsCurrent(bindingID),
               bookmarkData == bookmark, self.deviceID == deviceID,
               let observed = olderFileObservation,
               observed.bookmark == bookmark, observed.deviceID == deviceID,
               observed.bindingID == bindingID, !observed.announcedFailure, canAnnounce() else { return }
-        let matches = (try? await transport.confirmsDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: observed.contents)) == true
-        guard matches, !Task.isCancelled, generation == writeGeneration, enabled,
+        let confirm = confirmOlderFile
+        let contents = observed.contents
+        Task.detached(priority: .utility) { [weak self] in
+            guard (try? await confirm(bookmark, deviceID, contents)) == true, !Task.isCancelled else { return }
+            await self?.finishOlderFileFailureConfirmation(
+                generation: generation, bookmark: bookmark, deviceID: deviceID,
+                bindingID: bindingID, contents: contents
+            )
+        }
+    }
+
+    private func finishOlderFileFailureConfirmation(generation: Int, bookmark: Data, deviceID: String, bindingID: UUID, contents: Data) {
+        guard generation == writeGeneration, enabled,
               contextIsCurrent(bindingID), bookmarkData == bookmark, self.deviceID == deviceID,
               var current = olderFileObservation, current.bookmark == bookmark,
               current.deviceID == deviceID, current.bindingID == bindingID,
-              current.contents == observed.contents, !current.announcedFailure, canAnnounce() else { return }
+              current.contents == contents, !current.announcedFailure,
+              case .failed = status, canAnnounce() else { return }
         current.announcedFailure = true
         olderFileObservation = current
         announceOlderFileFailure("Could not write listening places.")

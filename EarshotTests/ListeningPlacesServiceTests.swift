@@ -61,6 +61,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertTrue(announcements.isEmpty, "A background or VoiceOver-off failure must not be spoken")
         canSpeak = true
         await service.writeNow()
+        for _ in 0..<100 where announcements.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(announcements, ["Could not write listening places."])
         await service.writeNow()
         XCTAssertEqual(announcements.count, 1, "Repeated failures should be announced once")
@@ -73,6 +74,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
 
         try setSelfReportedApp("earshot/0.0.1", in: file)
         await service.chooseFolder(directory)
+        for _ in 0..<100 where announcements.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(announcements.count, 2, "A newly observed old file may report a new failure")
         service.releasePersistence()
     }
@@ -127,10 +129,12 @@ final class ListeningPlacesServiceTests: XCTestCase {
             initial.releasePersistence()
             try setSelfReportedApp("earshot/0.0.1", in: file)
             let writer = LegacyFailureWriter()
+            let confirmation = LegacyConfirmationProbe()
             var announcements: [String] = []
             let service = ListeningPlacesService(
                 writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
-                canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) }
+                canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) },
+                confirmOlderFile: { bookmark, deviceID, contents in try await confirmation.confirm(bookmark: bookmark, deviceID: deviceID, contents: contents) }
             )
             service.configure(context: container.mainContext)
             await service.chooseFolder(directory)
@@ -140,6 +144,8 @@ final class ListeningPlacesServiceTests: XCTestCase {
             if cancel { write.cancel() } else { await service.setEnabled(false) }
             await writer.resumeWrite()
             await write.value
+            let attempts = await confirmation.attempts()
+            XCTAssertEqual(attempts, 0, "Canceled or superseded writes must not schedule confirmation")
             XCTAssertTrue(announcements.isEmpty)
             service.releasePersistence()
         }
@@ -164,10 +170,12 @@ final class ListeningPlacesServiceTests: XCTestCase {
             initial.releasePersistence()
             try setSelfReportedApp("earshot/0.0.1", in: file)
             let writer = LegacyFailureWriter()
+            let confirmation = LegacyConfirmationProbe()
             var announcements: [String] = []
             let service = ListeningPlacesService(
                 writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
-                canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) }
+                canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) },
+                confirmOlderFile: { bookmark, deviceID, contents in try await confirmation.confirm(bookmark: bookmark, deviceID: deviceID, contents: contents) }
             )
             service.configure(context: container.mainContext)
             await service.chooseFolder(directory)
@@ -182,6 +190,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
             }
             await writer.resumeWrite()
             await write.value
+            await confirmation.waitUntilFinished()
             guard case .failed = service.status else { return XCTFail("The injected write must fail") }
             XCTAssertTrue(announcements.isEmpty, "Changed or unreadable bytes must not be identified as the old file")
             service.releasePersistence()
@@ -222,6 +231,55 @@ final class ListeningPlacesServiceTests: XCTestCase {
             XCTAssertTrue(announcements.isEmpty)
             service.releasePersistence()
         }
+    }
+
+    func testHeldConfirmationDoesNotRetainWriteOrSpeakAfterRebind() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "held-confirmation", title: "Episode", audioURL: "https://example.com/audio", positionSeconds: 30)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let initial = ListeningPlacesService()
+        initial.configure(context: container.mainContext)
+        await initial.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        initial.releasePersistence()
+        try setSelfReportedApp("earshot/0.0.1", in: file)
+        let writer = LegacyFailureWriter()
+        let confirmation = LegacyConfirmationProbe()
+        await confirmation.holdNext()
+        let completion = LegacyWriteCompletion()
+        var announcements: [String] = []
+        let service = ListeningPlacesService(
+            writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
+            canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) },
+            confirmOlderFile: { bookmark, deviceID, contents in try await confirmation.confirm(bookmark: bookmark, deviceID: deviceID, contents: contents) }
+        )
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let write = Task { await service.setIncludeLabels(true); await completion.markFinished() }
+        await confirmation.waitUntilHeld()
+        for _ in 0..<100 {
+            if await completion.isFinished() { break }
+            await Task.yield()
+        }
+        let returnedBeforeConfirmation = await completion.isFinished()
+        XCTAssertTrue(returnedBeforeConfirmation, "A blocked provider check must not retain the write operation")
+        guard case .failed = service.status else { return XCTFail("The write failure status must be available immediately") }
+        service.releasePersistence()
+        let next = try makeContainer()
+        service.configure(context: next.mainContext)
+        await confirmation.resume()
+        await confirmation.waitUntilFinished()
+        await write.value
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertTrue(announcements.isEmpty, "The old binding must not speak after release")
+        service.releasePersistence()
     }
 
     private func setSelfReportedApp(_ app: String, in file: URL) throws {
@@ -967,5 +1025,52 @@ private actor LegacyFailureWriter {
         }
         if failing { throw failure }
         try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: deviceID, data: data)
+    }
+}
+
+private actor LegacyWriteCompletion {
+    private var finished = false
+    func markFinished() { finished = true }
+    func isFinished() -> Bool { finished }
+}
+
+private actor LegacyConfirmationProbe {
+    private let transport = ListeningPlacesFileTransport()
+    private var count = 0
+    private var hold = false
+    private var held = false
+    private var finished = false
+    private var heldWaiters: [CheckedContinuation<Void, Never>] = []
+    private var finishWaiters: [CheckedContinuation<Void, Never>] = []
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func holdNext() { hold = true }
+    func attempts() -> Int { count }
+    func waitUntilHeld() async {
+        if held { return }
+        await withCheckedContinuation { heldWaiters.append($0) }
+    }
+    func waitUntilFinished() async {
+        if finished { return }
+        await withCheckedContinuation { finishWaiters.append($0) }
+    }
+    func resume() { continuation?.resume(); continuation = nil }
+    func confirm(bookmark: Data, deviceID: String, contents: Data) async throws -> Bool {
+        count += 1
+        if hold {
+            hold = false
+            held = true
+            await withCheckedContinuation { value in
+                continuation = value
+                for waiter in heldWaiters { waiter.resume() }
+                heldWaiters.removeAll()
+            }
+        }
+        defer {
+            finished = true
+            for waiter in finishWaiters { waiter.resume() }
+            finishWaiters.removeAll()
+        }
+        return try await transport.confirmsDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: contents)
     }
 }
