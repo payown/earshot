@@ -1771,9 +1771,8 @@ final class DownloadManagerTests: XCTestCase {
                                                        presenceOverride: { _ in .unknown })
         }
         XCTAssertEqual(episode.downloadPath, "audio.mp3")
-        await manager.reconcileDownloadPaths(verifyBatch: { corrections in
-            let valid = DownloadPathReconciliation.verifyBatch(corrections)
-            return .init(directoryValid: valid.directoryValid, missing: [])
+        await manager.reconcileDownloadPaths(verifyBatch: { corrections, apply in
+            DownloadPathReconciliation.verifyAndApplyBatch(corrections, presenceOverride: { _ in .unknown }, apply: apply)
         }) { container in
             try await DownloadPathReconciliation.scan(container: container, directoryURL: directory)
         }
@@ -1797,10 +1796,10 @@ final class DownloadManagerTests: XCTestCase {
                 try FileManager.default.moveItem(at: directory, to: oldDirectory)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             }
-            await manager.reconcileDownloadPaths(verifyBatch: { corrections in
-                DownloadPathReconciliation.verifyBatch(corrections, beforeFinalValidation: {
+            await manager.reconcileDownloadPaths(verifyBatch: { corrections, apply in
+                DownloadPathReconciliation.verifyAndApplyBatch(corrections, beforePathValidation: {
                     if replaceDuringCheck { try? replaceDirectory() }
-                })
+                }, apply: apply)
             }) { container in
                 let corrections = try await DownloadPathReconciliation.scan(container: container, directoryURL: directory)
                 XCTAssertEqual(corrections.count, 1)
@@ -1829,6 +1828,56 @@ final class DownloadManagerTests: XCTestCase {
         }
         XCTAssertEqual(episode.downloadPath, "audio.mp3")
         XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
+    func testReconciliationPreservesEmbeddedNULPath() async throws {
+        let context = TestStore.freshContext()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let name = "missing\0suffix"
+        let episode = Episode(guid: "nul-path", title: "Download", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        await manager.reconcileDownloadPaths { container in
+            try await DownloadPathReconciliation.scan(container: container, directoryURL: directory)
+        }
+        XCTAssertEqual(episode.downloadPath, name)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
+    func testReconciliationRechecksEachFileImmediatelyBeforeApplying() async throws {
+        let context = TestStore.freshContext()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let episodes = ["first", "second"].map { name in
+            Episode(guid: name, title: name, audioURL: "https://h/\(name).mp3",
+                    downloadStatus: .downloaded, downloadPath: "\(name).mp3")
+        }
+        try persistLocalDownloadState(for: episodes, in: context)
+        let manager = makeManager(context)
+        var arrivedURL: URL?
+        await manager.reconcileDownloadPaths(verifyBatch: { corrections, apply in
+            XCTAssertEqual(corrections.count, 2)
+            guard corrections.count == 2, let secondURL = corrections[1].checkedURL else { return }
+            var applied = 0
+            DownloadPathReconciliation.verifyAndApplyBatch(corrections) { correction in
+                apply(correction)
+                applied += 1
+                if applied == 1 {
+                    try? Data("audio".utf8).write(to: secondURL)
+                    arrivedURL = secondURL
+                }
+            }
+        }) { container in
+            try await DownloadPathReconciliation.scan(container: container, directoryURL: directory)
+        }
+        let arrived = try XCTUnwrap(arrivedURL)
+        let protected = try XCTUnwrap(episodes.first { $0.downloadPath == arrived.lastPathComponent })
+        XCTAssertEqual(protected.downloadStatus, .downloaded)
+        XCTAssertEqual(episodes.filter { $0.downloadPath == nil }.count, 1)
     }
 
     // MARK: downloadAndWait fast paths (#576)

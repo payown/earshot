@@ -40,8 +40,14 @@ enum DownloadPathReconciliation {
                 && identity == DirectoryIdentity(device: pathInfo.st_dev, inode: pathInfo.st_ino)
         }
 
+        func isCurrentPath() -> Bool {
+            var pathInfo = stat()
+            guard stat(url.path, &pathInfo) == 0 else { return false }
+            return identity == DirectoryIdentity(device: pathInfo.st_dev, inode: pathInfo.st_ino)
+        }
+
         func presence(name: String) -> FilePresence {
-            guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else { return .unknown }
+            guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.utf8.contains(0) else { return .unknown }
             var info = stat()
             if fstatat(descriptor, name, &info, AT_SYMLINK_NOFOLLOW) == 0 { return .present }
             return DownloadPathReconciliation.classifyFailedLookup(errno: errno)
@@ -120,35 +126,39 @@ enum DownloadPathReconciliation {
         return corrections
     }
 
-    struct BatchVerification {
-        let directoryValid: Bool
-        let missing: Set<URL>
-    }
-
-    /// Recheck missing candidates in one bounded batch on the caller's executor.
-    /// The opened folder must match the worker's folder and its current path.
-    static func verifyBatch(
-        _ corrections: [Correction], beforeFinalValidation: () -> Void = {}
-    ) -> BatchVerification {
+    /// Verify and apply each candidate without suspension. Per-file lookup and
+    /// folder identity validation remain immediately adjacent to the mutation.
+    static func verifyAndApplyBatch(
+        _ corrections: [Correction],
+        presenceOverride: (String) -> FilePresence? = { _ in nil },
+        beforePathValidation: () -> Void = {},
+        apply: (Correction) -> Void
+    ) {
         let candidates = corrections.filter { $0.checkedURL != nil }
         guard let first = candidates.first, let firstURL = first.checkedURL,
               let expected = first.directoryIdentity,
               let directory = DirectoryProbe(firstURL.deletingLastPathComponent()) else {
-            return BatchVerification(directoryValid: false, missing: [])
+            for correction in corrections where correction.checkedURL == nil { apply(correction) }
+            return
         }
         defer { directory.closeDescriptor() }
         guard directory.identity == expected, directory.isStillCurrent(),
               candidates.allSatisfy({ candidate in
                   candidate.checkedURL?.deletingLastPathComponent() == directory.url
                       && candidate.directoryIdentity == expected
-              }) else { return BatchVerification(directoryValid: false, missing: []) }
-        var missing: Set<URL> = []
-        for candidate in candidates where candidate.replacementName == nil {
-            guard let url = candidate.checkedURL else { continue }
-            if directory.presence(name: url.lastPathComponent) == .missing { missing.insert(url) }
+              }) else {
+            for correction in corrections where correction.checkedURL == nil { apply(correction) }
+            return
         }
-        beforeFinalValidation()
-        guard directory.isStillCurrent() else { return BatchVerification(directoryValid: false, missing: []) }
-        return BatchVerification(directoryValid: true, missing: missing)
+        for correction in corrections {
+            guard let url = correction.checkedURL else { apply(correction); continue }
+            if correction.replacementName == nil,
+               (presenceOverride(url.lastPathComponent) ?? directory.presence(name: url.lastPathComponent)) != .missing { continue }
+            beforePathValidation()
+            // Checking the current path after each lookup prevents a replaced
+            // directory from authorizing a mutation based on its old descriptor.
+            guard directory.isCurrentPath() else { continue }
+            apply(correction)
+        }
     }
 }
