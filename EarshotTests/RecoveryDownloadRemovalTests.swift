@@ -280,7 +280,7 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
         XCTAssertEqual(interruptedByGUID["missing"]?.volumeBoostRaw, "off")
         XCTAssertEqual(interruptedByGUID["pending"]?.volumeBoostRaw, "medium")
         XCTAssertEqual(interruptedByGUID["future"]?.volumeBoostRaw, "future-value")
-        XCTAssertEqual(interruptedByGUID["missing"]?.downloadStatus, .none)
+        XCTAssertEqual(interruptedByGUID["missing"]?.downloadStatus, DownloadStatus.none)
         XCTAssertNil(interruptedByGUID["missing"]?.downloadPath)
         XCTAssertNil(interruptedByGUID["no-boost"])
         XCTAssertEqual(interruptedByGUID["kept"]?.downloadStatus, .downloaded)
