@@ -41,12 +41,14 @@ final class ListeningPlacesServiceTests: XCTestCase {
         try setSelfReportedApp("earshot/0.0.1", in: file)
 
         let writer = LegacyFailureWriter()
+        let confirmation = LegacyConfirmationProbe()
         var canSpeak = false
         var announcements: [String] = []
         let service = ListeningPlacesService(
             writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
             canAnnounce: { canSpeak },
-            announceOlderFileFailure: { announcements.append($0) }
+            announceOlderFileFailure: { announcements.append($0) },
+            confirmOlderFile: { bookmark, deviceID, contents in try await confirmation.confirm(bookmark: bookmark, deviceID: deviceID, contents: contents) }
         )
         service.configure(context: container.mainContext)
         await service.chooseFolder(directory)
@@ -58,6 +60,9 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertTrue(announcements.isEmpty, "A folder-preparation failure is not a device-file write failure")
         canSpeak = false
         await service.setIncludeLabels(true)
+        let suppressedAttempts = await confirmation.attempts()
+        XCTAssertEqual(suppressedAttempts, 0, "An ineligible failure must not schedule a detached confirmation")
+        XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
         XCTAssertTrue(announcements.isEmpty, "A background or VoiceOver-off failure must not be spoken")
         canSpeak = true
         await service.writeNow()
