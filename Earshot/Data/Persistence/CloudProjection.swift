@@ -2428,9 +2428,9 @@ actor CloudProjectionCoordinator: ModelActor {
         try publishLocalFolderChanges(now: now, activatingFeedURL: feedURL)
     }
 
-    /// Records the destructive intent before the application-store transaction.
-    /// The projection store remains in place, so a force quit after this save
-    /// restarts from tombstones rather than re-importing the deleted library.
+    /// Marks the library rows currently present in the local projection store.
+    /// The caller coordinates the reset; this save does not prove remote delivery
+    /// or prevent another projection writer from changing the same rows.
     enum ResetProjectionError: Error {
         case uncommittedProjectionChanges
     }
