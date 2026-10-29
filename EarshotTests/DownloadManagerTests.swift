@@ -1757,6 +1757,37 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path), "Reconciliation must not recreate a missing directory")
     }
 
+    func testReconciliationRepairsExistingDirectoryBackupExclusion() async throws {
+        let context = TestStore.freshContext()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let episode = Episode(guid: "backup-folder", title: "Download", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: "audio.mp3")
+        try persistLocalDownloadState(for: [episode], in: context)
+        let corrections = try await DownloadPathReconciliation.scan(container: context.container, directoryURL: directory)
+        XCTAssertEqual(corrections.count, 1)
+        let excluded = try directory.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+        XCTAssertEqual(excluded, true)
+    }
+
+    func testReconciliationPreservesRowsWhenBackupExclusionFails() async throws {
+        let context = TestStore.freshContext()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let episode = Episode(guid: "backup-failed", title: "Download", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: "audio.mp3")
+        try persistLocalDownloadState(for: [episode], in: context)
+        let manager = makeManager(context)
+        await manager.reconcileDownloadPaths { container in
+            try await DownloadPathReconciliation.scan(container: container, directoryURL: directory,
+                                                       excludeFromBackup: { _ in throw CocoaError(.fileWriteNoPermission) })
+        }
+        XCTAssertEqual(episode.downloadPath, "audio.mp3")
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
     func testReconciliationPreservesIndeterminateFileAtScanAndFinalCheck() async throws {
         let context = TestStore.freshContext()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

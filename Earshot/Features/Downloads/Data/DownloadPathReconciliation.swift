@@ -78,6 +78,12 @@ enum DownloadPathReconciliation {
     static func scan(
         container: ModelContainer,
         directoryURL: URL? = existingDownloadsDirectory(),
+        excludeFromBackup: @Sendable (URL) throws -> Void = { url in
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var directory = url
+            try directory.setResourceValues(values)
+        },
         presenceOverride: @Sendable (String) -> FilePresence? = { _ in nil }
     ) async throws -> [Correction] {
         try Task.checkCancellation()
@@ -85,8 +91,21 @@ enum DownloadPathReconciliation {
         let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>(
             predicate: #Predicate { $0.downloadPath != nil }
         ))
-        let directory = directoryURL.flatMap(DirectoryProbe.init)
-        defer { directory?.closeDescriptor() }
+        let openedDirectory = directoryURL.flatMap(DirectoryProbe.init)
+        defer { openedDirectory?.closeDescriptor() }
+        let directory: DirectoryProbe?
+        if let openedDirectory, openedDirectory.isStillCurrent() {
+            do {
+                // Preserve the normal backup-exclusion repair without creating
+                // a missing folder. A failed or replaced folder is inconclusive.
+                try excludeFromBackup(openedDirectory.url)
+                directory = openedDirectory.isStillCurrent() ? openedDirectory : nil
+            } catch {
+                directory = nil
+            }
+        } else {
+            directory = nil
+        }
         var corrections: [Correction] = []
         for row in rows {
             try Task.checkCancellation()
