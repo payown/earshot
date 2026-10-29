@@ -2447,6 +2447,7 @@ actor CloudProjectionCoordinator: ModelActor {
         // A failing fetch or save must not leave partial tombstones in the
         // long-lived shared context. All rows live in this one projection store.
         let context = ModelContext(projectionContainer)
+        context.autosaveEnabled = false
         let podcastRows = try context.fetch(FetchDescriptor<CloudPodcastProjection>())
         for row in podcastRows where row.deletedAt == nil {
             row.deletedAt = now
