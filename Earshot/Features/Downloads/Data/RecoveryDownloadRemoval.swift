@@ -132,16 +132,23 @@ enum RecoveryDownloadRemoval {
     static func reconcileStoreIfNeeded(
         container: ModelContainer,
         markerURL: URL = markerURL,
-        journal: DownloadEventJournal = .shared
+        journal: DownloadEventJournal = .shared,
+        resolveDownloadURL: (String) -> URL? = { DownloadPaths.resolveLocalURL(storedValue: $0) },
+        hydrate: (ModelContext) throws -> Void = { try LocalStateStore.hydrate(in: $0, repairing: false) }
     ) throws {
         guard isPending(at: markerURL) else { return }
         let context = container.mainContext
         for row in try context.fetch(FetchDescriptor<LocalEpisodeState>()) {
             if let name = DownloadPaths.storedFileName(row.downloadPath),
-               let url = DownloadPaths.resolveLocalURL(storedValue: name),
+               let url = resolveDownloadURL(name),
                FileManager.default.fileExists(atPath: url.path) {
                 row.downloadPath = name
                 row.downloadStatus = .downloaded
+            } else if row.volumeBoostRaw != nil {
+                // Download recovery must retain this episode's independent
+                // volume setting, including raw values a newer app may know.
+                row.downloadPath = nil
+                row.downloadStatus = .none
             } else {
                 context.delete(row)
             }
@@ -149,7 +156,7 @@ enum RecoveryDownloadRemoval {
         try context.save()
         try failIfInjected(at: .afterStoreSave)
         try journal.acknowledgeAllForRecovery()
-        try LocalStateStore.hydrate(in: context, repairing: false)
+        try hydrate(context)
         try failIfInjected(at: .beforeMarkerRemoval)
         try finish(at: markerURL)
     }

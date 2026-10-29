@@ -186,3 +186,139 @@ final class RecoveryDownloadRemovalTests: XCTestCase {
         try container.mainContext.save()
     }
 }
+
+/// Isolated from the default recovery marker and real app downloads.
+@MainActor
+final class RecoveryVolumeSettingsTests: XCTestCase {
+    func testRecoveryKeepsEpisodeBoostAfterStoreSaveInterruptionAndReopen() throws {
+        try exerciseRecovery(realHydration: false)
+    }
+
+    // Run alone in a disposable test-host process: real hydration clears the
+    // process-wide LocalRuntimeState before populating it from this store.
+    func testRecoveryWithRealHydrationInDisposableHost() throws {
+        guard ProcessInfo.processInfo.environment["EARSHOT_TEST_REAL_RECOVERY_HYDRATION"] == "1" else {
+            throw XCTSkip("Run only in an explicitly isolated test-host process")
+        }
+        try exerciseRecovery(realHydration: true)
+    }
+
+    // The store is reopened in this process; this does not simulate process
+    // termination, power loss, or a real customer backup restore.
+    private func exerciseRecovery(realHydration: Bool) throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "RecoveryBoost-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let marker = directory.appending(path: "pending.json")
+        let journalURL = directory.appending(path: "events.json")
+        let survivingFile = directory.appending(path: "kept.mp3")
+        let survivingBytes = Data("download fixture".utf8)
+        try survivingBytes.write(to: survivingFile)
+        defer {
+            RecoveryDownloadRemoval.injectedFailurePoint = nil
+            try? FileManager.default.removeItem(at: directory)
+        }
+        func open() throws -> ModelContainer {
+            let schema = Schema(versionedSchema: EarshotSchemaV13.self)
+            return try ModelContainer(for: schema, configurations:
+                ModelConfiguration("FutureMirrored", schema: Schema(EarshotSchemaV13.mirroredModels),
+                                   url: directory.appending(path: "primary.store"), cloudKitDatabase: .none),
+                ModelConfiguration("DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                                   url: directory.appending(path: "local.store"), cloudKitDatabase: .none))
+        }
+        let feed = "https://example.com/feed"
+        var hydrateCalls = 0
+        do {
+            let container = try open()
+            let context = container.mainContext
+            let show = Podcast(feedURL: feed, title: "Show")
+            let episode = Episode(guid: "missing", title: "Episode", audioURL: "https://example.com/audio")
+            episode.podcast = show
+            let keptEpisode = Episode(guid: "kept", title: "Kept", audioURL: "https://example.com/kept")
+            keptEpisode.podcast = show
+            context.insert(show)
+            context.insert(episode)
+            context.insert(keptEpisode)
+            context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "missing",
+                                             downloadStatus: .downloaded, downloadPath: "missing-\(UUID().uuidString).mp3",
+                                             volumeBoost: .off))
+            context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "pending",
+                                             downloadStatus: .pending, volumeBoost: .medium))
+            context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "no-download", volumeBoost: .high))
+            context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "kept",
+                                             downloadStatus: .downloading, downloadPath: "kept.mp3", volumeBoost: .low))
+            let future = LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "future", downloadStatus: .downloading)
+            future.volumeBoostRaw = "future-value"
+            context.insert(future)
+            context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "no-boost", downloadStatus: .pending))
+            try context.save()
+            let journal = DownloadEventJournal(url: journalURL)
+            journal.record(taskKey: "feed|missing", outcome: .failed)
+            try RecoveryDownloadRemoval.begin(at: marker)
+            RecoveryDownloadRemoval.injectedFailurePoint = .afterStoreSave
+            XCTAssertThrowsError(try RecoveryDownloadRemoval.reconcileStoreIfNeeded(
+                container: container, markerURL: marker, journal: journal,
+                resolveDownloadURL: { directory.appending(path: $0) },
+                hydrate: { context in
+                    hydrateCalls += 1
+                    if realHydration { try LocalStateStore.hydrate(in: context, repairing: false) }
+                }
+            )) {
+                XCTAssertEqual($0 as? RecoveryDownloadRemoval.InjectedFailure, .init(point: .afterStoreSave))
+            }
+            XCTAssertTrue(RecoveryDownloadRemoval.isPending(at: marker))
+        }
+        RecoveryDownloadRemoval.injectedFailurePoint = nil
+        let reopened = try open()
+        let journal = DownloadEventJournal(url: journalURL)
+        let pendingBeforeRetry = journal.pendingEvents()
+        XCTAssertEqual(pendingBeforeRetry.count, 1)
+        XCTAssertEqual(pendingBeforeRetry.first?.taskKey, "feed|missing")
+        let interruptedContext = ModelContext(reopened)
+        let interrupted = try interruptedContext.fetch(FetchDescriptor<LocalEpisodeState>())
+        let interruptedByGUID = Dictionary(uniqueKeysWithValues: interrupted.map { ($0.episodeGUID, $0) })
+        XCTAssertEqual(interruptedByGUID["missing"]?.volumeBoostRaw, "off")
+        XCTAssertEqual(interruptedByGUID["pending"]?.volumeBoostRaw, "medium")
+        XCTAssertEqual(interruptedByGUID["future"]?.volumeBoostRaw, "future-value")
+        XCTAssertEqual(interruptedByGUID["missing"]?.downloadStatus, DownloadStatus.none)
+        XCTAssertNil(interruptedByGUID["missing"]?.downloadPath)
+        XCTAssertNil(interruptedByGUID["no-boost"])
+        XCTAssertEqual(interruptedByGUID["kept"]?.downloadStatus, .downloaded)
+        try RecoveryDownloadRemoval.reconcileStoreIfNeeded(
+            container: reopened, markerURL: marker, journal: journal,
+            resolveDownloadURL: { directory.appending(path: $0) },
+            hydrate: { context in
+                hydrateCalls += 1
+                if realHydration { try LocalStateStore.hydrate(in: context, repairing: false) }
+            }
+        )
+        let context = ModelContext(reopened)
+        let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
+        let byGUID = Dictionary(uniqueKeysWithValues: rows.map { ($0.episodeGUID, $0) })
+        XCTAssertEqual(Set(byGUID.keys), Set(["missing", "pending", "no-download", "future", "kept"]))
+        XCTAssertEqual(byGUID["missing"]?.volumeBoostRaw, "off")
+        XCTAssertEqual(byGUID["pending"]?.volumeBoostRaw, "medium")
+        XCTAssertEqual(byGUID["no-download"]?.volumeBoostRaw, "high")
+        XCTAssertEqual(byGUID["future"]?.volumeBoostRaw, "future-value")
+        XCTAssertEqual(byGUID["kept"]?.volumeBoostRaw, "low")
+        XCTAssertEqual(byGUID["kept"]?.downloadStatus, .downloaded)
+        XCTAssertEqual(byGUID["kept"]?.downloadPath, "kept.mp3")
+        XCTAssertEqual(try Data(contentsOf: survivingFile), survivingBytes)
+        for row in rows where row.episodeGUID != "kept" {
+            XCTAssertEqual(row.downloadStatus, .none)
+            XCTAssertNil(row.downloadPath)
+        }
+        let episodes = try context.fetch(FetchDescriptor<Episode>())
+        let episode = try XCTUnwrap(episodes.first { $0.guid == "missing" })
+        XCTAssertEqual(LocalStateStore.volumeBoost(for: episode, in: context), .off)
+        if realHydration {
+            let keptEpisode = try XCTUnwrap(episodes.first { $0.guid == "kept" })
+            let state = try XCTUnwrap(LocalRuntimeState.shared.episode(keptEpisode.persistentModelID))
+            XCTAssertEqual(state.0, .downloaded)
+            XCTAssertEqual(state.1, "kept.mp3")
+        }
+        XCTAssertFalse(RecoveryDownloadRemoval.isPending(at: marker))
+        XCTAssertEqual(hydrateCalls, 1)
+        XCTAssertTrue(journal.pendingEvents().isEmpty)
+    }
+}
