@@ -708,7 +708,8 @@ final class DownloadManagerTests: XCTestCase {
         for outcome in [PendingDownloadTerminalEvent.Outcome.failed, .finished(fileName: audio.lastPathComponent)] {
             let storeDirectory = directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
             try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
-            let context = try openStore(at: storeDirectory).mainContext
+            let container = try openStore(at: storeDirectory)
+            let context = container.mainContext
             let episode = Episode(guid: UUID().uuidString, title: "Episode", audioURL: "https://h/a.mp3",
                                   downloadStatus: .downloading)
             try persistLocalDownloadState(for: [episode], in: context)
@@ -759,6 +760,7 @@ final class DownloadManagerTests: XCTestCase {
                         XCTAssertEqual(resolved, audio)
                         XCTAssertEqual(try Data(contentsOf: resolved), bytes)
                     }
+                    withExtendedLifetime(reopened) {}
                 } catch {
                     XCTFail("Could not reopen synthetic download state: \(error)")
                     return false
@@ -777,12 +779,14 @@ final class DownloadManagerTests: XCTestCase {
                 XCTAssertEqual(episode.downloadPath, audio.lastPathComponent)
             }
             XCTAssertTrue(DownloadEventJournal(url: journalURL).pendingEvents().isEmpty)
+            withExtendedLifetime(container) {}
         }
     }
 
     func testTerminalEventsKeepExistingParentlessBehavior() throws {
         for outcome in [PendingDownloadTerminalEvent.Outcome.failed, .finished(fileName: "\(UUID().uuidString).mp3")] {
-            let context = try ModelContainerFactory.makeInMemory().mainContext
+            let container = try ModelContainerFactory.makeInMemory()
+            let context = container.mainContext
             let episode = Episode(guid: UUID().uuidString, title: "Episode", audioURL: "https://h/a.mp3",
                                   downloadStatus: .downloading)
             context.insert(episode)
@@ -804,6 +808,7 @@ final class DownloadManagerTests: XCTestCase {
             case .failed: XCTAssertEqual(episode.downloadStatus, .failed)
             case .finished: XCTAssertEqual(episode.downloadStatus, .downloaded)
             }
+            withExtendedLifetime(container) {}
         }
     }
 
