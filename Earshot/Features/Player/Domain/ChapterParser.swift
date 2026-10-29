@@ -13,11 +13,11 @@ enum ChapterParser {
     static func parsePodcastIndexJSON(_ data: Data) -> [Chapter] {
         guard
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let raw = root["chapters"] as? [Any]
+            let raw = root["chapters"] as? [[String: Any]]
         else { return [] }
 
         var chapters: [Chapter] = []
-        for case let item as [String: Any] in raw {
+        for item in raw {
             if let toc = item["toc"] as? Bool, toc == false { continue }
             guard let number = item["startTime"] as? NSNumber,
                   CFGetTypeID(number) != CFBooleanGetTypeID(),

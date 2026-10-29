@@ -39,7 +39,6 @@ final class ChapterParserTests: XCTestCase {
           {"startTime":-1,"title":"Negative"},
           {"startTime":1e100,"title":"Huge"},
           {"startTime":true,"title":"Boolean"},
-          "not a chapter",
           {"startTime":61.75,"title":"Fraction"},
           {"startTime":12,"toc":false},
           {"startTime":120}
@@ -49,6 +48,11 @@ final class ChapterParserTests: XCTestCase {
         XCTAssertEqual(chapters.map(\.startTime), [0, 61.75, 120])
         XCTAssertEqual(chapters.map(\.title), ["Intro", "Fraction", "Chapter 3"])
         XCTAssertEqual(chapters.map(\.index), [0, 1, 2])
+    }
+
+    func testMalformedChapterArrayRetainsExistingFallbackBehavior() {
+        let json = #"{"chapters":[{"startTime":0},"not a chapter"]}"#.data(using: .utf8)!
+        XCTAssertTrue(ChapterParser.parsePodcastIndexJSON(json).isEmpty)
     }
 
     func testChapterTimeValidationRejectsNonfiniteAndOutOfRangeValues() {
