@@ -1090,8 +1090,10 @@ final class DownloadManager {
         resolve: (String, ModelContext) throws -> Episode? = {
             try DownloadTaskKey.findEpisode(matching: $0, in: $1)
         },
+        fetchLocalRows: (EpisodeLocalKey, ModelContext) throws -> [LocalEpisodeState] = LocalStateStore.episodeRowsThrowing,
         persist: (ModelContext) throws -> Void = { try $0.save() },
-        acknowledge: (PendingDownloadTerminalEvent) -> Bool = { delegate.acknowledge($0) }
+        acknowledge: (PendingDownloadTerminalEvent) -> Bool = { delegate.acknowledge($0) },
+        isRecoveryPending: () -> Bool = { RecoveryDownloadRemoval.isPending }
     ) -> Bool {
         func acknowledgeAppliedEvent() -> Bool {
             guard acknowledge(event) else {
@@ -1104,7 +1106,7 @@ final class DownloadManager {
         if pendingAcknowledgements.contains(event.id) {
             return acknowledgeAppliedEvent()
         }
-        if RecoveryDownloadRemoval.isPending {
+        if isRecoveryPending() {
             if case .finished(let fileName) = event.outcome,
                let url = DownloadPaths.resolveLocalURL(storedValue: fileName) {
                 try? FileManager.default.removeItem(at: url)
@@ -1117,9 +1119,10 @@ final class DownloadManager {
             switch event.outcome {
             case .finished(let fileName):
                 try complete(taskKey: event.taskKey, fileName: fileName,
-                             episode: episode, context: context, persist: persist)
+                             episode: episode, context: context, fetchLocalRows: fetchLocalRows, persist: persist)
             case .failed:
-                try fail(taskKey: event.taskKey, episode: episode, context: context, persist: persist)
+                try fail(taskKey: event.taskKey, episode: episode, context: context,
+                         fetchLocalRows: fetchLocalRows, persist: persist)
             }
             return acknowledgeAppliedEvent()
         } catch {
@@ -1130,6 +1133,7 @@ final class DownloadManager {
 
     private static func complete(
         taskKey: String, fileName: String, episode: Episode?, context: ModelContext,
+        fetchLocalRows: (EpisodeLocalKey, ModelContext) throws -> [LocalEpisodeState],
         persist: (ModelContext) throws -> Void
     ) throws {
         let identityKey = DownloadTransferKey.identityKey(from: taskKey)
@@ -1169,10 +1173,10 @@ final class DownloadManager {
         // Store only the file NAME: iOS relocates the app container on every
         // app update, so an absolute path goes stale (#575). Reads resolve the
         // name against the current container via `Episode.localAudioURL`.
-        episode.downloadPath = fileName
         // Terminal: this also drops the ActiveDownload row, in the same save
         // (#701).
-        ActiveDownload.setDownloadStatus(.downloaded, on: episode, in: context)
+        try LocalStateStore.setTerminalDownloadState(.downloaded, path: fileName, on: episode,
+                                                     in: context, fetchRows: fetchLocalRows)
         try persist(context)
         resolveWaiters(for: identityKey, success: true)
         // Status is durable and readable in Download activity. Per-episode
@@ -1214,6 +1218,7 @@ final class DownloadManager {
 
     private static func fail(
         taskKey: String, episode: Episode?, context: ModelContext,
+        fetchLocalRows: (EpisodeLocalKey, ModelContext) throws -> [LocalEpisodeState],
         persist: (ModelContext) throws -> Void
     ) throws {
         guard let episode else {
@@ -1231,7 +1236,8 @@ final class DownloadManager {
         }
         // Don't clobber a state that already moved on (e.g. the user removed it).
         guard episode.downloadStatus == .downloading else { return }
-        ActiveDownload.setDownloadStatus(.failed, on: episode, in: context)
+        try LocalStateStore.setTerminalDownloadState(.failed, path: episode.downloadPath, on: episode,
+                                                     in: context, fetchRows: fetchLocalRows)
         try persist(context)
         resolveWaiters(for: DownloadTransferKey.identityKey(from: taskKey), success: false)
         AppLog.networking.error("Download failed: \(episode.title, privacy: .public)")

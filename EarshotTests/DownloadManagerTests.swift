@@ -687,6 +687,94 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertTrue(DownloadEventJournal(url: directory.appendingPathComponent("events.json")).pendingEvents().isEmpty)
     }
 
+    func testTerminalEventsRetainJournalAndExistingStateWhenLocalRowFetchFails() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            DownloadManager.setContainerForTesting(nil)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let audio = directory.appendingPathComponent("\(UUID().uuidString).mp3")
+        let bytes = Data("synthetic downloaded audio".utf8)
+        try bytes.write(to: audio)
+        for outcome in [PendingDownloadTerminalEvent.Outcome.failed, .finished(fileName: audio.lastPathComponent)] {
+            let context = TestStore.freshContext()
+            let episode = Episode(guid: UUID().uuidString, title: "Episode", audioURL: "https://h/a.mp3",
+                                  downloadStatus: .downloading)
+            try persistLocalDownloadState(for: [episode], in: context)
+            defer { LocalRuntimeState.shared.removeEpisode(episode.persistentModelID) }
+            let original = try XCTUnwrap(context.fetch(FetchDescriptor<LocalEpisodeState>()).first)
+            original.volumeBoostRaw = "future-boost"
+            try context.save()
+            let journalURL = directory.appendingPathComponent("\(UUID().uuidString).json")
+            let journal = DownloadEventJournal(url: journalURL)
+            let event = journal.record(taskKey: episode.guid, outcome: outcome)
+            DownloadManager.setContainerForTesting(context.container)
+            var fetches = 0
+            var acknowledgements = 0
+            XCTAssertFalse(DownloadManager.handle(event, resolve: { _, _ in episode }, fetchLocalRows: { _, _ in
+                fetches += 1
+                throw DownloadEventTestError.injected
+            }, acknowledge: { event in
+                acknowledgements += 1
+                return journal.acknowledge(event.id)
+            }, isRecoveryPending: { false }))
+            XCTAssertEqual(fetches, 1)
+            XCTAssertEqual(acknowledgements, 0)
+            XCTAssertFalse(context.hasChanges)
+            XCTAssertEqual(episode.downloadStatus, .downloading)
+            XCTAssertNil(episode.downloadPath)
+            let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
+            XCTAssertEqual(rows.count, 1)
+            XCTAssertEqual(rows.first?.volumeBoostRaw, "future-boost")
+            XCTAssertEqual(rows.first?.downloadStatus, .downloading)
+            XCTAssertEqual(try Data(contentsOf: audio), bytes)
+            XCTAssertEqual(DownloadEventJournal(url: journalURL).pendingEvents(), [event])
+
+            XCTAssertTrue(DownloadManager.handle(event, resolve: { _, _ in episode },
+                                                   acknowledge: { journal.acknowledge($0.id) },
+                                                   isRecoveryPending: { false }))
+            XCTAssertEqual(try context.fetch(FetchDescriptor<LocalEpisodeState>()).count, 1)
+            XCTAssertEqual(try context.fetch(FetchDescriptor<LocalEpisodeState>()).first?.volumeBoostRaw, "future-boost")
+            switch outcome {
+            case .failed:
+                XCTAssertEqual(episode.downloadStatus, .failed)
+                XCTAssertNil(episode.downloadPath)
+            case .finished:
+                XCTAssertEqual(episode.downloadStatus, .downloaded)
+                XCTAssertEqual(episode.downloadPath, audio.lastPathComponent)
+            }
+            XCTAssertTrue(DownloadEventJournal(url: journalURL).pendingEvents().isEmpty)
+        }
+    }
+
+    func testTerminalEventsKeepExistingParentlessBehavior() throws {
+        for outcome in [PendingDownloadTerminalEvent.Outcome.failed, .finished(fileName: "\(UUID().uuidString).mp3")] {
+            let context = TestStore.freshContext()
+            let episode = Episode(guid: UUID().uuidString, title: "Episode", audioURL: "https://h/a.mp3",
+                                  downloadStatus: .downloading)
+            context.insert(episode)
+            try context.save()
+            defer {
+                LocalRuntimeState.shared.removeEpisode(episode.persistentModelID)
+                DownloadManager.setContainerForTesting(nil)
+            }
+            DownloadManager.setContainerForTesting(context.container)
+            let event = PendingDownloadTerminalEvent(taskKey: episode.guid, outcome: outcome)
+            var acknowledged = false
+            XCTAssertTrue(DownloadManager.handle(event, resolve: { _, _ in episode }, fetchLocalRows: { _, _ in
+                XCTFail("Parentless episodes have no feed-keyed local row")
+                throw DownloadEventTestError.injected
+            }, acknowledge: { _ in acknowledged = true; return true }, isRecoveryPending: { false }))
+            XCTAssertTrue(acknowledged)
+            XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalEpisodeState>()), 0)
+            switch outcome {
+            case .failed: XCTAssertEqual(episode.downloadStatus, .failed)
+            case .finished: XCTAssertEqual(episode.downloadStatus, .downloaded)
+            }
+        }
+    }
+
     func testFailedJournalAcknowledgementRetriesWithoutDeletingOwnedAudio() throws {
         let context = TestStore.freshContext()
         let episode = Episode(guid: "ack-retry", title: "Retry", audioURL: "https://h/a.mp3",
