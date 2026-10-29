@@ -197,9 +197,14 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
     // Run alone in a disposable test-host process: real hydration clears the
     // process-wide LocalRuntimeState before populating it from this store.
     func testRecoveryWithRealHydrationInDisposableHost() throws {
+        guard ProcessInfo.processInfo.environment["EARSHOT_TEST_REAL_RECOVERY_HYDRATION"] == "1" else {
+            throw XCTSkip("Run only in an explicitly isolated test-host process")
+        }
         try exerciseRecovery(realHydration: true)
     }
 
+    // The store is reopened in this process; this does not simulate process
+    // termination, power loss, or a real customer backup restore.
     private func exerciseRecovery(realHydration: Bool) throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "RecoveryBoost-\(UUID().uuidString)", directoryHint: .isDirectory)
