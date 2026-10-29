@@ -161,6 +161,56 @@ final class AppRuntimeTests: XCTestCase {
         throw CocoaError(.coderInvalidValue)
     }
 
+    func testConcurrentResetIsRejectedBeforeSecondPreDeleteNotification() async throws {
+        let app = try ModelContainerFactory.makeInMemory()
+        let gate = ActivationGate()
+        let refresh = Task {
+            await BackgroundFeedRefresher.runUserInitiatedRefresh(trigger: .manualToolbar, total: 0) {
+                await gate.waitUntilReleased()
+                return SubscriptionRefreshReport(notifications: [], attempted: 0, total: 0,
+                    succeeded: 0, failed: 0, cancelled: true, intendedInsertions: 0, durableInsertions: 0)
+            }
+        }
+        await gate.waitUntilStarted()
+        let notifications = Mutex(0)
+        let fileResets = Mutex(0)
+        let observer = NotificationCenter.default.addObserver(
+            forName: .earshotWillDeleteEpisodes, object: nil, queue: nil
+        ) { _ in notifications.withLock { $0 += 1 } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let runtime = AppRuntime(load: .ready(app), mode: .testHost, fileResetOperation: {
+            fileResets.withLock { $0 += 1 }
+            return false
+        })
+        let first = Task { await runtime.resetLocalData() }
+        while !runtime.isResettingLocalData { await Task.yield() }
+        let secondResult = Mutex<Bool?>(nil)
+        let second = Task {
+            let result = await runtime.resetLocalData()
+            secondResult.withLock { $0 = result }
+        }
+        for _ in 0..<200 {
+            if secondResult.withLock({ $0 != nil }) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let rejectedBeforeRelease = secondResult.withLock { $0 == false }
+        let notificationsBeforeRelease = notifications.withLock { $0 }
+        await gate.release()
+        _ = await refresh.value
+        _ = await first.value
+        await second.value
+        XCTAssertTrue(rejectedBeforeRelease, "The second reset must return while the first is still draining")
+        XCTAssertEqual(notificationsBeforeRelease, 1)
+        XCTAssertEqual(notifications.withLock { $0 }, 1)
+        XCTAssertEqual(fileResets.withLock { $0 }, 1)
+        XCTAssertFalse(runtime.isResettingLocalData)
+        let retry = await runtime.resetLocalData()
+        XCTAssertFalse(retry, "The test reset operation intentionally fails")
+        XCTAssertEqual(notifications.withLock { $0 }, 2, "A later reset can begin after failure")
+        XCTAssertEqual(fileResets.withLock { $0 }, 2)
+        XCTAssertFalse(runtime.isResettingLocalData)
+    }
+
     func testDirtyCloudResetFailurePresentsAlertWithoutTouchingLocalFiles() async throws {
         let app = try ModelContainerFactory.makeInMemory()
         let projection = try projectionContainer()
