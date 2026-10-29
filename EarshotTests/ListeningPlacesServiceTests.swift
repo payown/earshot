@@ -97,15 +97,20 @@ final class ListeningPlacesServiceTests: XCTestCase {
         initial.releasePersistence()
         try setSelfReportedApp("another-app/0.0.1", in: file)
         let writer = LegacyFailureWriter()
+        let confirmation = LegacyConfirmationProbe()
         var announcements: [String] = []
         let service = ListeningPlacesService(
             writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
-            canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) }
+            canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) },
+            confirmOlderFile: { bookmark, deviceID, contents in try await confirmation.confirm(bookmark: bookmark, deviceID: deviceID, contents: contents) }
         )
         service.configure(context: container.mainContext)
         await service.chooseFolder(directory)
         await service.setIncludeLabels(true)
         guard case .failed = service.status else { return XCTFail("The injected write must fail") }
+        let confirmationAttempts = await confirmation.attempts()
+        XCTAssertEqual(confirmationAttempts, 0, "Foreign metadata must not schedule a confirmation")
+        XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
         XCTAssertTrue(announcements.isEmpty)
         service.releasePersistence()
     }
@@ -179,6 +184,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
             )
             service.configure(context: container.mainContext)
             await service.chooseFolder(directory)
+            let deliveriesBeforeWrite = service.olderConfirmationDeliveriesForTesting
             await writer.holdNextWrite()
             let write = Task { await service.setIncludeLabels(true) }
             await writer.waitUntilHeld()
@@ -190,7 +196,12 @@ final class ListeningPlacesServiceTests: XCTestCase {
             }
             await writer.resumeWrite()
             await write.value
-            await confirmation.waitUntilFinished()
+            for _ in 0..<100 where service.olderConfirmationDeliveriesForTesting == deliveriesBeforeWrite {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(service.olderConfirmationDeliveriesForTesting, deliveriesBeforeWrite + 1,
+                           "The service must process the confirmation result before checking speech")
+            XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
             guard case .failed = service.status else { return XCTFail("The injected write must fail") }
             XCTAssertTrue(announcements.isEmpty, "Changed or unreadable bytes must not be identified as the old file")
             service.releasePersistence()
@@ -220,14 +231,20 @@ final class ListeningPlacesServiceTests: XCTestCase {
             try setSelfReportedApp("earshot/0.0.1", in: file)
             let writer = LegacyFailureWriter()
             await writer.setFailure(error)
+            let confirmation = LegacyConfirmationProbe()
             var announcements: [String] = []
             let service = ListeningPlacesService(
                 writeDeviceFile: { bookmark, deviceID, data in try await writer.write(bookmark: bookmark, deviceID: deviceID, data: data) },
-                canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) }
+                canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) },
+                confirmOlderFile: { bookmark, deviceID, contents in try await confirmation.confirm(bookmark: bookmark, deviceID: deviceID, contents: contents) }
             )
             service.configure(context: container.mainContext)
             await service.chooseFolder(directory)
             await service.setIncludeLabels(true)
+            guard case .failed = service.status else { return XCTFail("The injected provider error must reach the write failure path") }
+            let confirmationAttempts = await confirmation.attempts()
+            XCTAssertEqual(confirmationAttempts, 0, "Cancellation must not schedule a confirmation")
+            XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
             XCTAssertTrue(announcements.isEmpty)
             service.releasePersistence()
         }
@@ -334,9 +351,13 @@ final class ListeningPlacesServiceTests: XCTestCase {
         await service.stopSharingAndRemoveDeviceFile()
         XCTAssertEqual(service.status, .notConfigured)
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        let deliveriesBeforeResume = service.olderConfirmationDeliveriesForTesting
         await confirmation.resume()
-        await confirmation.waitUntilFinished()
-        for _ in 0..<10 { await Task.yield() }
+        for _ in 0..<100 where service.olderConfirmationDeliveriesForTesting == deliveriesBeforeResume {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(service.olderConfirmationDeliveriesForTesting, deliveriesBeforeResume + 1)
+        XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
         XCTAssertTrue(announcements.isEmpty, "A confirmed write or removal invalidates the old failure")
         service.releasePersistence()
     }

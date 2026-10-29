@@ -724,6 +724,9 @@ final class ListeningPlacesService {
 
     private func finishOlderFileFailureConfirmation(_ candidate: ConfirmationCandidate, confirmationID: UUID, matches: Bool) {
         guard olderConfirmationInFlight == confirmationID else { return }
+#if DEBUG
+        defer { olderConfirmationDeliveriesForTesting += 1 }
+#endif
         olderConfirmationInFlight = nil
         if matches, isEligibleOlderConfirmation(candidate), var current = olderFileObservation {
             current.announcedFailure = true
@@ -794,5 +797,6 @@ final class ListeningPlacesService {
 #if DEBUG
     var isRemovingDeviceFileForTesting: Bool { removingDeviceFile }
     var isOlderConfirmationInFlightForTesting: Bool { olderConfirmationInFlight != nil }
+    @ObservationIgnored private(set) var olderConfirmationDeliveriesForTesting = 0
 #endif
 }
