@@ -190,12 +190,15 @@ final class RecoveryDownloadRemovalTests: XCTestCase {
 /// Isolated from the default recovery marker and real app downloads.
 @MainActor
 final class RecoveryVolumeSettingsTests: XCTestCase {
-    func testRecoveryKeepsEpisodeBoostAcrossFailedSaveBoundaryAndReopen() throws {
+    func testRecoveryKeepsEpisodeBoostAfterStoreSaveInterruptionAndReopen() throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "RecoveryBoost-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let marker = directory.appending(path: "pending.json")
         let journalURL = directory.appending(path: "events.json")
+        let survivingFile = directory.appending(path: "kept.mp3")
+        let survivingBytes = Data("download fixture".utf8)
+        try survivingBytes.write(to: survivingFile)
         defer {
             RecoveryDownloadRemoval.injectedFailurePoint = nil
             try? FileManager.default.removeItem(at: directory)
@@ -223,6 +226,8 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
             context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "pending",
                                              downloadStatus: .pending, volumeBoost: .medium))
             context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "no-download", volumeBoost: .high))
+            context.insert(LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "kept",
+                                             downloadStatus: .downloading, downloadPath: "kept.mp3", volumeBoost: .low))
             let future = LocalEpisodeState(podcastFeedURL: feed, episodeGUID: "future", downloadStatus: .downloading)
             future.volumeBoostRaw = "future-value"
             context.insert(future)
@@ -250,12 +255,16 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
         let context = ModelContext(reopened)
         let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
         let byGUID = Dictionary(uniqueKeysWithValues: rows.map { ($0.episodeGUID, $0) })
-        XCTAssertEqual(Set(byGUID.keys), Set(["missing", "pending", "no-download", "future"]))
+        XCTAssertEqual(Set(byGUID.keys), Set(["missing", "pending", "no-download", "future", "kept"]))
         XCTAssertEqual(byGUID["missing"]?.volumeBoostRaw, "off")
         XCTAssertEqual(byGUID["pending"]?.volumeBoostRaw, "medium")
         XCTAssertEqual(byGUID["no-download"]?.volumeBoostRaw, "high")
         XCTAssertEqual(byGUID["future"]?.volumeBoostRaw, "future-value")
-        for row in rows {
+        XCTAssertEqual(byGUID["kept"]?.volumeBoostRaw, "low")
+        XCTAssertEqual(byGUID["kept"]?.downloadStatus, .downloaded)
+        XCTAssertEqual(byGUID["kept"]?.downloadPath, "kept.mp3")
+        XCTAssertEqual(try Data(contentsOf: survivingFile), survivingBytes)
+        for row in rows where row.episodeGUID != "kept" {
             XCTAssertEqual(row.downloadStatus, .none)
             XCTAssertNil(row.downloadPath)
         }
