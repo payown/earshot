@@ -69,6 +69,21 @@ final class PlayerAsyncMetadataTests: XCTestCase {
         player.stopAndUnload()
     }
 
+    func testPlayerRejectsInvalidChapterTimesAndReindexesSurvivors() {
+        let player = PlayerService()
+        player.setChapters([
+            Chapter(index: 0, startTime: -.infinity, title: "Bad"),
+            Chapter(index: 1, startTime: 0.5, title: "First", imageURL: "https://example.com/image"),
+            Chapter(index: 2, startTime: .nan, title: "Bad too"),
+            Chapter(index: 3, startTime: 61.75, title: "Second"),
+            Chapter(index: 4, startTime: Chapter.maximumStartTimeExclusive, title: "Huge")
+        ])
+        XCTAssertEqual(player.chapterCount, 2)
+        XCTAssertEqual(player.loadedChapterSnapshot.map(\.startTime), [0.5, 61.75])
+        XCTAssertEqual(player.loadedChapterSnapshot.map(\.index), [0, 1])
+        XCTAssertEqual(player.loadedChapterSnapshot.first?.imageURL, "https://example.com/image")
+    }
+
     func testChapterResultAfterStopIsDiscarded() async {
         let gate = MetadataGate<[Chapter]>()
         let player = PlayerService(chapterLoader: { _, _, _, _ in await gate.load() }, artworkLoader: { _ in nil })

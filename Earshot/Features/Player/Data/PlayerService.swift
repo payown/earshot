@@ -2215,9 +2215,9 @@ final class PlayerService {
 
     /// Supplies chapters to the engine and its presentation surfaces.
     func setChapters(_ chapters: [Chapter]) {
-        currentChapters = chapters
+        currentChapters = chapters.removingInvalidStartTimes()
         lastAutoSkipFromChapterIndex = nil
-        chapterCount = chapters.count
+        chapterCount = currentChapters.count
         // Force a refresh: a fresh list means the cached index may now point at a
         // different chapter (or none), so don't let updateCurrentChapter's
         // same-index early-return keep a stale title.

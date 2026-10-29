@@ -112,7 +112,7 @@ struct ChapterService {
             var chapters: [Chapter] = []
             for (i, group) in groups.enumerated() {
                 let start = group.timeRange.start.seconds
-                guard start.isFinite else { continue }
+                guard Chapter.isValidStartTime(start) else { continue }
                 let titleItem = group.items.first { $0.commonKey == .commonKeyTitle }
                 let title = (try? await titleItem?.load(.stringValue)) ?? nil
                 chapters.append(
