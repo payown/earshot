@@ -60,6 +60,10 @@ enum DownloadPathReconciliation {
         errno == ENOENT ? .missing : .unknown
     }
 
+    static func isSafeStoredPath(_ path: String) -> Bool {
+        !path.utf8.contains(0)
+    }
+
     struct Correction: Sendable {
         let key: EpisodeLocalKey
         let originalPath: String
@@ -109,7 +113,7 @@ enum DownloadPathReconciliation {
         var corrections: [Correction] = []
         for row in rows {
             try Task.checkCancellation()
-            guard let path = row.downloadPath else { continue }
+            guard let path = row.downloadPath, isSafeStoredPath(path) else { continue }
             let url: URL?
             let replacement: String?
             if let name = DownloadPaths.storedFileName(path) {
@@ -171,8 +175,9 @@ enum DownloadPathReconciliation {
         }
         for correction in corrections {
             guard let url = correction.checkedURL else { apply(correction); continue }
-            if correction.replacementName == nil,
-               (presenceOverride(url.lastPathComponent) ?? directory.presence(name: url.lastPathComponent)) != .missing { continue }
+            let presence = presenceOverride(url.lastPathComponent) ?? directory.presence(name: url.lastPathComponent)
+            let expected: FilePresence = correction.replacementName == nil ? .missing : .present
+            guard presence == expected else { continue }
             beforePathValidation()
             // Checking the current path after each lookup prevents a replaced
             // directory from authorizing a mutation based on its old descriptor.

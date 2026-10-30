@@ -1909,6 +1909,57 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, .downloaded)
     }
 
+    func testReconciliationRejectsNULInLegacyParentWhenFileIsPresentOrMissing() throws {
+        for fileExists in [false, true] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let name = "audio.mp3"
+            let file = directory.appendingPathComponent(name)
+            if fileExists { try Data("audio".utf8).write(to: file) }
+            let path = "/old\0folder/\(name)"
+            // The test store truncates NULs on save, so exercise the scanner's
+            // path guard directly without claiming that a legacy store retains it.
+            XCTAssertEqual(DownloadPaths.storedFileName(path), name)
+            XCTAssertFalse(DownloadPathReconciliation.isSafeStoredPath(path))
+            XCTAssertTrue(DownloadPathReconciliation.isSafeStoredPath("/old/folder/\(name)"))
+            XCTAssertEqual(FileManager.default.fileExists(atPath: file.path), fileExists)
+        }
+    }
+
+    func testLegacyRewriteRequiresFreshConfirmedPresence() async throws {
+        for scenario in ["missing", "unknown", "present"] {
+            let context = TestStore.freshContext()
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let name = "audio.mp3"
+            let file = directory.appendingPathComponent(name)
+            try Data("audio".utf8).write(to: file)
+            let legacyPath = "/old/container/\(name)"
+            let episode = Episode(guid: UUID().uuidString, title: "Download", audioURL: "https://h/a.mp3",
+                                  downloadStatus: .downloaded, downloadPath: legacyPath)
+            try persistLocalDownloadState(for: [episode], in: context)
+            let manager = makeManager(context)
+            var finalChecks = 0
+            await manager.reconcileDownloadPaths(verifyBatch: { corrections, apply in
+                DownloadPathReconciliation.verifyAndApplyBatch(corrections, presenceOverride: { _ in
+                    finalChecks += 1
+                    return scenario == "unknown" ? .unknown : nil
+                }, apply: apply)
+            }) { container in
+                let corrections = try await DownloadPathReconciliation.scan(container: container, directoryURL: directory)
+                XCTAssertEqual(corrections.count, 1)
+                XCTAssertEqual(corrections.first?.replacementName, name, "The scan must initially find the file")
+                if scenario == "missing" { try FileManager.default.removeItem(at: file) }
+                return corrections
+            }
+            XCTAssertEqual(finalChecks, 1, "The rewrite must check file presence again")
+            XCTAssertEqual(episode.downloadPath, scenario == "present" ? name : legacyPath)
+            XCTAssertEqual(episode.downloadStatus, .downloaded)
+        }
+    }
+
     func testReconciliationRechecksEachFileImmediatelyBeforeApplying() async throws {
         let context = TestStore.freshContext()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
