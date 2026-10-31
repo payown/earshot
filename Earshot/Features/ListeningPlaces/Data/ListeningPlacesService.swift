@@ -550,11 +550,12 @@ final class ListeningPlacesService {
             }
             let removalStillOwnsFolder = self.bookmarkData == bookmarkData
                 && deviceID == capturedDeviceID
-                && bindingID == capturedBindingID
             if removalStillOwnsFolder {
-                // Rebase before the generation check so a re-enable in the
-                // same folder writes against the now-absent file. A removal
-                // for an old folder must not replace a newer folder's baseline.
+                // A binding can be renewed by reselecting this same folder
+                // while removal is suspended. The physical file is still the
+                // same target, so rebase it to absent even though that binding
+                // changed; a subsequent write can recreate the snapshot. A
+                // different folder or device must retain its own baseline.
                 observedDeviceFile = nil
                 hasObservedDeviceFile = true
                 diskMayDifferFromKnownSnapshot = true
