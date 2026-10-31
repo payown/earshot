@@ -32,6 +32,47 @@ final class ChapterParserTests: XCTestCase {
         XCTAssertTrue(ChapterParser.parsePodcastIndexJSON(Data(#"{"foo":1}"#.utf8)).isEmpty)
     }
 
+    func testPodcastIndexSkipsInvalidTimesAndKeepsValidMixedEntries() {
+        let json = """
+        {"chapters":[
+          {"startTime":0,"title":"Intro"},
+          {"startTime":-1,"title":"Negative"},
+          {"startTime":1e100,"title":"Huge"},
+          {"startTime":true,"title":"Boolean"},
+          {"startTime":61.75,"title":"Fraction"},
+          {"startTime":12,"toc":false},
+          {"startTime":120}
+        ]}
+        """.data(using: .utf8)!
+        let chapters = ChapterParser.parsePodcastIndexJSON(json)
+        XCTAssertEqual(chapters.map(\.startTime), [0, 61.75, 120])
+        XCTAssertEqual(chapters.map(\.title), ["Intro", "Fraction", "Chapter 3"])
+        XCTAssertEqual(chapters.map(\.index), [0, 1, 2])
+    }
+
+    func testMalformedChapterArrayRetainsExistingFallbackBehavior() {
+        let json = #"{"chapters":[{"startTime":0},"not a chapter"]}"#.data(using: .utf8)!
+        XCTAssertTrue(ChapterParser.parsePodcastIndexJSON(json).isEmpty)
+    }
+
+    func testChapterTimeValidationRejectsNonfiniteAndOutOfRangeValues() {
+        XCTAssertTrue(Chapter.isValidStartTime(0))
+        XCTAssertTrue(Chapter.isValidStartTime(0.125))
+        XCTAssertTrue(Chapter.isValidStartTime(Chapter.maximumStartTimeExclusive.nextDown))
+        for value in [-1.0, Double.nan, Double.infinity, -Double.infinity,
+                      Chapter.maximumStartTimeExclusive, Double.greatestFiniteMagnitude] {
+            XCTAssertFalse(Chapter.isValidStartTime(value))
+        }
+    }
+
+    func testTimestampParsingRejectsNegativeAndOverflowWithoutTrapping() {
+        for value in ["-1:00", "1:-1", "1:02:-1", "-1:02:03",
+                      "9223372036854775807:59", "9223372036854775807:59:59"] {
+            XCTAssertNil(ChapterParser.parseTimestamp(value), value)
+        }
+        XCTAssertEqual(ChapterParser.parseTimestamp("999:59:59"), 3_599_999)
+    }
+
     func testParseDescriptionChapters() {
         let html = "<p>0:00 Introduction</p><p>5:30 - Deep Dive</p><p>1:02:03 Wrap up</p>"
         let chapters = ChapterParser.parseDescriptionChapters(html)
@@ -68,6 +109,25 @@ final class ChapterParserTests: XCTestCase {
         XCTAssertEqual(chapters.activeChapterIndex(at: 0), 0)
         XCTAssertEqual(chapters.activeChapterIndex(at: 75), 1)
         XCTAssertEqual(chapters.activeChapterIndex(at: 200), 2)
+    }
+}
+
+@MainActor
+final class ChapterServiceFallbackTests: XCTestCase {
+    func testAllInvalidJSONFallsBackToDescription() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        let json = #"{"chapters":[{"startTime":-1},{"startTime":1e100}]}"#.data(using: .utf8)!
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: json)])
+        let audio = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp3")
+        try Data().write(to: audio)
+        defer { try? FileManager.default.removeItem(at: audio) }
+        let service = ChapterService(http: HTTPClient(session: MockURLProtocol.makeSession()))
+        let chapters = await service.chapters(chapterURL: "https://example.com/chapters", audioURL: "",
+                                              downloadPath: audio.path,
+                                              descriptionHTML: "0:00 Intro\n1:30 Story")
+        XCTAssertEqual(chapters.map(\.startTime), [0, 90])
+        XCTAssertEqual(chapters.map(\.title), ["Intro", "Story"])
     }
 }
 

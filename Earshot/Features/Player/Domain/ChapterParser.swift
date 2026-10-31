@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 /// Pure chapter parsing: Podcasting 2.0 chapter JSON and timestamp lists pulled
@@ -8,7 +9,7 @@ enum ChapterParser {
     // MARK: Podcasting 2.0 JSON
 
     /// Parses a Podcasting 2.0 chapters file. Skips entries flagged `toc: false`
-    /// (hidden from the chapter list) and any without a numeric `startTime`.
+    /// (hidden from the chapter list) and entries with invalid start times.
     static func parsePodcastIndexJSON(_ data: Data) -> [Chapter] {
         guard
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -18,7 +19,10 @@ enum ChapterParser {
         var chapters: [Chapter] = []
         for item in raw {
             if let toc = item["toc"] as? Bool, toc == false { continue }
-            guard let start = (item["startTime"] as? NSNumber)?.doubleValue else { continue }
+            guard let number = item["startTime"] as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  Chapter.isValidStartTime(number.doubleValue) else { continue }
+            let start = number.doubleValue
             let title = (item["title"] as? String) ?? "Chapter \(chapters.count + 1)"
             chapters.append(
                 Chapter(index: chapters.count, startTime: start, title: title, imageURL: item["img"] as? String)
@@ -68,16 +72,19 @@ enum ChapterParser {
     /// minute/second components.
     static func parseTimestamp(_ ts: String) -> Double? {
         let parts = ts.split(separator: ":").map(String.init)
+        let seconds: Double
         if parts.count == 2 {
-            guard let m = Int(parts[0]), let s = Int(parts[1]), s < 60 else { return nil }
-            return Double(m * 60 + s)
-        }
-        if parts.count == 3 {
+            guard let m = Int(parts[0]), let s = Int(parts[1]),
+                  m >= 0, s >= 0, s < 60 else { return nil }
+            seconds = Double(m) * 60 + Double(s)
+        } else if parts.count == 3 {
             guard let h = Int(parts[0]), let m = Int(parts[1]), let s = Int(parts[2]),
-                  m < 60, s < 60 else { return nil }
-            return Double(h * 3600 + m * 60 + s)
+                  h >= 0, m >= 0, m < 60, s >= 0, s < 60 else { return nil }
+            seconds = Double(h) * 3_600 + Double(m) * 60 + Double(s)
+        } else {
+            return nil
         }
-        return nil
+        return Chapter.isValidStartTime(seconds) ? seconds : nil
     }
 
     private static func firstTimestamp(in line: String) -> (text: String, range: Range<String.Index>)? {
