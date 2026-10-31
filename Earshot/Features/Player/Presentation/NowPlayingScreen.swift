@@ -50,6 +50,7 @@ struct NowPlayingScreen: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
     @Environment(SettingsStore.self) private var settings
+    @Environment(QuickActionStore.self) private var quickActions
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.playbackFolderNavigation) private var openPlaybackFolder
@@ -70,6 +71,7 @@ struct NowPlayingScreen: View {
     // The full chapter list (#509), opened by activating the current-chapter
     // display below the title. The same list is reachable from the controls sheet.
     @State private var showingChapters = false
+    @ScaledMetric(relativeTo: .subheadline) private var transportActionMinimumHeight = Spacing.minTouchTarget
 
     // Export audio file (#371): the prepared local-file URL to share, and a flag
     // covering the download-then-share wait so the action can show progress and
@@ -231,6 +233,7 @@ struct NowPlayingScreen: View {
 
     private var playbackDock: some View {
         VStack(spacing: Spacing.xs) {
+            additionalTransportRow
             // Clocks can grow upward without moving the slider or transport.
             ViewThatFits(in: .horizontal) {
                 HStack {
@@ -564,6 +567,61 @@ struct NowPlayingScreen: View {
 
     // MARK: Transport
 
+    /// Optional, user-ordered skip buttons fill one horizontally scrollable
+    /// strip at the top of the playback controls. They share the available
+    /// width when they fit and retain a touch-friendly minimum when they scroll.
+    @ViewBuilder
+    private var additionalTransportRow: some View {
+        let actions = TransportActionVisibility.visible(
+            quickActions.transportActions,
+            backSeconds: player.skipBackSeconds,
+            forwardSeconds: player.skipForwardSeconds
+        )
+        if !actions.isEmpty {
+            GeometryReader { geometry in
+                let spacing = Spacing.sm
+                let minimumButtonWidth = transportActionMinimumHeight + 2 * Spacing.xs
+                let availableButtonWidth = (geometry.size.width - spacing * CGFloat(actions.count - 1))
+                    / CGFloat(actions.count)
+                let buttonWidth = max(minimumButtonWidth, availableButtonWidth)
+                let contentWidth = buttonWidth * CGFloat(actions.count) + spacing * CGFloat(actions.count - 1)
+
+                ScrollView(.horizontal) {
+                    HStack(spacing: Spacing.sm) {
+                        ForEach(actions) { action in
+                            Button {
+                                switch action.direction {
+                                case .backward: player.skipBack(seconds: action.seconds)
+                                case .forward: player.skipForward(seconds: action.seconds)
+                                }
+                            } label: {
+                                Text(action.buttonTitle)
+                                    .font(.subheadline.weight(.semibold))
+                                    .monospacedDigit()
+                                    .frame(
+                                        maxWidth: .infinity,
+                                        minHeight: transportActionMinimumHeight
+                                    )
+                                    .padding(.horizontal, Spacing.xs)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.primary)
+                            .accessibilityLabel(action.label)
+                            .accessibilityIdentifier("player.transportAction.\(action.id)")
+                            .frame(width: buttonWidth)
+                        }
+                    }
+                    .frame(width: contentWidth)
+                }
+                .scrollIndicators(.hidden)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("player.transportActions")
+            }
+            .frame(minHeight: transportActionMinimumHeight)
+        }
+    }
+
     private var transportRow: some View {
         HStack(spacing: Spacing.md) {
             transportButton(
@@ -573,17 +631,8 @@ struct NowPlayingScreen: View {
                 target: 64,
                 action: player.skipBack
             )
-            // Pair "Previous chapter" with Skip back as a VoiceOver custom action
-            // (#560), the same rotor-action pattern the artwork uses. Additive:
-            // the button keeps its default Skip back activation. Announces a clear
-            // "no chapters" response when the episode has none, never a silent no-op.
-            .accessibilityAction(named: "Previous chapter") {
-                player.previousChapterOrAnnounceNoChapters()
-            }
-            .accessibilityAction(named: "Previous in Queue") {
-                player.previousInQueue()
-            }
-            .accessibilityHint("Use Actions for more navigation options")
+            .rotorActions(playerButtonRotorActions(for: .rewind))
+            .accessibilityHint(playerButtonActionHint(for: .rewind))
 
             // Dynamic VoiceOver name reflecting the action the button performs
             // ("Play" when paused, "Pause" when playing), matching the mini bar.
@@ -608,21 +657,35 @@ struct NowPlayingScreen: View {
                 target: 64,
                 action: player.skipForward
             )
-            // Pair "Next chapter" with Skip forward as a VoiceOver custom action
-            // (#560); mirrors the Skip back / Previous chapter pairing above.
-            .accessibilityAction(named: "Next chapter") {
-                player.nextChapterOrAnnounceNoChapters()
-            }
-            .accessibilityAction(named: "Next in Queue") {
-                player.nextInQueue()
-            }
-            .accessibilityAction(named: "Mark as played and next in Queue") {
-                player.markCurrentPlayedAndNextInQueue()
-            }
-            .accessibilityHint("Use Actions for more navigation options")
+            .rotorActions(playerButtonRotorActions(for: .fastForward))
+            .accessibilityHint(playerButtonActionHint(for: .fastForward))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.sm)
+    }
+
+    private func playerButtonRotorActions(for button: PlayerTransportButton) -> [QuickActionItem] {
+        quickActions.playerButtonActions(for: button).map { action in
+            QuickActionItem(
+                id: "playerButton.\(button.rawValue).\(action.id)",
+                label: action.label,
+                isDestructive: false
+            ) {
+                switch action {
+                case .previousChapter: player.previousChapterOrAnnounceNoChapters()
+                case .nextChapter: player.nextChapterOrAnnounceNoChapters()
+                case .previousInQueue: player.previousInQueue()
+                case .nextInQueue: player.nextInQueue()
+                case .markPlayedAndNextInQueue: player.markCurrentPlayedAndNextInQueue()
+                }
+            }
+        }
+    }
+
+    private func playerButtonActionHint(for button: PlayerTransportButton) -> String {
+        quickActions.playerButtonActions(for: button).isEmpty
+            ? "No additional actions"
+            : "Use Actions for more navigation options"
     }
 
     private func transportButton(
@@ -1114,7 +1177,10 @@ private struct ScrubberView: View {
     /// on by the caller only when a duration is known.
     private var scrubberAccessibilityElement: some View {
         Color.clear
-            .frame(height: 56)
+            // Keep VoiceOver's replacement element explicitly as wide as the
+            // visible slider, with leading alignment, so its focus frame stays
+            // anchored to the slider instead of drifting toward the action grid.
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
             .accessibilityElement()
             .accessibilityIdentifier("player.position")
             // The label is static so VoiceOver isn't re-reading it every second as

@@ -1,16 +1,16 @@
 import SwiftUI
 
-/// Configures the ordered Enabled and Available Quick Actions for Episode,
-/// Podcast, and Queue rows. The first enabled action remains the default
-/// double-tap; only enabled actions populate the VoiceOver Actions rotor.
+/// Configures ordered Quick Actions for Episode, Podcast, and Queue rows and
+/// VoiceOver actions for the full player's transport buttons.
 struct QuickActionsSettingsView: View {
     @Environment(QuickActionStore.self) private var store
+    @Environment(SettingsStore.self) private var settings
     @AccessibilityFocusState private var focusedActionID: String?
 
     var body: some View {
         List {
             Section {
-                Text("The first enabled action is the default double-tap. Enabled actions fill the VoiceOver Actions rotor. Remove actions you do not use, or add them back from Available. At least one action stays enabled. New actions added by future updates appear in Available after you customize a list.")
+                Text("Episode, Podcast, and Queue actions fill the VoiceOver Actions rotor; the first enabled action is the default double-tap. Add, remove, or reorder them. Player skip increments add buttons to the full player. Rewind and Fast-forward actions configure each button's VoiceOver Actions rotor, including chapter and queue navigation; either button can perform either action. You can remove all player actions. A skip matching the primary interval in Playback settings is hidden from the extra-action lists and returns if that interval changes.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -39,6 +39,52 @@ struct QuickActionsSettingsView: View {
                           actions: store.availableQueueActions, label: \.label,
                           move: store.moveAvailableQueueActions,
                           transfer: addQueueAction)
+
+            let visibleTransportActions = TransportActionVisibility.visible(
+                store.transportActions,
+                backSeconds: settings.skipBackSeconds,
+                forwardSeconds: settings.skipForwardSeconds
+            )
+            let visibleAvailableTransportActions = TransportActionVisibility.visible(
+                store.availableTransportActions,
+                backSeconds: settings.skipBackSeconds,
+                forwardSeconds: settings.skipForwardSeconds
+            )
+            actionSection(content: "Player transport", state: .enabled,
+                          actions: visibleTransportActions, label: \.label,
+                          move: { store.moveTransportActions(from: $0, to: $1, visibleActions: visibleTransportActions) },
+                          transfer: store.removeTransportAction,
+                          allowsEmptyEnabled: true,
+                          hasDefaultAction: false)
+            actionSection(content: "Player transport", state: .available,
+                          actions: visibleAvailableTransportActions, label: \.label,
+                          move: { store.moveAvailableTransportActions(from: $0, to: $1, visibleActions: visibleAvailableTransportActions) },
+                          transfer: store.addTransportAction,
+                          allowsEmptyEnabled: true,
+                          hasDefaultAction: false)
+
+            ForEach(PlayerTransportButton.allCases) { button in
+                actionSection(
+                    content: button.title,
+                    state: .enabled,
+                    actions: store.playerButtonActions(for: button),
+                    label: \.label,
+                    move: { store.movePlayerButtonActions(from: $0, to: $1, for: button) },
+                    transfer: { store.removePlayerButtonAction($0, from: button) },
+                    allowsEmptyEnabled: true,
+                    hasDefaultAction: false
+                )
+                actionSection(
+                    content: button.title,
+                    state: .available,
+                    actions: store.availablePlayerButtonActions(for: button),
+                    label: \.label,
+                    move: { store.moveAvailablePlayerButtonActions(from: $0, to: $1, for: button) },
+                    transfer: { store.addPlayerButtonAction($0, to: button) },
+                    allowsEmptyEnabled: true,
+                    hasDefaultAction: false
+                )
+            }
         }
         .navigationTitle("Quick Actions")
         .toolbar {
@@ -52,7 +98,9 @@ struct QuickActionsSettingsView: View {
         actions: [A],
         label: KeyPath<A, String>,
         move: @escaping (IndexSet, Int) -> Void,
-        transfer: @escaping (A) -> Void
+        transfer: @escaping (A) -> Void,
+        allowsEmptyEnabled: Bool = false,
+        hasDefaultAction: Bool = true
     ) -> some View where A.ID == String {
         Section("\(content) actions — \(state.title)") {
             if actions.isEmpty {
@@ -62,61 +110,139 @@ struct QuickActionsSettingsView: View {
                 ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
                     let name = action[keyPath: label]
                     let focusID = "\(content).\(action.id)"
-                    Text(name)
-                        .accessibilityLabel(rowLabel(
-                            name, state: state, index: index, count: actions.count
-                        ))
-                        .accessibilityHint(state.hint)
-                        .accessibilityFocused($focusedActionID, equals: focusID)
-                        .rotorActions(rowActions(
-                            action: action, name: name, focusID: focusID,
-                            state: state, index: index, count: actions.count,
-                            move: move, transfer: transfer
-                        ))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(state.transferLabel) {
-                                transfer(action)
-                                announceTransfer(name, state: state)
-                                focusedActionID = focusID
-                            }
-                            .tint(state == .enabled ? .red : .green)
-                            .disabled(state == .enabled && actions.count == 1)
-                        }
+                    actionRow(
+                        action: action,
+                        name: name,
+                        focusID: focusID,
+                        state: state,
+                        index: index,
+                        count: actions.count,
+                        hasDefaultAction: hasDefaultAction,
+                        allowsEmptyEnabled: allowsEmptyEnabled,
+                        move: move,
+                        transfer: transfer
+                    )
                 }
-                .onMove { move($0, $1) }
+                // Available rows are only staged for adding. Reordering them
+                // has no effect on the enabled action order and creates a
+                // separate VoiceOver reorder control in Edit mode.
+                .onMove(perform: state == .enabled ? move : nil)
             }
         }
     }
 
-    private func rowActions<A: Identifiable>(
+    @ViewBuilder
+    private func actionRow<A: Identifiable>(
         action: A,
         name: String,
         focusID: String,
         state: ActionState,
         index: Int,
         count: Int,
+        hasDefaultAction: Bool,
+        allowsEmptyEnabled: Bool,
         move: @escaping (IndexSet, Int) -> Void,
         transfer: @escaping (A) -> Void
-    ) -> [QuickActionItem] where A.ID == String {
-        var items: [QuickActionItem] = []
-        if state == .available || count > 1 {
-            items.append(QuickActionItem(
-                id: state.transferLabel,
-                label: state.transferLabel,
-                isDestructive: state == .enabled
-            ) {
-                transfer(action)
-                announceTransfer(name, state: state)
-                focusedActionID = focusID
-            })
-        }
-        items += QuickActionMoveLogic.targets(index: index, count: count).map { target in
-            QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
-                move(IndexSet(integer: index), target.destinationOffset)
-                Announcer.announce(
-                    "Moved \(name) to position \(target.resultingIndex + 1) of \(count)"
+    ) -> some View where A.ID == String {
+        if state == .available {
+            Button {
+                performTransfer(
+                    action, name: name, focusID: focusID,
+                    state: state, transfer: transfer
                 )
-                focusedActionID = focusID
+            } label: {
+                Text(name)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(rowLabel(
+                name, state: state, index: index, count: count,
+                hasDefaultAction: hasDefaultAction
+            ))
+            .accessibilityHint(state.hint(hasDefaultAction: hasDefaultAction))
+            .accessibilityFocused($focusedActionID, equals: focusID)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                transferButton(
+                    action, name: name, focusID: focusID,
+                    state: state, count: count,
+                    allowsEmptyEnabled: allowsEmptyEnabled,
+                    transfer: transfer
+                )
+            }
+        } else {
+            let movementActions = rowActions(
+                name: name, focusID: focusID,
+                state: state, index: index, count: count,
+                move: move
+            )
+            Text(name)
+                .accessibilityLabel(rowLabel(
+                    name, state: state, index: index, count: count,
+                    hasDefaultAction: hasDefaultAction
+                ))
+                .accessibilityHint(state.hint(hasDefaultAction: hasDefaultAction))
+                .accessibilityFocused($focusedActionID, equals: focusID)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    transferButton(
+                        action, name: name, focusID: focusID,
+                        state: state, count: count,
+                        allowsEmptyEnabled: allowsEmptyEnabled,
+                        transfer: transfer
+                    )
+                }
+                // Add/Remove come from the native swipe action. Enabled rows
+                // add only Move choices to avoid duplicate rotor entries.
+                .quickActionsRotorIfNeeded(movementActions)
+        }
+    }
+
+    private func transferButton<A>(
+        _ action: A,
+        name: String,
+        focusID: String,
+        state: ActionState,
+        count: Int,
+        allowsEmptyEnabled: Bool,
+        transfer: @escaping (A) -> Void
+    ) -> some View {
+        Button(state.transferLabel) {
+            performTransfer(action, name: name, focusID: focusID, state: state, transfer: transfer)
+        }
+        .tint(state == .enabled ? .red : .green)
+        .disabled(state == .enabled && count == 1 && !allowsEmptyEnabled)
+    }
+
+    private func performTransfer<A>(
+        _ action: A,
+        name: String,
+        focusID: String,
+        state: ActionState,
+        transfer: @escaping (A) -> Void
+    ) {
+        transfer(action)
+        announceTransfer(name, state: state)
+        focusedActionID = focusID
+    }
+
+    private func rowActions(
+        name: String,
+        focusID: String,
+        state: ActionState,
+        index: Int,
+        count: Int,
+        move: @escaping (IndexSet, Int) -> Void
+    ) -> [QuickActionItem] {
+        var items: [QuickActionItem] = []
+        if state == .enabled {
+            items += QuickActionMoveLogic.targets(index: index, count: count).map { target in
+                QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
+                    move(IndexSet(integer: index), target.destinationOffset)
+                    Announcer.announce(
+                        "Moved \(name) to position \(target.resultingIndex + 1) of \(count)"
+                    )
+                    focusedActionID = focusID
+                }
             }
         }
         return items
@@ -126,9 +252,10 @@ struct QuickActionsSettingsView: View {
         _ label: String,
         state: ActionState,
         index: Int,
-        count: Int
+        count: Int,
+        hasDefaultAction: Bool
     ) -> String {
-        if state == .enabled, index == 0 {
+        if state == .enabled, index == 0, hasDefaultAction {
             return "\(label), enabled, default action, position 1 of \(count)"
         }
         return "\(label), \(state.spokenState), position \(index + 1) of \(count)"
@@ -157,6 +284,17 @@ struct QuickActionsSettingsView: View {
     private func addQueueAction(_ action: QueueItemAction) { store.addQueueAction(action) }
 }
 
+private extension View {
+    @ViewBuilder
+    func quickActionsRotorIfNeeded(_ actions: [QuickActionItem]) -> some View {
+        if actions.isEmpty {
+            self
+        } else {
+            rotorActions(actions)
+        }
+    }
+}
+
 private enum ActionState: Equatable {
     case enabled
     case available
@@ -165,9 +303,12 @@ private enum ActionState: Equatable {
     var spokenState: String { self == .enabled ? "enabled" : "available" }
     var transferLabel: String { self == .enabled ? "Remove" : "Add" }
     var emptyLabel: String { self == .enabled ? "No enabled actions" : "No available actions" }
-    var hint: String {
-        self == .enabled
-            ? "Remove or reorder with the Actions rotor. Position 1 is the default action."
-            : "Add or reorder with the Actions rotor."
+    func hint(hasDefaultAction: Bool) -> String {
+        if self == .enabled, hasDefaultAction {
+            return "Remove or reorder with the Actions rotor. Position 1 is the default action."
+        }
+        return self == .enabled
+            ? "Remove or reorder with the Actions rotor."
+            : "Double-tap to add to Enabled. You can also use the Actions rotor."
     }
 }
