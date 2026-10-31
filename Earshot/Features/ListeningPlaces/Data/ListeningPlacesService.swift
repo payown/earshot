@@ -285,6 +285,7 @@ final class ListeningPlacesService {
 
     @ObservationIgnored private let transport: ListeningPlacesFileTransport
     @ObservationIgnored private let writeDeviceFile: @Sendable (Data, String, Data) async throws -> Void
+    @ObservationIgnored private let replaceDeviceFile: (@Sendable (Data, String, Data?, Data) async throws -> Void)?
     @ObservationIgnored private let removeDeviceFile: @Sendable (Data, String) async throws -> Void
     @ObservationIgnored private let canAnnounce: @MainActor () -> Bool
     @ObservationIgnored private let announceOlderFileFailure: @MainActor (String) -> Void
@@ -310,6 +311,9 @@ final class ListeningPlacesService {
     @ObservationIgnored private var pendingZeroSnapshots: [String: EpisodeUserStateSnapshot] = [:]
     @ObservationIgnored private var writeGeneration = 0
     @ObservationIgnored private var hasRestoredExisting = false
+    @ObservationIgnored private var observedDeviceFile: Data?
+    @ObservationIgnored private var hasObservedDeviceFile = false
+    @ObservationIgnored private var announcedDeviceFileConflict = false
 
     init(
         removeDeviceFile: (@Sendable (Data, String) async throws -> Void)? = nil,
@@ -331,6 +335,13 @@ final class ListeningPlacesService {
         }
         self.writeDeviceFile = writeDeviceFile ?? { bookmark, deviceID, data in
             try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: deviceID, data: data)
+        }
+        if writeDeviceFile == nil {
+            self.replaceDeviceFile = { bookmark, deviceID, expected, data in
+                try await transport.replaceDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: expected, with: data)
+            }
+        } else {
+            self.replaceDeviceFile = nil
         }
     }
 
@@ -392,6 +403,9 @@ final class ListeningPlacesService {
         updatedAtByID = [:]
         lastWrittenRecords = nil
         hasRestoredExisting = false
+        observedDeviceFile = nil
+        hasObservedDeviceFile = false
+        announcedDeviceFileConflict = false
         pendingWriteTask?.cancel()
         pendingWriteTask = nil
         pendingZeroSnapshots = [:]
@@ -426,6 +440,9 @@ final class ListeningPlacesService {
             updatedAtByID = [:]
             lastWrittenRecords = nil
             hasRestoredExisting = false
+            observedDeviceFile = nil
+            hasObservedDeviceFile = false
+            announcedDeviceFileConflict = false
             pendingZeroSnapshots = [:]
             await restoreExistingAndWrite()
         } catch {
@@ -530,6 +547,9 @@ final class ListeningPlacesService {
                 bookmarkData: bookmarkData,
                 deviceID: deviceID
             ) {
+                observedDeviceFile = data
+                hasObservedDeviceFile = true
+                announcedDeviceFileConflict = false
                 let loader = await ListeningPlacesSnapshotLoader.makeBackground(
                     modelContainer: context.container
                 )
@@ -551,6 +571,10 @@ final class ListeningPlacesService {
                 lastWrittenRecords = restored.records
                 updatedAtByID = restored.updatedAtByID
                 signatures = restored.signatures
+            } else {
+                observedDeviceFile = nil
+                hasObservedDeviceFile = true
+                announcedDeviceFileConflict = false
             }
             guard generation == writeGeneration,
                   enabled,
@@ -625,7 +649,18 @@ final class ListeningPlacesService {
             diskMayDifferFromKnownSnapshot = true
             let writeID = UUID()
             let writer = writeDeviceFile
-            let write = Task { try await writer(bookmarkData, capturedDeviceID, data) }
+            let guardedWriter = replaceDeviceFile
+            guard hasObservedDeviceFile else {
+                throw ListeningPlacesFileError.deviceFileChanged
+            }
+            let expectedDeviceFile = observedDeviceFile
+            let write = Task {
+                if let guardedWriter {
+                    try await guardedWriter(bookmarkData, capturedDeviceID, expectedDeviceFile, data)
+                } else {
+                    try await writer(bookmarkData, capturedDeviceID, data)
+                }
+            }
             inFlightFileWrite = write
             inFlightFileWriteID = writeID
             defer {
@@ -641,6 +676,12 @@ final class ListeningPlacesService {
                    self.bookmarkData == bookmarkData {
                     fail(error)
                     reportedWriteFailure = true
+                    if case .deviceFileChanged? = error as? ListeningPlacesFileError,
+                       !announcedDeviceFileConflict,
+                       canAnnounce() {
+                        announcedDeviceFileConflict = true
+                        announceOlderFileFailure(error.localizedDescription)
+                    }
                 }
                 scheduleOlderFileFailureConfirmation(
                     error: error, generation: generation, bookmark: bookmarkData,
@@ -658,6 +699,8 @@ final class ListeningPlacesService {
                 return
             }
             lastWrittenRecords = prepared.records
+            observedDeviceFile = data
+            hasObservedDeviceFile = true
             diskMayDifferFromKnownSnapshot = false
             removeConsumedPendingZeros(capturedPendingZeroSnapshots)
             status = .lastWritten(prepared.writtenAt)
