@@ -1019,6 +1019,15 @@ final class DownloadManager {
             try await DownloadPathReconciliation.scan(container: $0)
         }
     ) async {
+        await reconcileDownloadPaths(verifyBatch: { corrections, apply in
+            DownloadPathReconciliation.verifyAndApplyBatch(corrections, apply: apply)
+        }, scan: scan)
+    }
+
+    func reconcileDownloadPaths(
+        verifyBatch: ([DownloadPathReconciliation.Correction], (DownloadPathReconciliation.Correction) -> Void) -> Void,
+        scan: @MainActor (ModelContainer) async throws -> [DownloadPathReconciliation.Correction]
+    ) async {
         guard let context else { return }
         save()
         do {
@@ -1032,18 +1041,15 @@ final class DownloadManager {
                       !RecoveryDownloadRemoval.isPending else { return }
                 let batch = corrections[start..<min(start + 50, corrections.count)]
                 let episodes = try LocalStateStore.episodes(matching: batch.map(\.key), in: context)
-                for correction in batch {
+                verifyBatch(Array(batch)) { correction in
                     guard let episode = episodes[correction.key],
                           episode.downloadPath == correction.originalPath,
-                          episode.downloadStatus.rawValue == correction.originalStatus else { continue }
+                          episode.downloadStatus.rawValue == correction.originalStatus else { return }
                     if let name = correction.replacementName {
                         LocalStateStore.setDownloadPath(name, on: episode, in: context)
                         rewritten += 1
                     } else {
-                        // A transfer may have finished while the worker scanned.
-                        // Recheck only missing-file candidates before clearing.
-                        if let url = correction.checkedURL,
-                           FileManager.default.fileExists(atPath: url.path) { continue }
+                        // The verifier rechecked this candidate before calling us.
                         episode.downloadPath = nil
                         ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
                         reset += 1
