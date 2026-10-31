@@ -15,7 +15,33 @@ enum AppLaunchPhase {
     case unavailable
     case ready(container: ModelContainer, generation: Int)
     case recovery(StoreRecoveryState)
+    case resetRecovery(InterruptedLibraryResetReason)
 }
+
+enum InterruptedLibraryResetReason: Equatable {
+    case cloudAccountUnavailable
+    case cloudAccountChanged
+    case recoveryFailed
+    case intentUnreadable
+
+    var title: String { "Library reset needs attention" }
+
+    var message: String {
+        switch self {
+        case .cloudAccountUnavailable:
+            "The library reset is waiting for the iCloud account used when it began. Connect to iCloud with that account, then try again."
+        case .cloudAccountChanged:
+            "The library reset began with a different iCloud account. Switch back to that account, then try again so the reset does not affect the wrong library."
+        case .recoveryFailed:
+            "The library reset could not finish. Your reset is saved and will be checked again when you retry."
+        case .intentUnreadable:
+            "Earshot could not read the saved library reset state. Your library has not been opened. Contact support before continuing."
+        }
+    }
+}
+
+typealias ResetCloudAccountLookup = @Sendable () async -> LibraryResetCloudAccountStatus
+typealias ResetCloudTombstoneOperation = @Sendable () async throws -> Void
 
 enum RootServiceActivationStatus: Equatable {
     case notStarted
@@ -119,6 +145,7 @@ private final class SystemLaunchAnnouncer: LaunchAnnouncing {
 typealias StoreLaunchOperation = @MainActor (
     _ progress: @escaping @MainActor (StoreMigrationProgress) -> Void
 ) async -> StoreLoad
+typealias StoreReplacementLoadOperation = @MainActor @Sendable () async -> StoreLoad
 
 typealias LaunchSleepOperation = @Sendable (Duration) async throws -> Void
 typealias RecoveryDownloadUsageOperation = @MainActor @Sendable () async -> Int64
@@ -185,12 +212,16 @@ final class AppRuntime {
 
     private let mode: Mode
     private let launchOperation: StoreLaunchOperation
+    private let replacementLoadOperation: StoreReplacementLoadOperation
     private let launchAnnouncer: any LaunchAnnouncing
     private let launchSleep: LaunchSleepOperation
     private let recoveryDownloadUsage: RecoveryDownloadUsageOperation
     private let recoveryDownloadRemoval: RecoveryDownloadRemovalOperation
     private let recoveryCapacity: RecoveryCapacityOperation
     private let fileResetOperation: @Sendable () async -> Bool
+    private let resetIntentApplicationSupport: URL
+    private let resetCloudAccountLookup: ResetCloudAccountLookup
+    private let resetCloudTombstoneOperation: ResetCloudTombstoneOperation
     private var generation = 0
     private var processServicesStarted = false
     private var entitlementContainer: ModelContainer?
@@ -217,6 +248,7 @@ final class AppRuntime {
     private var preparedDownloadContainer: ModelContainer?
     private var resetTask: Task<Bool, Never>?
     private var resetInFlight = false
+    private var resetIntentPending = false
     private(set) var cloudKitEventMonitor: CloudKitEventMonitor?
     private var cloudProjectionCoordinator: CloudProjectionCoordinator?
     private var cloudProjectionActivationTask: Task<Void, Error>?
@@ -229,6 +261,7 @@ final class AppRuntime {
         showsLaunchPreparation: Bool? = nil,
         recoveryBackup: MigrationBackupDescriptor? = nil,
         launchOperation: StoreLaunchOperation? = nil,
+        replacementLoadOperation: StoreReplacementLoadOperation? = nil,
         launchAnnouncer: (any LaunchAnnouncing)? = nil,
         recoveryDownloadUsage: @escaping RecoveryDownloadUsageOperation = {
             await DownloadManager.recoveryDownloadUsage()
@@ -244,6 +277,13 @@ final class AppRuntime {
         fileResetOperation: @escaping @Sendable () async -> Bool = {
             await SettingsReset.performFileReset()
         },
+        resetIntentApplicationSupport: URL = .applicationSupportDirectory,
+        resetCloudAccountLookup: @escaping ResetCloudAccountLookup = {
+            await AppRuntime.currentResetCloudAccountStatus()
+        },
+        resetCloudTombstoneOperation: @escaping ResetCloudTombstoneOperation = {
+            try await CloudProjectionCoordinator.markAllSubscriptionsDeletedForResetRecovery()
+        },
         launchSleep: @escaping LaunchSleepOperation = { duration in
             try await Task.sleep(for: duration)
         }
@@ -255,12 +295,25 @@ final class AppRuntime {
         self.showsLaunchPreparation = showsLaunchPreparation ?? false
         self.recoveryBackup = recoveryBackup
         self.launchOperation = launchOperation ?? Self.productionLaunch
+        self.replacementLoadOperation = replacementLoadOperation ?? {
+            await ModelContainerFactory.makeShared(using: StoreMigrationEngine())
+        }
         self.launchAnnouncer = launchAnnouncer ?? SystemLaunchAnnouncer.shared
         self.recoveryDownloadUsage = recoveryDownloadUsage
         self.recoveryDownloadRemoval = recoveryDownloadRemoval
         self.recoveryCapacity = recoveryCapacity
         self.fileResetOperation = fileResetOperation
+        self.resetIntentApplicationSupport = resetIntentApplicationSupport
+        self.resetCloudAccountLookup = resetCloudAccountLookup
+        self.resetCloudTombstoneOperation = resetCloudTombstoneOperation
         self.launchSleep = launchSleep
+        do {
+            resetIntentPending = try LibraryResetIntentStore.read(
+                in: resetIntentApplicationSupport
+            ) != nil
+        } catch {
+            resetIntentPending = true
+        }
         cloudSyncAvailability = mode == .normal
             && CloudKitLaunchPolicy.isMirroringEnabled()
             ? .checking : .disabled
@@ -294,6 +347,18 @@ final class AppRuntime {
         return load
     }
 
+    private static func currentResetCloudAccountStatus() async -> LibraryResetCloudAccountStatus {
+        guard CloudKitLaunchPolicy.isMirroringEnabled() else { return .disabled }
+        do {
+            let container = CKContainer(identifier: CloudKitLaunchPolicy.containerIdentifier)
+            guard try await container.accountStatus() == .available else { return .unavailable }
+            let recordName = try await container.userRecordID().recordName
+            return .available(recordName)
+        } catch {
+            return .unavailable
+        }
+    }
+
     /// Starts the shared launch path once. The unstructured task is owned by the
     /// process-lifetime runtime rather than a SwiftUI `.task`, so view removal,
     /// backgrounding, or reconstruction cannot create a second migration.
@@ -318,18 +383,112 @@ final class AppRuntime {
         let operation = launchOperation
         launchTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            let interruptedIntent: LibraryResetIntent?
+            do {
+                interruptedIntent = try LibraryResetIntentStore.read(
+                    in: resetIntentApplicationSupport
+                )
+            } catch {
+                resetIntentPending = true
+                finishInterruptedResetRecovery(.intentUnreadable)
+                launchTask = nil
+                return
+            }
+            if let interruptedIntent {
+                resetIntentPending = true
+                let outcome = await resumeInterruptedLibraryReset(interruptedIntent)
+                guard outcome == .complete else {
+                    let reason: InterruptedLibraryResetReason
+                    switch outcome {
+                    case .cloudAccountChanged: reason = .cloudAccountChanged
+                    case .cloudAccountUnavailable: reason = .cloudAccountUnavailable
+                    case .recoveryFailed: reason = .recoveryFailed
+                    case .complete: reason = .recoveryFailed
+                    }
+                    finishInterruptedResetRecovery(reason)
+                    launchTask = nil
+                    return
+                }
+            }
             let load = await operation { [weak self] progress in
                 self?.receive(progress, attemptID: attemptID)
             }
+            if interruptedIntent != nil {
+                guard case .ready = load else {
+                    finishInterruptedResetRecovery(.recoveryFailed)
+                    launchTask = nil
+                    return
+                }
+                do {
+                    try LibraryResetIntentStore.clear(in: resetIntentApplicationSupport)
+                    resetIntentPending = false
+                } catch {
+                    finishInterruptedResetRecovery(.recoveryFailed)
+                    launchTask = nil
+                    return
+                }
+            }
             await self.finishLaunch(load, attemptID: attemptID)
         }
+    }
+
+    private func resumeInterruptedLibraryReset(
+        _ intent: LibraryResetIntent
+    ) async -> LibraryResetRecoveryOutcome {
+        let accountStatus = await resetCloudAccountLookup()
+        let accountName: String?
+        let accountAvailable: Bool
+        switch accountStatus {
+        case .disabled:
+            accountName = nil
+            accountAvailable = !intent.requiresCloudTombstones
+        case .available(let value):
+            accountName = value
+            accountAvailable = true
+        case .unavailable:
+            accountName = nil
+            accountAvailable = false
+        }
+        do {
+            return try await LibraryResetRecovery.resume(
+                in: resetIntentApplicationSupport,
+                currentCloudAccountRecordName: accountName,
+                cloudAccountAvailable: accountAvailable,
+                markCloudTombstones: resetCloudTombstoneOperation,
+                prepareLocalReset: {
+                    try await LibrarySearchIndex.shared.disableAndClear()
+                    await LibraryIntentBridge.shared.clear()
+                },
+                resetFiles: fileResetOperation
+            )
+        } catch {
+            AppLog.data.error(
+                "Interrupted library reset recovery failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return .recoveryFailed
+        }
+    }
+
+    func retryInterruptedLibraryReset() {
+        guard case .resetRecovery = phase, launchTask == nil else { return }
+        phase = .unavailable
+        showsLaunchPreparation = true
+        startLaunchIfNeeded()
+    }
+
+    private func finishInterruptedResetRecovery(_ reason: InterruptedLibraryResetReason) {
+        cancelAnnouncementWork()
+        endLaunchBackgroundTask()
+        launchAttemptID = nil
+        pendingStoreLoad = nil
+        phase = .resetRecovery(reason)
     }
 
     /// A settled, already-onboarded store can serve audio intents while the
     /// scene stays backgrounded. Migration/recovery presentation still waits
     /// for the normal foreground path; this never changes or retries migration.
     func completeBackgroundAudioLaunchIfReady() async {
-        guard !resetInFlight, !isSceneActive, !showsLaunchPreparation,
+        guard !resetInFlight, !resetIntentPending, !isSceneActive, !showsLaunchPreparation,
               let pendingStoreLoad, case .ready(let container) = pendingStoreLoad,
               let attemptID = launchAttemptID,
               AppSettingsStore(context: container.mainContext).bool(
@@ -338,7 +497,7 @@ final class AppRuntime {
         if mode != .testHost {
             await DownloadManager.prepareForReadyContainer(container)
         }
-        guard !resetInFlight, !isSceneActive, !showsLaunchPreparation,
+        guard !resetInFlight, !resetIntentPending, !isSceneActive, !showsLaunchPreparation,
               launchAttemptID == attemptID else { return }
         preparedDownloadContainer = container
         launchFocusRequest = Self.focusDestination(for: container)
@@ -739,24 +898,99 @@ final class AppRuntime {
         guard resetTask == nil, !resetInFlight else { return false }
         libraryResetCloudFailure = nil
         resetInFlight = true
+        var durableIntent: LibraryResetIntent?
+        if mode == .normal {
+            let requiresCloud = CloudKitLaunchPolicy.isMirroringEnabled()
+            var accountName: String?
+            if requiresCloud {
+                guard case .available(let currentAccount) = await resetCloudAccountLookup() else {
+                    resetInFlight = false
+                    libraryResetCloudFailure = .publicationFailed
+                    return false
+                }
+                if let previousAccount = CloudAccountIdentityStore.value(),
+                   previousAccount != currentAccount {
+                    resetInFlight = false
+                    libraryResetCloudFailure = .publicationFailed
+                    return false
+                }
+                accountName = currentAccount
+                CloudAccountIdentityStore.set(currentAccount)
+            }
+            let intent = LibraryResetIntent(
+                cloudAccountRecordName: accountName,
+                requiresCloudTombstones: requiresCloud
+            )
+            do {
+                try LibraryResetIntentStore.write(intent, in: resetIntentApplicationSupport)
+                resetIntentPending = true
+                durableIntent = intent
+            } catch {
+                resetInFlight = false
+                libraryResetCloudFailure = .publicationFailed
+                return false
+            }
+        }
         NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
         await BackgroundFeedRefresher.cancelAndWait()
         let cloudActivation = cloudProjectionActivationTask
         cloudActivation?.cancel()
         _ = try? await cloudActivation?.value
         cloudProjectionActivationTask = nil
-        do {
-            try await cloudProjectionCoordinator?.markAllSubscriptionsDeleted()
-        } catch CloudProjectionCoordinator.ResetProjectionError.uncommittedProjectionChanges {
+        let shouldMarkCloudTombstones = durableIntent?.requiresCloudTombstones == true
+            || (mode == .testHost && cloudProjectionCoordinator != nil)
+        if shouldMarkCloudTombstones {
+            // Close every ordinary projection writer before opening the
+            // reset-only tombstone writer. `stop()` joins reconciliation
+            // already in progress; the coordinator remains available for the
+            // one idempotent reset save below.
+            if durableIntent != nil {
+                await cloudProjectionCoordinator?.stop()
+            }
+            do {
+                durableIntent?.phase = .cloudMutationMayHaveStarted
+                if let durableIntent {
+                    try LibraryResetIntentStore.write(durableIntent, in: resetIntentApplicationSupport)
+                }
+                if let cloudProjectionCoordinator {
+                    try await cloudProjectionCoordinator.markAllSubscriptionsDeleted()
+                } else {
+                    try await resetCloudTombstoneOperation()
+                }
+                durableIntent?.phase = .tombstonesSavedDeliveryUnknown
+                if let durableIntent {
+                    try LibraryResetIntentStore.write(durableIntent, in: resetIntentApplicationSupport)
+                }
+            } catch CloudProjectionCoordinator.ResetProjectionError.uncommittedProjectionChanges {
+                guard durableIntent != nil else {
+                    resetInFlight = false
+                    libraryResetCloudFailure = .pendingChanges
+                    return false
+                }
+                await quiesceServicesForResetRecovery()
+                phase = .resetRecovery(.recoveryFailed)
+                resetInFlight = false
+                return false
+            } catch {
+                AppLog.data.error(
+                    "Reset tombstone save or journal update failed: \(error.localizedDescription, privacy: .public)"
+                )
+                guard durableIntent != nil else {
+                    resetInFlight = false
+                    libraryResetCloudFailure = .publicationFailed
+                    return false
+                }
+                await quiesceServicesForResetRecovery()
+                phase = .resetRecovery(.recoveryFailed)
+                resetInFlight = false
+                return false
+            }
+        } else if mode == .normal && cloudProjectionCoordinator != nil {
+            // A coordinator without a durable CloudKit identity is not allowed
+            // to mutate a projection during a local-only reset operation.
+            await quiesceServicesForResetRecovery()
+            phase = .resetRecovery(.recoveryFailed)
             resetInFlight = false
-            libraryResetCloudFailure = .pendingChanges
-            return false
-        } catch {
-            AppLog.data.error(
-                "Refused local reset because sync tombstones could not be saved: \(error.localizedDescription, privacy: .public)"
-            )
-            resetInFlight = false
-            libraryResetCloudFailure = .publicationFailed
             return false
         }
         if mode == .normal {
@@ -764,10 +998,59 @@ final class AppRuntime {
                 try await LibrarySearchIndex.shared.disableAndClear()
                 LibraryIntentBridge.shared.clear()
             } catch {
+                await quiesceServicesForResetRecovery()
+                phase = .resetRecovery(.recoveryFailed)
                 resetInFlight = false
                 return false
             }
         }
+        await quiesceServicesForResetRecovery()
+        phase = .unavailable
+        preparedDownloadContainer = nil
+
+        let task = Task { @MainActor [weak self] () -> Bool in
+            let deleted = await self?.fileResetOperation() ?? false
+            guard deleted, let self else { return false }
+            if var intent = durableIntent {
+                intent.phase = .localFilesReset
+                do {
+                    try LibraryResetIntentStore.write(intent, in: self.resetIntentApplicationSupport)
+                } catch {
+                    return false
+                }
+            }
+            let load = await self.replacementLoadOperation()
+            guard case .ready(let container) = load else { return false }
+            // Seed one-time launch settings before publishing the replacement
+            // container. Publishing first lets RootView synchronously save while
+            // SwiftUI is attaching its SwiftData observers, which can deadlock
+            // the main thread immediately after Delete Synced Library Everywhere.
+            AppSettingsStore(context: container.mainContext)
+                .introducePodcastCapGatingIfNeeded(currentPodcastCount: 0)
+            if durableIntent != nil {
+                do {
+                    try LibraryResetIntentStore.clear(in: self.resetIntentApplicationSupport)
+                    self.resetIntentPending = false
+                    self.resetInFlight = false
+                } catch {
+                    return false
+                }
+            }
+            self.install(load)
+            return true
+        }
+        resetTask = task
+        let result = await task.value
+        resetTask = nil
+        resetInFlight = false
+        if !result, durableIntent != nil {
+            resetIntentPending = true
+            phase = .resetRecovery(.recoveryFailed)
+        }
+        return result
+    }
+
+    private func quiesceServicesForResetRecovery() async {
         await cancelAndWaitForDeferredRootStartup()
         await cloudProjectionCoordinator?.stop()
         cloudProjectionCoordinator = nil
@@ -789,29 +1072,6 @@ final class AppRuntime {
         boundRootServicesContainer = nil
         rootServiceActivationState = .notStarted
         await downloads.releasePersistence()
-        phase = .unavailable
-        preparedDownloadContainer = nil
-
-        let task = Task { @MainActor [weak self] () -> Bool in
-            let deleted = await self?.fileResetOperation() ?? false
-            guard deleted, let self else { return false }
-            let engine = StoreMigrationEngine()
-            let load = await ModelContainerFactory.makeShared(using: engine)
-            guard case .ready(let container) = load else { return false }
-            // Seed one-time launch settings before publishing the replacement
-            // container. Publishing first lets RootView synchronously save while
-            // SwiftUI is attaching its SwiftData observers, which can deadlock
-            // the main thread immediately after Delete Synced Library Everywhere.
-            AppSettingsStore(context: container.mainContext)
-                .introducePodcastCapGatingIfNeeded(currentPodcastCount: 0)
-            self.install(load)
-            return true
-        }
-        resetTask = task
-        let result = await task.value
-        resetTask = nil
-        resetInFlight = false
-        return result
     }
 
     func dismissLibraryResetCloudFailure() {
@@ -917,7 +1177,9 @@ final class AppRuntime {
         return container
     }
 
-    var shouldRunBackgroundServices: Bool { mode == .normal }
+    var shouldRunBackgroundServices: Bool {
+        mode == .normal && !resetInFlight && !resetIntentPending
+    }
 
     /// Registers the notification delegate/categories once, independently of
     /// store readiness. The preparation screen can therefore retain a notification
@@ -955,7 +1217,8 @@ final class AppRuntime {
         guard mode == .normal,
               CloudKitLaunchPolicy.isMirroringEnabled(),
               cloudProjectionCoordinator == nil,
-              !resetInFlight else { return }
+              !resetInFlight,
+              !resetIntentPending else { return }
         if let cloudProjectionActivationTask {
             try await cloudProjectionActivationTask.value
             return
@@ -963,19 +1226,19 @@ final class AppRuntime {
         let task = Task { @MainActor [weak self] in
             guard let self, await prepareCloudAccount() else { return }
             try Task.checkCancellation()
-            guard !resetInFlight, cloudProjectionCoordinator == nil else { return }
+            guard !resetInFlight, !resetIntentPending, cloudProjectionCoordinator == nil else { return }
             let coordinator = try await CloudProjectionCoordinator.make(
                 applicationContainer: container
             )
             try Task.checkCancellation()
             try await coordinator.start(performInitialReconciliation: false)
-            if Task.isCancelled || resetInFlight {
+            if Task.isCancelled || resetInFlight || resetIntentPending {
                 await coordinator.stop()
                 return
             }
             cloudProjectionCoordinator = coordinator
             cloudSyncAvailability = .available
-            coordinator.scheduleInitialReconciliationInBackground()
+            await coordinator.scheduleInitialReconciliationInBackground()
         }
         cloudProjectionActivationTask = task
         defer { cloudProjectionActivationTask = nil }
@@ -1041,6 +1304,7 @@ final class AppRuntime {
     }
 
     private func handleCloudAccountChange() async {
+        guard !resetInFlight, !resetIntentPending else { return }
         let activation = cloudProjectionActivationTask
         activation?.cancel()
         _ = try? await activation?.value
@@ -1067,6 +1331,7 @@ final class AppRuntime {
     func connectToCurrentCloudAccount() async {
         guard mode == .normal,
               CloudKitLaunchPolicy.isMirroringEnabled(),
+              !resetInFlight, !resetIntentPending,
               case .ready(let container, _) = phase else { return }
         let activation = cloudProjectionActivationTask
         activation?.cancel()
@@ -1097,7 +1362,7 @@ final class AppRuntime {
         }
     }
 
-    var isResettingLocalData: Bool { resetInFlight }
+    var isResettingLocalData: Bool { resetInFlight || resetIntentPending }
 
     var rootServiceActivationStatus: RootServiceActivationStatus {
         switch rootServiceActivationState {
@@ -1115,6 +1380,7 @@ final class AppRuntime {
         for container: ModelContainer,
         operation: @escaping @MainActor @Sendable () async throws -> Void
     ) async -> Bool {
+        guard !resetIntentPending, !resetInFlight else { return false }
         while true {
             let activationID: UUID
             let activationTask: Task<RootServiceActivationResult, Never>
@@ -1333,6 +1599,11 @@ struct EarshotApp: App {
                     // explicit file-level recovery and must never bind to a fake
                     // empty data graph (#529, #781).
                     StoreRecoveryScreen(state: state, backup: runtime.recoveryBackup)
+                case .resetRecovery(let reason):
+                    InterruptedLibraryResetScreen(
+                        reason: reason,
+                        retry: runtime.retryInterruptedLibraryReset
+                    )
                 case let .ready(container, generation):
                     if isRunningTests {
                         Color.clear

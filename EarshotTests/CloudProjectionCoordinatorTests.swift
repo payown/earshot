@@ -326,6 +326,97 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testStopClosesReconciliationAdmissionAndJoinsScheduledWork() async throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let center = NotificationCenter()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: center
+        )
+        try await coordinator.start(performInitialReconciliation: false)
+        let checkpointCalls = Mutex(0)
+        let cancelledCheckpoints = Mutex(0)
+        await coordinator.setScheduledReconciliationCheckpointForTesting {
+            checkpointCalls.withLock { $0 += 1 }
+            do {
+                try await Task.sleep(for: .seconds(30))
+            } catch {
+                cancelledCheckpoints.withLock { $0 += 1 }
+            }
+        }
+
+        await coordinator.scheduleInitialReconciliationInBackground()
+        for _ in 0..<200 where checkpointCalls.withLock({ $0 }) == 0 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(checkpointCalls.withLock { $0 }, 1)
+
+        // Race another cold-launch request against stop's suspended join. It
+        // either coalesces into the running task or arrives after the gate has
+        // closed; in both orders it must not start work after stop returns.
+        let lateSchedule = Task {
+            await coordinator.scheduleInitialReconciliationInBackground()
+        }
+        let stop = Task { await coordinator.stop() }
+        await stop.value
+        await lateSchedule.value
+        await coordinator.scheduleInitialReconciliationInBackground()
+        center.post(name: .earshotCloudKitImportDidFinish, object: nil)
+
+        XCTAssertEqual(cancelledCheckpoints.withLock { $0 }, 1)
+        do {
+            try await coordinator.publishLocalSubscriptionGraphChange(feedURL: nil)
+            XCTFail("Stopped coordinators must reject projection writers")
+        } catch CloudProjectionCoordinator.ResetProjectionError.coordinatorStopped {
+            // Expected: ordinary writers have no admission after stop.
+        } catch {
+            XCTFail("Unexpected stop error: \(error)")
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(checkpointCalls.withLock { $0 }, 1)
+        XCTAssertEqual(
+            try projection.mainContext.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
+            0
+        )
+    }
+
+    func testStopWaitsForAlreadyAdmittedDirectReconciliation() async throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection
+        )
+        let gate = QueueApplicationRaceGate()
+        await coordinator.setDirectReconciliationCheckpointForTesting {
+            await gate.pause()
+        }
+
+        let reconciliation = Task { try await coordinator.reconcile() }
+        let reconciliationIsPaused = await gate.waitUntilPaused()
+        XCTAssertTrue(reconciliationIsPaused)
+        let stopReturned = Mutex(false)
+        let stop = Task {
+            await coordinator.stop()
+            stopReturned.withLock { $0 = true }
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertFalse(stopReturned.withLock { $0 })
+
+        await gate.resume()
+        try await reconciliation.value
+        await stop.value
+
+        XCTAssertTrue(stopReturned.withLock { $0 })
+        XCTAssertEqual(
+            try projection.mainContext.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
+            0,
+            "stop must wait for admitted reconciliation and prevent post-stop projection writes"
+        )
+    }
+
     func testTargetedSubscriptionNotificationUpdatesOnlyNamedPodcast() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
@@ -377,22 +468,26 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         remote.title = "Remote"
         projection.mainContext.insert(remote)
         try projection.mainContext.save()
-        var applyCount = 0
+        let applyCount = Mutex(0)
         let token = center.addObserver(
             forName: .earshotCloudProjectionDidApply,
             object: nil,
-            queue: .main
+            queue: nil
         ) { _ in
-            MainActor.assumeIsolated { applyCount += 1 }
+            applyCount.withLock { $0 += 1 }
         }
         defer { center.removeObserver(token) }
 
         for _ in 0..<100 {
             center.post(name: .earshotCloudKitImportDidFinish, object: nil)
         }
-        for _ in 0..<100 {
+        // The coordinator is deliberately pinned to a background serial
+        // executor. Give its scheduled reconciliation enough time under a
+        // loaded CI simulator instead of treating main-queue scheduling as a
+        // proxy for whether the projection was applied.
+        for _ in 0..<500 {
             if try ModelContext(app).fetchCount(FetchDescriptor<Podcast>()) == 1,
-               applyCount == 1 { break }
+               applyCount.withLock({ $0 }) == 1 { break }
             try await Task.sleep(for: .milliseconds(10))
         }
 
@@ -400,7 +495,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             try app.mainContext.fetchCount(FetchDescriptor<Podcast>()),
             1
         )
-        XCTAssertEqual(applyCount, 1)
+        XCTAssertEqual(applyCount.withLock { $0 }, 1)
 
         await coordinator.stop()
         let afterStop = CloudPodcastProjection()
@@ -414,7 +509,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             try app.mainContext.fetchCount(FetchDescriptor<Podcast>()),
             1
         )
-        XCTAssertEqual(applyCount, 1)
+        XCTAssertEqual(applyCount.withLock { $0 }, 1)
     }
 
     func testExistingSubscriptionsSeedOnlyCompactProjectionRows() async throws {
