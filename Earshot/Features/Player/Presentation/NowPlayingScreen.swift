@@ -1159,7 +1159,10 @@ private struct ScrubberView: View {
     /// on by the caller only when a duration is known.
     private var scrubberAccessibilityElement: some View {
         Color.clear
-            .frame(height: 56)
+            // Keep VoiceOver's replacement element explicitly as wide as the
+            // visible slider, with leading alignment, so its focus frame stays
+            // anchored to the slider instead of drifting toward the action grid.
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
             .accessibilityElement()
             .accessibilityIdentifier("player.position")
             // The label is static so VoiceOver isn't re-reading it every second as

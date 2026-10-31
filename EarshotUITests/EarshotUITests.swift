@@ -483,6 +483,8 @@ final class EarshotUITests: XCTestCase {
         let controls = [position, app.buttons["player.gobackward"], play, app.buttons["player.goforward"], route, notes]
         let initial = controls.map(\.frame)
         XCTAssertGreaterThanOrEqual(position.frame.height, 56)
+        XCTAssertEqual(position.frame.midX, app.frame.midX, accuracy: 2,
+                       "VoiceOver's playback-position focus frame should span the player center, not sit at the trailing edge")
         XCTAssertTrue(play.isHittable)
         XCTAssertLessThanOrEqual(play.frame.maxY, app.frame.maxY)
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Episode artwork")).firstMatch.exists)
