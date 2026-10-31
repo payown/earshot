@@ -614,6 +614,43 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.releasePersistence()
     }
 
+    func testReselectingSameFolderDuringBlockedRemovalRecreatesFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "reselect-during-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover()
+        let service = ListeningPlacesService(removeObservedDeviceFile: { bookmark, deviceID, expected in
+            try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        await service.setEnabled(false)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.chooseFolder(directory)
+        await remover.resumeRemoval()
+        await stopping.value
+
+        for _ in 0..<100 where !FileManager.default.fileExists(atPath: file.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "Reselecting the same physical folder must rebase the completed removal to absent and recreate its snapshot")
+        XCTAssertTrue(service.enabled)
+        XCTAssertEqual(service.folderName, directory.lastPathComponent)
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(contents.contains("60000"))
+        service.releasePersistence()
+    }
+
     func testStaleRemovalFailureDoesNotAffectReplacementFolderStatusOrSpeech() async throws {
         let firstDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-stale-remove-\(UUID().uuidString)", directoryHint: .isDirectory)
         let secondDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-new-folder-\(UUID().uuidString)", directoryHint: .isDirectory)
