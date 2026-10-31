@@ -38,6 +38,17 @@ final class QuickActionRepository {
         )
     }
 
+    func playerButtonConfiguration(
+        for button: PlayerTransportButton
+    ) -> QuickActionConfiguration<PlayerButtonRotorAction> {
+        resolve(
+            button.contentType,
+            all: PlayerButtonRotorAction.allCases,
+            fallback: button.defaultActions,
+            allowsEmptyEnabled: true
+        )
+    }
+
     func episodeOrder() -> [EpisodeAction] { episodeConfiguration().enabled }
     func podcastOrder() -> [PodcastAction] { podcastConfiguration().enabled }
     func queueOrder() -> [QueueItemAction] { queueConfiguration().enabled }
@@ -57,6 +68,18 @@ final class QuickActionRepository {
     func setTransportConfiguration(_ value: QuickActionConfiguration<TransportAction>) {
         store(
             .playerTransport,
+            enabled: value.enabled.map(\.rawValue),
+            available: value.available.map(\.rawValue),
+            allowsEmptyEnabled: true
+        )
+    }
+
+    func setPlayerButtonConfiguration(
+        _ value: QuickActionConfiguration<PlayerButtonRotorAction>,
+        for button: PlayerTransportButton
+    ) {
+        store(
+            button.contentType,
             enabled: value.enabled.map(\.rawValue),
             available: value.available.map(\.rawValue),
             allowsEmptyEnabled: true

@@ -17,6 +17,10 @@ final class QuickActionStore {
     private(set) var availableQueueActions: [QueueItemAction] = []
     private(set) var transportActions: [TransportAction] = defaultTransportActions
     private(set) var availableTransportActions: [TransportAction] = TransportAction.allCases
+    private(set) var rewindButtonActions = PlayerTransportButton.rewind.defaultActions
+    private(set) var availableRewindButtonActions: [PlayerButtonRotorAction] = []
+    private(set) var fastForwardButtonActions = PlayerTransportButton.fastForward.defaultActions
+    private(set) var availableFastForwardButtonActions: [PlayerButtonRotorAction] = []
 
     @ObservationIgnored private var context: ModelContext?
 
@@ -37,6 +41,12 @@ final class QuickActionStore {
         let transport = repo.transportConfiguration()
         transportActions = transport.enabled
         availableTransportActions = transport.available
+        let rewind = repo.playerButtonConfiguration(for: .rewind)
+        rewindButtonActions = rewind.enabled
+        availableRewindButtonActions = rewind.available
+        let fastForward = repo.playerButtonConfiguration(for: .fastForward)
+        fastForwardButtonActions = fastForward.enabled
+        availableFastForwardButtonActions = fastForward.available
     }
 
     func releasePersistence() { context = nil }
@@ -144,6 +154,68 @@ final class QuickActionStore {
         persistTransportActions()
     }
 
+    func playerButtonActions(for button: PlayerTransportButton) -> [PlayerButtonRotorAction] {
+        switch button {
+        case .rewind: rewindButtonActions
+        case .fastForward: fastForwardButtonActions
+        }
+    }
+
+    func availablePlayerButtonActions(for button: PlayerTransportButton) -> [PlayerButtonRotorAction] {
+        switch button {
+        case .rewind: availableRewindButtonActions
+        case .fastForward: availableFastForwardButtonActions
+        }
+    }
+
+    func movePlayerButtonActions(
+        from offsets: IndexSet,
+        to destination: Int,
+        for button: PlayerTransportButton
+    ) {
+        switch button {
+        case .rewind: rewindButtonActions.move(fromOffsets: offsets, toOffset: destination)
+        case .fastForward: fastForwardButtonActions.move(fromOffsets: offsets, toOffset: destination)
+        }
+        persistPlayerButtonActions(for: button)
+    }
+
+    func moveAvailablePlayerButtonActions(
+        from offsets: IndexSet,
+        to destination: Int,
+        for button: PlayerTransportButton
+    ) {
+        switch button {
+        case .rewind: availableRewindButtonActions.move(fromOffsets: offsets, toOffset: destination)
+        case .fastForward: availableFastForwardButtonActions.move(fromOffsets: offsets, toOffset: destination)
+        }
+        persistPlayerButtonActions(for: button)
+    }
+
+    func removePlayerButtonAction(_ action: PlayerButtonRotorAction, from button: PlayerTransportButton) {
+        switch button {
+        case .rewind:
+            guard let index = rewindButtonActions.firstIndex(of: action) else { return }
+            availableRewindButtonActions.append(rewindButtonActions.remove(at: index))
+        case .fastForward:
+            guard let index = fastForwardButtonActions.firstIndex(of: action) else { return }
+            availableFastForwardButtonActions.append(fastForwardButtonActions.remove(at: index))
+        }
+        persistPlayerButtonActions(for: button)
+    }
+
+    func addPlayerButtonAction(_ action: PlayerButtonRotorAction, to button: PlayerTransportButton) {
+        switch button {
+        case .rewind:
+            guard let index = availableRewindButtonActions.firstIndex(of: action) else { return }
+            rewindButtonActions.append(availableRewindButtonActions.remove(at: index))
+        case .fastForward:
+            guard let index = availableFastForwardButtonActions.firstIndex(of: action) else { return }
+            fastForwardButtonActions.append(availableFastForwardButtonActions.remove(at: index))
+        }
+        persistPlayerButtonActions(for: button)
+    }
+
     private func persistEpisodeActions() {
         repo?.setEpisodeConfiguration(QuickActionConfiguration(
             enabled: episodeActions,
@@ -170,6 +242,16 @@ final class QuickActionStore {
             enabled: transportActions,
             available: availableTransportActions
         ))
+    }
+
+    private func persistPlayerButtonActions(for button: PlayerTransportButton) {
+        repo?.setPlayerButtonConfiguration(
+            QuickActionConfiguration(
+                enabled: playerButtonActions(for: button),
+                available: availablePlayerButtonActions(for: button)
+            ),
+            for: button
+        )
     }
 
     private var repo: QuickActionRepository? {
