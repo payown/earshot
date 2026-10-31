@@ -137,8 +137,18 @@ final class QuickActionStore {
         persistTransportActions()
     }
 
-    func moveAvailableTransportActions(from: IndexSet, to: Int) {
-        availableTransportActions.move(fromOffsets: from, toOffset: to)
+    func moveAvailableTransportActions(
+        from: IndexSet,
+        to: Int,
+        visibleActions: [TransportAction]? = nil
+    ) {
+        if let visibleActions {
+            availableTransportActions = TransportActionVisibility.movingVisible(
+                availableTransportActions, visibleActions: visibleActions, from: from, to: to
+            )
+        } else {
+            availableTransportActions.move(fromOffsets: from, toOffset: to)
+        }
         persistTransportActions()
     }
 

@@ -58,7 +58,7 @@ struct QuickActionsSettingsView: View {
                           hasDefaultAction: false)
             actionSection(content: "Player transport", state: .available,
                           actions: visibleAvailableTransportActions, label: \.label,
-                          move: store.moveAvailableTransportActions,
+                          move: { store.moveAvailableTransportActions(from: $0, to: $1, visibleActions: visibleAvailableTransportActions) },
                           transfer: store.addTransportAction,
                           allowsEmptyEnabled: true,
                           hasDefaultAction: false)

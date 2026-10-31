@@ -597,7 +597,7 @@ struct NowPlayingScreen: View {
                     }
                 }
             }
-            .frame(height: Spacing.minTouchTarget)
+            .frame(minHeight: Spacing.minTouchTarget)
             .scrollIndicators(.hidden)
             .accessibilityElement(children: .contain)
         }

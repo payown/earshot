@@ -62,4 +62,20 @@ final class TransportActionTests: XCTestCase {
 
         XCTAssertEqual(result, [.skipBack30, .skipBack15, .skipForward30, .skipBack10])
     }
+
+    func testAvailableReorderingMovesVisibleActionAroundHiddenPrimaryDefaults() {
+        let available: [TransportAction] = [
+            .skipBack15, .skipBack30, .skipForward30, .skipForward120,
+        ]
+        let visibleAvailable = TransportActionVisibility.visible(
+            available, backSeconds: 15, forwardSeconds: 30
+        )
+
+        let result = TransportActionVisibility.movingVisible(
+            available, visibleActions: visibleAvailable, from: IndexSet(integer: 1), to: 0
+        )
+
+        XCTAssertEqual(visibleAvailable, [.skipBack30, .skipForward120])
+        XCTAssertEqual(result, [.skipBack15, .skipForward120, .skipForward30, .skipBack30])
+    }
 }
