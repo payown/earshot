@@ -660,6 +660,112 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.releasePersistence()
     }
 
+    func testRemovalAfterRelaunchWhileDisabledReadsBaselineAndRemovesFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "disabled-relaunch-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let firstLaunch = ListeningPlacesService()
+        firstLaunch.configure(context: container.mainContext)
+        await firstLaunch.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        await firstLaunch.setEnabled(false)
+        firstLaunch.releasePersistence()
+
+        let relaunched = ListeningPlacesService()
+        relaunched.configure(context: container.mainContext)
+        XCTAssertFalse(relaunched.enabled)
+        await relaunched.stopSharingAndRemoveDeviceFile()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(relaunched.status, .notConfigured)
+        relaunched.releasePersistence()
+    }
+
+    func testSlowRestoreFromPreviousFolderCannotReplaceCurrentObservedBaseline() async throws {
+        let oldDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-slow-old-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let newDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-slow-new-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: oldDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: newDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: oldDirectory)
+            try? FileManager.default.removeItem(at: newDirectory)
+        }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "slow-restore-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let initial = ListeningPlacesService()
+        initial.configure(context: container.mainContext)
+        await initial.chooseFolder(oldDirectory)
+        initial.releasePersistence()
+
+        let reader = SuspendedObservedListeningPlacesReader()
+        let service = ListeningPlacesService(readObservedDeviceFile: { bookmark, deviceID in
+            try await reader.read(bookmark: bookmark, deviceID: deviceID)
+        })
+        service.configure(context: container.mainContext)
+        let oldRestore = Task { await service.chooseFolder(oldDirectory) }
+        await reader.waitUntilSuspended()
+        await service.chooseFolder(newDirectory)
+        await reader.resumeRead()
+        await oldRestore.value
+
+        await service.setIncludeLabels(true)
+
+        let newFile = try deviceFile(in: newDirectory)
+        let contents = try String(contentsOf: newFile, encoding: .utf8)
+        XCTAssertTrue(contents.contains("Show"))
+        XCTAssertTrue(service.enabled)
+        guard case .lastWritten = service.status else { return XCTFail("The newer folder baseline should allow the privacy update") }
+        service.releasePersistence()
+    }
+
+    func testPrivacyRewriteUsesBaselineFromSupersededSuccessfulCompareAndReplace() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Private Show")
+        let episode = Episode(guid: "privacy-write-race", title: "Private Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let writer = SuspendedObservedListeningPlacesWriter()
+        let service = ListeningPlacesService(replaceObservedDeviceFile: { bookmark, deviceID, expected, data in
+            try await writer.replace(bookmark: bookmark, deviceID: deviceID, expected: expected, data: data)
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+
+        await writer.holdNextWrite()
+        let namesOn = Task { await service.setIncludeLabels(true) }
+        await writer.waitUntilSuspended()
+        let namesOff = Task { await service.setIncludeLabels(false) }
+        for _ in 0..<100 where service.includeLabels { await Task.yield() }
+        XCTAssertFalse(service.includeLabels)
+        await writer.resumeWrite()
+        await namesOn.value
+        await namesOff.value
+
+        let file = try deviceFile(in: directory)
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertFalse(contents.contains("Private Show"))
+        XCTAssertFalse(contents.contains("Private Episode"))
+        guard case .lastWritten = service.status else { return XCTFail("The privacy rewrite should succeed after the older compare-and-replace completes") }
+        service.releasePersistence()
+    }
+
     private func setSelfReportedApp(_ app: String, in file: URL) throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         json["app"] = app
@@ -1371,6 +1477,70 @@ private actor SuspendedListeningPlacesRemover {
             waiters.removeAll()
         }
         try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+    }
+}
+
+private actor SuspendedObservedListeningPlacesReader {
+    private let transport = ListeningPlacesFileTransport()
+    private var holdNext = true
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func resumeRead() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+
+    func read(bookmark: Data, deviceID: String) async throws -> Data? {
+        if holdNext {
+            holdNext = false
+            suspended = true
+            await withCheckedContinuation { continuation in
+                resumeContinuation = continuation
+                for waiter in waiters { waiter.resume() }
+                waiters.removeAll()
+            }
+        }
+        return try await transport.readDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+    }
+}
+
+private actor SuspendedObservedListeningPlacesWriter {
+    private let transport = ListeningPlacesFileTransport()
+    private var holdNext = false
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    func holdNextWrite() { holdNext = true }
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func resumeWrite() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+
+    func replace(bookmark: Data, deviceID: String, expected: Data?, data: Data) async throws {
+        if holdNext {
+            holdNext = false
+            suspended = true
+            await withCheckedContinuation { continuation in
+                resumeContinuation = continuation
+                for waiter in waiters { waiter.resume() }
+                waiters.removeAll()
+            }
+        }
+        try await transport.replaceDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: expected, with: data)
     }
 }
 
