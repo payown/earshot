@@ -106,6 +106,15 @@ actor ListeningPlacesFileTransport {
         }
     }
 
+    /// Compares the resolved filesystem targets, so alternate bookmarks for
+    /// the same directory (for example, a symlink) are recognized as one
+    /// device-file location.
+    func refersToSameFolder(_ firstBookmark: Data, as secondBookmark: Data) throws -> Bool {
+        let first = try resolveFolder(firstBookmark).standardizedFileURL.resolvingSymlinksInPath()
+        let second = try resolveFolder(secondBookmark).standardizedFileURL.resolvingSymlinksInPath()
+        return first == second
+    }
+
     func writeDeviceFile(bookmarkData: Data, deviceID: String, data: Data) throws {
         try withFolder(bookmarkData: bookmarkData) { folder in
             let (_, devices) = try prepareLayout(in: folder)
@@ -264,6 +273,13 @@ actor ListeningPlacesFileTransport {
         bookmarkData: Data,
         operation: (URL) throws -> T
     ) throws -> T {
+        let folder = try resolveFolder(bookmarkData)
+        let accessed = folder.startAccessingSecurityScopedResource()
+        defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
+        return try operation(folder)
+    }
+
+    private func resolveFolder(_ bookmarkData: Data) throws -> URL {
         var stale = false
         let folder = try URL(
             resolvingBookmarkData: bookmarkData,
@@ -272,9 +288,7 @@ actor ListeningPlacesFileTransport {
             bookmarkDataIsStale: &stale
         )
         guard !stale else { throw ListeningPlacesFileError.staleBookmark }
-        let accessed = folder.startAccessingSecurityScopedResource()
-        defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
-        return try operation(folder)
+        return folder
     }
 }
 

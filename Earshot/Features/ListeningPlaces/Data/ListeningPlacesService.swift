@@ -548,14 +548,20 @@ final class ListeningPlacesService {
             } else {
                 try await removeDeviceFile(bookmarkData, capturedDeviceID)
             }
-            let removalStillOwnsFolder = self.bookmarkData == bookmarkData
-                && deviceID == capturedDeviceID
+            let currentBookmark = self.bookmarkData
+            let samePhysicalFolder: Bool
+            if currentBookmark == bookmarkData {
+                samePhysicalFolder = true
+            } else if let currentBookmark {
+                samePhysicalFolder = (try? await transport.refersToSameFolder(bookmarkData, as: currentBookmark)) ?? false
+            } else {
+                samePhysicalFolder = false
+            }
+            let removalStillOwnsFolder = samePhysicalFolder && deviceID == capturedDeviceID
             if removalStillOwnsFolder {
-                // A binding can be renewed by reselecting this same folder
-                // while removal is suspended. The physical file is still the
-                // same target, so rebase it to absent even though that binding
-                // changed; a subsequent write can recreate the snapshot. A
-                // different folder or device must retain its own baseline.
+                // A binding can be renewed with a different bookmark (such as
+                // a symlink alias) while removal is suspended. Rebase only if
+                // both bookmarks resolve to the same physical folder/device.
                 observedDeviceFile = nil
                 hasObservedDeviceFile = true
                 diskMayDifferFromKnownSnapshot = true
