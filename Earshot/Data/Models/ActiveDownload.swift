@@ -114,7 +114,7 @@ enum LocalStateStore {
         _ episode: Episode, key: EpisodeLocalKey, rows: [LocalEpisodeState], in context: ModelContext
     ) {
         if episode.downloadStatus == .none && episode.downloadPath == nil
-            && rows.allSatisfy({ $0.volumeBoost == nil }) {
+            && rows.allSatisfy({ $0.volumeBoost == nil && $0.downloadAttemptID == nil }) {
             LocalRuntimeState.shared.removeEpisode(episode.persistentModelID)
             for row in rows { context.delete(row) }
             return
@@ -128,6 +128,7 @@ enum LocalStateStore {
         row.episodeGUID = key.guid
         row.downloadStatus = episode.downloadStatus
         row.downloadPath = episode.downloadPath
+        row.downloadAttemptID = episode.downloadAttemptID
         for duplicate in rows.dropFirst() { context.delete(duplicate) }
     }
 
@@ -187,6 +188,7 @@ enum LocalStateStore {
                 ? (preferred?.downloadStatus ?? .none)
                 : .downloaded
             survivor.downloadPath = downloaded?.downloadPath
+            survivor.downloadAttemptID = preferred?.downloadAttemptID
             survivor.volumeBoostRaw = ordered.compactMap(\.volumeBoostRaw).first
             for duplicate in ordered.dropFirst() { context.delete(duplicate) }
         }
@@ -220,6 +222,7 @@ enum LocalStateStore {
             guard let episode = matches[key] else { continue }
             episode.downloadStatus = row.downloadStatus
             episode.downloadPath = row.downloadPath
+            episode.downloadAttemptID = row.downloadAttemptID
         }
     }
 

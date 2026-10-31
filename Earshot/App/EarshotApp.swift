@@ -204,6 +204,7 @@ final class AppRuntime {
     private(set) var tabFocusRevision = 0
     private(set) var launchAttemptCount = 0
     private(set) var recoveryBackup: MigrationBackupDescriptor?
+    private(set) var recoveryRestoreBackup: MigrationBackupDescriptor?
     private(set) var backupRestorePhase: BackupRestorePhase = .idle
     private(set) var recoveryStorageState: RecoveryStorageState?
     private(set) var isRemovingRecoveryDownloads = false
@@ -245,6 +246,7 @@ final class AppRuntime {
     private var recoveryCheckInProgress = false
     private var recoveryCheckToken: String?
     private var recoveryForegroundCheckCount = 0
+    private var recoveryBackupsDiscovered = false
     private var preparedDownloadContainer: ModelContainer?
     private var resetTask: Task<Bool, Never>?
     private var resetInFlight = false
@@ -294,6 +296,9 @@ final class AppRuntime {
         // older supported schema.
         self.showsLaunchPreparation = showsLaunchPreparation ?? false
         self.recoveryBackup = recoveryBackup
+        self.recoveryRestoreBackup = recoveryBackup.flatMap {
+            MigrationBackupManager.isRestorableByCurrentBuild($0) ? $0 : nil
+        }
         self.launchOperation = launchOperation ?? Self.productionLaunch
         self.replacementLoadOperation = replacementLoadOperation ?? {
             await ModelContainerFactory.makeShared(using: StoreMigrationEngine())
@@ -521,6 +526,8 @@ final class AppRuntime {
         launchFocusRequest = nil
         backupRestorePhase = .idle
         recoveryBackup = nil
+        recoveryRestoreBackup = nil
+        recoveryBackupsDiscovered = false
         showsLaunchPreparation = true
         phase = .unavailable
         // StorePreparationScreen starts the attempt only after its initial
@@ -529,17 +536,24 @@ final class AppRuntime {
 
     func discoverRecoveryBackupIfNeeded() async {
         guard mode == .normal,
-              recoveryBackup == nil,
+              !recoveryBackupsDiscovered,
               backupRestorePhase == .idle,
               case .recovery = phase else { return }
         let storeURL = ModelContainerFactory.storeURL
-        recoveryBackup = await Task.detached {
-            MigrationBackupManager.latestRestorableBackup(at: storeURL)
+        let discovered = await Task.detached {
+            (
+                MigrationBackupManager.latestVerifiedBackup(at: storeURL),
+                MigrationBackupManager.latestRestorableBackup(at: storeURL)
+            )
         }.value
+        if recoveryBackup == nil { recoveryBackup = discovered.0 }
+        recoveryRestoreBackup = discovered.1
+        recoveryBackupsDiscovered = true
     }
 
     func restoreRecoveryBackup() {
-        guard let backup = recoveryBackup,
+        guard let backup = recoveryRestoreBackup,
+              MigrationBackupManager.isRestorableByCurrentBuild(backup),
               case .recovery = phase,
               backupRestorePhase != .restoring,
               backupRestoreTask == nil else { return }
@@ -886,6 +900,10 @@ final class AppRuntime {
                 // `discoverRecoveryBackupIfNeeded()` perform the integrity check
                 // before any restore or erase action becomes visible.
                 recoveryBackup = state.recoveryBackup
+                recoveryRestoreBackup = state.recoveryBackup.flatMap {
+                    MigrationBackupManager.isRestorableByCurrentBuild($0) ? $0 : nil
+                }
+                recoveryBackupsDiscovered = false
             }
             phase = .recovery(state)
         }
@@ -1598,7 +1616,11 @@ struct EarshotApp: App {
                     // Recovery has no ModelContainer. The screen performs only
                     // explicit file-level recovery and must never bind to a fake
                     // empty data graph (#529, #781).
-                    StoreRecoveryScreen(state: state, backup: runtime.recoveryBackup)
+                    StoreRecoveryScreen(
+                        state: state,
+                        backup: runtime.recoveryBackup,
+                        restoreBackup: runtime.recoveryRestoreBackup
+                    )
                 case .resetRecovery(let reason):
                     InterruptedLibraryResetScreen(
                         reason: reason,

@@ -14,17 +14,25 @@ import SwiftUI
 ///     build. Purely informational; the store is left intact and the only path
 ///     forward is updating the app. No destructive action is offered.
 ///   - ``StoreRecoveryState/storePredatesSupportedSchema`` — the store predates
-///     the public migration floor. Offers restore and erasure only while a
-///     verified safety snapshot is available.
+///     the public migration floor. A verified snapshot is required for erasure;
+///     restoration is offered only when a compatible snapshot is available.
 ///   - ``StoreRecoveryState/corruptStore`` — the store is unreadable. Erasure is
-///     likewise unavailable without a verified, restorable snapshot.
+///     likewise unavailable without a verified snapshot.
 struct StoreRecoveryScreen: View {
     let state: StoreRecoveryState
     let backup: MigrationBackupDescriptor?
+    let restoreBackup: MigrationBackupDescriptor?
 
-    init(state: StoreRecoveryState, backup: MigrationBackupDescriptor? = nil) {
+    init(
+        state: StoreRecoveryState,
+        backup: MigrationBackupDescriptor? = nil,
+        restoreBackup: MigrationBackupDescriptor? = nil
+    ) {
         self.state = state
         self.backup = backup
+        self.restoreBackup = restoreBackup ?? backup.flatMap {
+            MigrationBackupManager.isRestorableByCurrentBuild($0) ? $0 : nil
+        }
     }
 
     static let retryLabel = "Try preparing again"
@@ -184,18 +192,16 @@ struct StoreRecoveryScreen: View {
             ProgressView()
                 .accessibilityHidden(true)
         case .restored:
-            if state.isUnsupportedSchema {
-                resetAction
-            } else {
-                Button(Self.retryLabel) {
-                    runtime.retryLaunch()
-                }
-                .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
-                .buttonStyle(.borderedProminent)
-                .accessibilityHint(Self.retryHint)
+            Button(Self.retryLabel) {
+                runtime.retryLaunch()
             }
+            .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
+            .buttonStyle(.borderedProminent)
+            .accessibilityHint(Self.retryHint)
         case .failed:
-            restoreButton(label: "Try restoring again")
+            if offersRestore {
+                restoreButton(label: "Try restoring again")
+            }
             if offersRetry {
                 retryButton
             }
@@ -206,7 +212,7 @@ struct StoreRecoveryScreen: View {
             if offersRetry {
                 retryButton
             }
-            if backup != nil {
+            if offersRestore {
                 restoreButton(label: "Restore library backup")
             }
             if offersReset {
@@ -362,6 +368,11 @@ struct StoreRecoveryScreen: View {
         case .storePredatesSupportedSchema, .corruptStore:
             return backup != nil
         }
+    }
+
+    var offersRestore: Bool {
+        guard let backup = restoreBackup else { return false }
+        return MigrationBackupManager.isRestorableByCurrentBuild(backup)
     }
 
     var offersRetry: Bool {
@@ -578,11 +589,8 @@ struct StoreRecoveryScreen: View {
     }
 
     var restoreConfirmationMessage: String {
-        guard let backup else { return "" }
+        guard let backup = restoreBackup else { return "" }
         let date = backup.createdAt.formatted(date: .long, time: .shortened)
-        if state.isUnsupportedSchema {
-            return "This replaces the current library files with the verified backup saved on \(date). The restored library still cannot be opened by Earshot."
-        }
         return "This replaces your library with the backup saved on \(date), just before preparation started. Earshot will keep the current files until the backup is verified."
     }
 }
