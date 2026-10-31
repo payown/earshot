@@ -149,4 +149,52 @@ final class QuickActionRepositoryTests: XCTestCase {
         XCTAssertFalse(store.removeQueueAction(.playNow))
         XCTAssertEqual(store.queueActions, [.playNow])
     }
+
+    func testTransportActionsStartAvailableWithoutAddingPlayerButtons() {
+        let repo = QuickActionRepository(context: TestStore.freshContext())
+        let value = repo.transportConfiguration()
+
+        XCTAssertTrue(value.enabled.isEmpty)
+        XCTAssertEqual(value.available, TransportAction.allCases)
+    }
+
+    func testTransportActionsCanRemoveAllAndRoundTripAcrossStoreConfiguration() {
+        let context = TestStore.freshContext()
+        let store = QuickActionStore()
+        store.configure(context: context)
+
+        store.addTransportAction(.skipBack120)
+        store.addTransportAction(.skipForward300)
+        store.moveTransportActions(from: IndexSet(integer: 1), to: 0)
+        XCTAssertEqual(store.transportActions, [.skipForward300, .skipBack120])
+
+        store.removeTransportAction(.skipForward300)
+        store.removeTransportAction(.skipBack120)
+        XCTAssertTrue(store.transportActions.isEmpty)
+        let expectedAvailable = store.availableTransportActions
+
+        let relaunched = QuickActionStore()
+        relaunched.configure(context: context)
+        XCTAssertTrue(relaunched.transportActions.isEmpty)
+        XCTAssertEqual(relaunched.availableTransportActions, expectedAvailable)
+    }
+
+    func testTransportActionRowsRemainIndependentFromEpisodeQueueRows() {
+        let context = TestStore.freshContext()
+        let repo = QuickActionRepository(context: context)
+        repo.setEpisodeConfiguration(QuickActionConfiguration(
+            enabled: [.share], available: EpisodeAction.allCases.filter { $0 != .share }
+        ))
+        repo.setQueueConfiguration(QuickActionConfiguration(
+            enabled: [.playNow], available: QueueItemAction.allCases.filter { $0 != .playNow }
+        ))
+        repo.setTransportConfiguration(QuickActionConfiguration(
+            enabled: [.skipForward120],
+            available: TransportAction.allCases.filter { $0 != .skipForward120 }
+        ))
+
+        XCTAssertEqual(repo.episodeOrder(), [.share])
+        XCTAssertEqual(repo.queueOrder(), [.playNow])
+        XCTAssertEqual(repo.transportConfiguration().enabled, [.skipForward120])
+    }
 }

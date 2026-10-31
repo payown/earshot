@@ -2,8 +2,8 @@ import Foundation
 import Observation
 import SwiftData
 
-/// Holds the user's configured Quick Action order for all three content sets
-/// (episode, podcast, queue), persisted in ``QuickActionConfig`` via
+/// Holds the user's configured Quick Action order for episode, podcast, queue,
+/// and player transport actions, persisted in ``QuickActionConfig`` via
 /// ``QuickActionRepository``. Mutating an order updates every row's VoiceOver
 /// rotor live — no relaunch. Serves defaults until ``configure(context:)`` runs.
 @MainActor
@@ -15,6 +15,8 @@ final class QuickActionStore {
     private(set) var availablePodcastActions: [PodcastAction] = []
     private(set) var queueActions: [QueueItemAction] = defaultQueueItemActions
     private(set) var availableQueueActions: [QueueItemAction] = []
+    private(set) var transportActions: [TransportAction] = defaultTransportActions
+    private(set) var availableTransportActions: [TransportAction] = TransportAction.allCases
 
     @ObservationIgnored private var context: ModelContext?
 
@@ -32,6 +34,9 @@ final class QuickActionStore {
         let queue = repo.queueConfiguration()
         queueActions = queue.enabled
         availableQueueActions = queue.available
+        let transport = repo.transportConfiguration()
+        transportActions = transport.enabled
+        availableTransportActions = transport.available
     }
 
     func releasePersistence() { context = nil }
@@ -111,6 +116,34 @@ final class QuickActionStore {
         persistQueueActions()
     }
 
+    func moveTransportActions(from: IndexSet, to: Int, visibleActions: [TransportAction]? = nil) {
+        if let visibleActions {
+            transportActions = TransportActionVisibility.movingVisible(
+                transportActions, visibleActions: visibleActions, from: from, to: to
+            )
+        } else {
+            transportActions.move(fromOffsets: from, toOffset: to)
+        }
+        persistTransportActions()
+    }
+
+    func moveAvailableTransportActions(from: IndexSet, to: Int) {
+        availableTransportActions.move(fromOffsets: from, toOffset: to)
+        persistTransportActions()
+    }
+
+    func removeTransportAction(_ action: TransportAction) {
+        guard let index = transportActions.firstIndex(of: action) else { return }
+        availableTransportActions.append(transportActions.remove(at: index))
+        persistTransportActions()
+    }
+
+    func addTransportAction(_ action: TransportAction) {
+        guard let index = availableTransportActions.firstIndex(of: action) else { return }
+        transportActions.append(availableTransportActions.remove(at: index))
+        persistTransportActions()
+    }
+
     private func persistEpisodeActions() {
         repo?.setEpisodeConfiguration(QuickActionConfiguration(
             enabled: episodeActions,
@@ -129,6 +162,13 @@ final class QuickActionStore {
         repo?.setQueueConfiguration(QuickActionConfiguration(
             enabled: queueActions,
             available: availableQueueActions
+        ))
+    }
+
+    private func persistTransportActions() {
+        repo?.setTransportConfiguration(QuickActionConfiguration(
+            enabled: transportActions,
+            available: availableTransportActions
         ))
     }
 

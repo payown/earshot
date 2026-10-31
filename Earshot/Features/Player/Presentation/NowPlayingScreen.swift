@@ -50,6 +50,7 @@ struct NowPlayingScreen: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
     @Environment(SettingsStore.self) private var settings
+    @Environment(QuickActionStore.self) private var quickActions
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.playbackFolderNavigation) private var openPlaybackFolder
@@ -248,6 +249,7 @@ struct NowPlayingScreen: View {
             .foregroundStyle(.secondary)
             .accessibilityHidden(true) // The slider speaks both complete times.
             ScrubberView(player: player, preview: $scrubPreview)
+            additionalTransportRow
             transportRow
             HStack(spacing: Spacing.lg) {
                 RoutePickerView()
@@ -563,6 +565,43 @@ struct NowPlayingScreen: View {
     }
 
     // MARK: Transport
+
+    /// Optional, user-ordered skip buttons configured under Settings > Quick
+    /// Actions. The primary back/play/forward row remains unchanged.
+    @ViewBuilder
+    private var additionalTransportRow: some View {
+        let actions = TransportActionVisibility.visible(
+            quickActions.transportActions,
+            backSeconds: player.skipBackSeconds,
+            forwardSeconds: player.skipForwardSeconds
+        )
+        if !actions.isEmpty {
+            ScrollView(.horizontal) {
+                HStack(spacing: Spacing.sm) {
+                    ForEach(actions) { action in
+                        Button {
+                            switch action.direction {
+                            case .backward: player.skipBack(seconds: action.seconds)
+                            case .forward: player.skipForward(seconds: action.seconds)
+                            }
+                        } label: {
+                            Text(action.buttonTitle)
+                                .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+                                .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel(action.label)
+                        .accessibilityIdentifier("player.transportAction.\(action.id)")
+                    }
+                }
+            }
+            .frame(height: Spacing.minTouchTarget)
+            .scrollIndicators(.hidden)
+            .accessibilityElement(children: .contain)
+        }
+    }
 
     private var transportRow: some View {
         HStack(spacing: Spacing.md) {
