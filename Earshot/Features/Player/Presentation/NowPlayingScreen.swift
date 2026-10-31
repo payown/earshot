@@ -567,9 +567,9 @@ struct NowPlayingScreen: View {
 
     // MARK: Transport
 
-    /// Optional, user-ordered skip buttons form one centered, horizontally
-    /// scrollable strip at the top of the playback controls. The row stays
-    /// predictable as actions are added, and VoiceOver follows configured order.
+    /// Optional, user-ordered skip buttons fill one horizontally scrollable
+    /// strip at the top of the playback controls. They share the available
+    /// width when they fit and retain a touch-friendly minimum when they scroll.
     @ViewBuilder
     private var additionalTransportRow: some View {
         let actions = TransportActionVisibility.visible(
@@ -579,9 +579,15 @@ struct NowPlayingScreen: View {
         )
         if !actions.isEmpty {
             GeometryReader { geometry in
+                let spacing = Spacing.sm
+                let minimumButtonWidth = transportActionMinimumHeight + 2 * Spacing.xs
+                let availableButtonWidth = (geometry.size.width - spacing * CGFloat(actions.count - 1))
+                    / CGFloat(actions.count)
+                let buttonWidth = max(minimumButtonWidth, availableButtonWidth)
+                let contentWidth = buttonWidth * CGFloat(actions.count) + spacing * CGFloat(actions.count - 1)
+
                 ScrollView(.horizontal) {
                     HStack(spacing: Spacing.sm) {
-                        Spacer(minLength: 0)
                         ForEach(actions) { action in
                             Button {
                                 switch action.direction {
@@ -593,20 +599,20 @@ struct NowPlayingScreen: View {
                                     .font(.subheadline.weight(.semibold))
                                     .monospacedDigit()
                                     .frame(
-                                        minWidth: transportActionMinimumHeight,
+                                        maxWidth: .infinity,
                                         minHeight: transportActionMinimumHeight
                                     )
                                     .padding(.horizontal, Spacing.xs)
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(.primary)
                             .accessibilityLabel(action.label)
                             .accessibilityIdentifier("player.transportAction.\(action.id)")
+                            .frame(width: buttonWidth)
                         }
-                        Spacer(minLength: 0)
                     }
-                    .frame(minWidth: geometry.size.width)
+                    .frame(width: contentWidth)
                 }
                 .scrollIndicators(.hidden)
                 .accessibilityElement(children: .contain)

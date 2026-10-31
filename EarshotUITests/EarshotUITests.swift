@@ -467,7 +467,7 @@ final class EarshotUITests: XCTestCase {
         XCTAssertEqual(rename.value as? String, originalName)
     }
 
-    func testPlayerTransportActionsUseCenteredTopRow() {
+    func testPlayerTransportActionsFillTopRowWidth() {
         let app = XCUIApplication()
         app.launchArguments = [
             "-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying",
@@ -484,6 +484,10 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(back.isHittable)
         XCTAssertTrue(forward.isHittable)
         XCTAssertEqual((back.frame.midX + forward.frame.midX) / 2, app.frame.midX, accuracy: 2)
+        XCTAssertEqual(back.frame.minX, position.frame.minX, accuracy: 4,
+                       "The first action should align with the leading edge of the player controls")
+        XCTAssertEqual(forward.frame.maxX, position.frame.maxX, accuracy: 4,
+                       "The last action should align with the trailing edge of the player controls")
         XCTAssertLessThan(back.frame.maxY, position.frame.minY,
                           "The configured actions should sit in one row above the position slider")
     }
