@@ -473,6 +473,44 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertFalse(matches)
     }
 
+    func testGuardedDeviceFileReplacementPreservesChangedContents() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transport = ListeningPlacesFileTransport()
+        let bookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let original = Data("original provider contents".utf8)
+        let external = Data("changed by another app".utf8)
+        try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", data: original)
+        try external.write(to: deviceFile(in: directory), options: .atomic)
+
+        do {
+            try await transport.replaceDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", expected: original, with: Data("Earshot update".utf8))
+            XCTFail("A stale observation must not replace changed provider contents")
+        } catch ListeningPlacesFileError.deviceFileChanged {
+            XCTAssertEqual(try Data(contentsOf: deviceFile(in: directory)), external)
+        }
+    }
+
+    func testGuardedDeviceFileReplacementPreservesUnexpectedlyAppearingFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transport = ListeningPlacesFileTransport()
+        let bookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        try await transport.prepareFolder(bookmarkData: bookmark)
+        let external = Data("unrelated file created by provider user".utf8)
+        let target = directory.appending(path: "Listening Places/devices/1234abcd.json")
+        try external.write(to: target, options: .atomic)
+
+        do {
+            try await transport.replaceDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", expected: nil, with: Data("Earshot update".utf8))
+            XCTFail("A file that appeared after the absent observation must not be replaced")
+        } catch ListeningPlacesFileError.deviceFileChanged {
+            XCTAssertEqual(try Data(contentsOf: target), external)
+        }
+    }
+
     private func setSelfReportedApp(_ app: String, in file: URL) throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         json["app"] = app
