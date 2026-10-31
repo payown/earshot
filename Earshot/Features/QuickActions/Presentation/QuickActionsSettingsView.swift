@@ -110,31 +110,18 @@ struct QuickActionsSettingsView: View {
                 ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
                     let name = action[keyPath: label]
                     let focusID = "\(content).\(action.id)"
-                    let movementActions = rowActions(
-                        name: name, focusID: focusID,
-                        state: state, index: index, count: actions.count,
-                        move: move
+                    actionRow(
+                        action: action,
+                        name: name,
+                        focusID: focusID,
+                        state: state,
+                        index: index,
+                        count: actions.count,
+                        hasDefaultAction: hasDefaultAction,
+                        allowsEmptyEnabled: allowsEmptyEnabled,
+                        move: move,
+                        transfer: transfer
                     )
-                    Text(name)
-                        .accessibilityLabel(rowLabel(
-                            name, state: state, index: index, count: actions.count,
-                            hasDefaultAction: hasDefaultAction
-                        ))
-                        .accessibilityHint(state.hint(hasDefaultAction: hasDefaultAction))
-                        .accessibilityFocused($focusedActionID, equals: focusID)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(state.transferLabel) {
-                                transfer(action)
-                                announceTransfer(name, state: state)
-                                focusedActionID = focusID
-                            }
-                            .tint(state == .enabled ? .red : .green)
-                            .disabled(state == .enabled && actions.count == 1 && !allowsEmptyEnabled)
-                        }
-                        // Add/Remove already come from the native swipe action.
-                        // Attach only Enabled-row move actions to avoid duplicate
-                        // Add/Remove entries in VoiceOver's Actions rotor.
-                        .quickActionsRotorIfNeeded(movementActions)
                 }
                 // Available rows are only staged for adding. Reordering them
                 // has no effect on the enabled action order and creates a
@@ -142,6 +129,100 @@ struct QuickActionsSettingsView: View {
                 .onMove(perform: state == .enabled ? move : nil)
             }
         }
+    }
+
+    @ViewBuilder
+    private func actionRow<A: Identifiable>(
+        action: A,
+        name: String,
+        focusID: String,
+        state: ActionState,
+        index: Int,
+        count: Int,
+        hasDefaultAction: Bool,
+        allowsEmptyEnabled: Bool,
+        move: @escaping (IndexSet, Int) -> Void,
+        transfer: @escaping (A) -> Void
+    ) -> some View where A.ID == String {
+        if state == .available {
+            Button {
+                performTransfer(
+                    action, name: name, focusID: focusID,
+                    state: state, transfer: transfer
+                )
+            } label: {
+                Text(name)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(rowLabel(
+                name, state: state, index: index, count: count,
+                hasDefaultAction: hasDefaultAction
+            ))
+            .accessibilityHint(state.hint(hasDefaultAction: hasDefaultAction))
+            .accessibilityFocused($focusedActionID, equals: focusID)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                transferButton(
+                    action, name: name, focusID: focusID,
+                    state: state, count: count,
+                    allowsEmptyEnabled: allowsEmptyEnabled,
+                    transfer: transfer
+                )
+            }
+        } else {
+            let movementActions = rowActions(
+                name: name, focusID: focusID,
+                state: state, index: index, count: count,
+                move: move
+            )
+            Text(name)
+                .accessibilityLabel(rowLabel(
+                    name, state: state, index: index, count: count,
+                    hasDefaultAction: hasDefaultAction
+                ))
+                .accessibilityHint(state.hint(hasDefaultAction: hasDefaultAction))
+                .accessibilityFocused($focusedActionID, equals: focusID)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    transferButton(
+                        action, name: name, focusID: focusID,
+                        state: state, count: count,
+                        allowsEmptyEnabled: allowsEmptyEnabled,
+                        transfer: transfer
+                    )
+                }
+                // Add/Remove come from the native swipe action. Enabled rows
+                // add only Move choices to avoid duplicate rotor entries.
+                .quickActionsRotorIfNeeded(movementActions)
+        }
+    }
+
+    private func transferButton<A>(
+        _ action: A,
+        name: String,
+        focusID: String,
+        state: ActionState,
+        count: Int,
+        allowsEmptyEnabled: Bool,
+        transfer: @escaping (A) -> Void
+    ) -> some View {
+        Button(state.transferLabel) {
+            performTransfer(action, name: name, focusID: focusID, state: state, transfer: transfer)
+        }
+        .tint(state == .enabled ? .red : .green)
+        .disabled(state == .enabled && count == 1 && !allowsEmptyEnabled)
+    }
+
+    private func performTransfer<A>(
+        _ action: A,
+        name: String,
+        focusID: String,
+        state: ActionState,
+        transfer: @escaping (A) -> Void
+    ) {
+        transfer(action)
+        announceTransfer(name, state: state)
+        focusedActionID = focusID
     }
 
     private func rowActions(
@@ -228,6 +309,6 @@ private enum ActionState: Equatable {
         }
         return self == .enabled
             ? "Remove or reorder with the Actions rotor."
-            : "Add with the Actions rotor."
+            : "Double-tap to add to Enabled. You can also use the Actions rotor."
     }
 }
