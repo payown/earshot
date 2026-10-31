@@ -694,6 +694,64 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.releasePersistence()
     }
 
+    func testFolderSwitchDuringSuspendedIdentityComparisonCannotRebaseNewFolder() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let firstDirectory = parent.appending(path: "first", directoryHint: .isDirectory)
+        let alias = parent.appending(path: "alias", directoryHint: .isDirectory)
+        let secondDirectory = parent.appending(path: "second", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: firstDirectory)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "identity-switch-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover()
+        let comparator = SuspendedFolderIdentityComparator()
+        let service = ListeningPlacesService(
+            removeObservedDeviceFile: { bookmark, deviceID, expected in
+                try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+            },
+            refersToSameFolder: { first, second in await comparator.compare(first, second) }
+        )
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(firstDirectory)
+        let firstFile = try deviceFile(in: firstDirectory)
+        let firstSnapshot = try Data(contentsOf: firstFile)
+        await service.setEnabled(false)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.chooseFolder(alias)
+        await remover.resumeRemoval()
+        await comparator.waitUntilSuspended()
+        let secondDevices = secondDirectory.appending(path: "Listening Places/devices", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: secondDevices, withIntermediateDirectories: true)
+        let secondFile = secondDevices.appending(path: firstFile.lastPathComponent)
+        try firstSnapshot.write(to: secondFile)
+        await service.chooseFolder(secondDirectory)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondFile.path))
+        await comparator.resumeComparison(returning: true)
+        await stopping.value
+
+        for _ in 0..<100 {
+            if case .failed = service.status { break }
+            if let contents = try? String(contentsOf: secondFile, encoding: .utf8), contents.contains("60000") { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        if case .failed(let message) = service.status {
+            XCTFail("A stale identity comparison must not invalidate the new folder's observed baseline: \(message)")
+        }
+        XCTAssertEqual(service.folderName, secondDirectory.lastPathComponent)
+        let contents = try String(contentsOf: secondFile, encoding: .utf8)
+        XCTAssertTrue(contents.contains("60000"))
+        service.releasePersistence()
+    }
+
     func testStaleRemovalFailureDoesNotAffectReplacementFolderStatusOrSpeech() async throws {
         let firstDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-stale-remove-\(UUID().uuidString)", directoryHint: .isDirectory)
         let secondDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-new-folder-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -1652,6 +1710,31 @@ private actor SuspendedObservedListeningPlacesRemover {
         }
         if failsAfterResume { throw ListeningPlacesFileError.deviceFileChanged }
         try await transport.removeDeviceFileIfUnchanged(bookmarkData: bookmark, deviceID: deviceID, expected: expected)
+    }
+}
+
+private actor SuspendedFolderIdentityComparator {
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Bool, Never>?
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func resumeComparison(returning result: Bool) {
+        resumeContinuation?.resume(returning: result)
+        resumeContinuation = nil
+    }
+
+    func compare(_ first: Data, _ second: Data) async -> Bool {
+        suspended = true
+        return await withCheckedContinuation { continuation in
+            resumeContinuation = continuation
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+        }
     }
 }
 
