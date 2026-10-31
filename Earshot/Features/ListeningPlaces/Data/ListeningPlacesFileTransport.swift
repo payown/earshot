@@ -148,6 +148,31 @@ actor ListeningPlacesFileTransport {
         }
     }
 
+    /// Removes the device file only when it still matches the last observed
+    /// contents. An absent observation permits only an absent file.
+    func removeDeviceFileIfUnchanged(bookmarkData: Data, deviceID: String, expected: Data?) throws {
+        try withFolder(bookmarkData: bookmarkData) { folder in
+            let target = deviceFile(in: folder, deviceID: deviceID)
+            var coordinationError: NSError?
+            var operationError: Error?
+            NSFileCoordinator().coordinate(writingItemAt: target, options: .forDeleting, error: &coordinationError) { url in
+                do {
+                    let actual: Data?
+                    do { actual = try Data(contentsOf: url) }
+                    catch {
+                        guard (error as NSError).code == NSFileReadNoSuchFileError else { throw error }
+                        actual = nil
+                    }
+                    guard actual == expected else { throw ListeningPlacesFileError.deviceFileChanged }
+                    guard actual != nil else { return }
+                    try FileManager.default.removeItem(at: url)
+                } catch { operationError = error }
+            }
+            if let coordinationError { throw coordinationError }
+            if let operationError { throw operationError }
+        }
+    }
+
     private func deviceFile(in folder: URL, deviceID: String) -> URL {
         folder
             .appending(path: "Listening Places", directoryHint: .isDirectory)

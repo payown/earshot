@@ -511,6 +511,73 @@ final class ListeningPlacesServiceTests: XCTestCase {
         }
     }
 
+    func testGuardedDeviceFileRemovalPreservesChangedContents() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transport = ListeningPlacesFileTransport()
+        let bookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let original = Data("original provider contents".utf8)
+        let external = Data("changed by another app".utf8)
+        try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", data: original)
+        try external.write(to: deviceFile(in: directory), options: .atomic)
+
+        do {
+            try await transport.removeDeviceFileIfUnchanged(bookmarkData: bookmark, deviceID: "1234abcd", expected: original)
+            XCTFail("A stale observation must not remove changed provider contents")
+        } catch ListeningPlacesFileError.deviceFileChanged {
+            XCTAssertEqual(try Data(contentsOf: deviceFile(in: directory)), external)
+        }
+    }
+
+    func testGuardedDeviceFileRemovalPreservesUnexpectedlyAppearingFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transport = ListeningPlacesFileTransport()
+        let bookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        try await transport.prepareFolder(bookmarkData: bookmark)
+        let external = Data("unrelated file created by provider user".utf8)
+        let target = directory.appending(path: "Listening Places/devices/1234abcd.json")
+        try external.write(to: target, options: .atomic)
+
+        do {
+            try await transport.removeDeviceFileIfUnchanged(bookmarkData: bookmark, deviceID: "1234abcd", expected: nil)
+            XCTFail("A file that appeared after the absent observation must not be removed")
+        } catch ListeningPlacesFileError.deviceFileChanged {
+            XCTAssertEqual(try Data(contentsOf: target), external)
+        }
+    }
+
+    func testStopSharingPreservesExternallyChangedDeviceFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Example Show")
+        let episode = Episode(guid: "remove-guard-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 42)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        var announcements: [String] = []
+        let service = ListeningPlacesService(canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        let external = Data("changed by another app".utf8)
+        try external.write(to: file, options: .atomic)
+
+        await service.stopSharingAndRemoveDeviceFile()
+
+        guard case .failed = service.status else { return XCTFail("A stale file must prevent removal") }
+        XCTAssertTrue(service.enabled)
+        XCTAssertEqual(try Data(contentsOf: file), external)
+        XCTAssertEqual(announcements.count, 1)
+        XCTAssertTrue(announcements[0].contains("left it untouched"))
+        service.releasePersistence()
+    }
+
     private func setSelfReportedApp(_ app: String, in file: URL) throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         json["app"] = app
