@@ -67,6 +67,20 @@ enum ScreenshotFixtures {
         context.insert(tw)
         context.insert(op)
 
+        if CommandLine.arguments.contains("-playerTransportActionLayoutTest") {
+            let layoutActions: [TransportAction] = CommandLine.arguments.contains("-playerTransportActionOverflowTest")
+                ? [.skipBack120, .skipBack300, .skipForward60, .skipForward120,
+                   .skipForward300, .skipBack60, .skipBack10]
+                : [.skipBack120, .skipForward300]
+            for (index, action) in layoutActions.enumerated() {
+                context.insert(QuickActionConfig(
+                    contentType: .playerTransport,
+                    actionKey: "enabled:\(action.rawValue)",
+                    sortOrder: index
+                ))
+            }
+        }
+
         // MARK: Technically Working episodes (real titles/GUIDs/audio).
 
         // #170 — the featured "Now Playing" episode. Downloaded, resumed mid-way,
