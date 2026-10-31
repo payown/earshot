@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Configures the ordered Enabled and Available Quick Actions for Episode,
-/// Podcast, and Queue rows. The first enabled action remains the default
-/// double-tap; only enabled actions populate the VoiceOver Actions rotor.
+/// Configures ordered Quick Actions for Episode, Podcast, and Queue rows and
+/// VoiceOver actions for the full player's transport buttons.
 struct QuickActionsSettingsView: View {
     @Environment(QuickActionStore.self) private var store
     @Environment(SettingsStore.self) private var settings
