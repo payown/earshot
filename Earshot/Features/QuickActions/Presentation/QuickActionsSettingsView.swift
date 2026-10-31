@@ -117,12 +117,6 @@ struct QuickActionsSettingsView: View {
                         ))
                         .accessibilityHint(state.hint(hasDefaultAction: hasDefaultAction))
                         .accessibilityFocused($focusedActionID, equals: focusID)
-                        .rotorActions(rowActions(
-                            action: action, name: name, focusID: focusID,
-                            state: state, index: index, count: actions.count,
-                            move: move, transfer: transfer,
-                            allowsEmptyEnabled: allowsEmptyEnabled
-                        ))
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(state.transferLabel) {
                                 transfer(action)
@@ -132,6 +126,16 @@ struct QuickActionsSettingsView: View {
                             .tint(state == .enabled ? .red : .green)
                             .disabled(state == .enabled && actions.count == 1 && !allowsEmptyEnabled)
                         }
+                        // Attach custom rotor actions after swipeActions so the
+                        // List row exposes Add/Remove and reorder actions together
+                        // instead of allowing the swipe-action modifier to mask
+                        // the row's Actions rotor.
+                        .rotorActions(rowActions(
+                            action: action, name: name, focusID: focusID,
+                            state: state, index: index, count: actions.count,
+                            move: move, transfer: transfer,
+                            allowsEmptyEnabled: allowsEmptyEnabled
+                        ))
                 }
                 .onMove { move($0, $1) }
             }
