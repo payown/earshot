@@ -467,6 +467,43 @@ final class EarshotUITests: XCTestCase {
         XCTAssertEqual(rename.value as? String, originalName)
     }
 
+    func testPlayerTransportActionsUseCenteredTopRow() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying",
+            "-playerTransportActionLayoutTest"
+        ]
+        app.launch()
+
+        let back = app.buttons["player.transportAction.skipBack120"]
+        let forward = app.buttons["player.transportAction.skipForward300"]
+        let position = app.descendants(matching: .any).matching(identifier: "player.position").firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        XCTAssertTrue(forward.exists)
+        XCTAssertTrue(position.exists)
+        XCTAssertTrue(back.isHittable)
+        XCTAssertTrue(forward.isHittable)
+        XCTAssertEqual((back.frame.midX + forward.frame.midX) / 2, app.frame.midX, accuracy: 2)
+        XCTAssertLessThan(back.frame.maxY, position.frame.minY,
+                          "The configured actions should sit in one row above the position slider")
+    }
+
+    func testPlayerTransportActionRowScrollsWhenItOverflows() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying",
+            "-playerTransportActionLayoutTest", "-playerTransportActionOverflowTest"
+        ]
+        app.launch()
+
+        let row = app.scrollViews["player.transportActions"]
+        let lastAction = app.buttons["player.transportAction.skipBack10"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(lastAction.waitForExistence(timeout: 5))
+        row.swipeLeft()
+        XCTAssertTrue(lastAction.isHittable)
+    }
+
     func testAnchoredPlayerStabilityAndSliderEdges() { verifyAnchoredPlayer(largeText: false) }
     func testAnchoredPlayerStabilityAtLargestText() { verifyAnchoredPlayer(largeText: true) }
 
