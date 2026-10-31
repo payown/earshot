@@ -508,25 +508,7 @@ actor CloudProjectionCoordinator: ModelActor {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 do {
-                    let schema = Schema([
-                        CloudPodcastProjection.self,
-                        CloudEpisodeStateProjection.self,
-                        CloudQueueItemProjection.self,
-                        CloudSettingProjection.self,
-                        CloudBookmarkProjection.self,
-                        CloudListeningSessionProjection.self,
-                        CloudFolderProjection.self,
-                    ])
-                    let configuration = ModelConfiguration(
-                        "CloudProjection",
-                        schema: schema,
-                        url: storeURL,
-                        cloudKitDatabase: CloudKitLaunchPolicy.projectionDatabase()
-                    )
-                    let projectionContainer = try ModelContainer(
-                        for: schema,
-                        configurations: configuration
-                    )
+                    let projectionContainer = try makeProjectionContainer()
                     continuation.resume(returning: CloudProjectionCoordinator(
                         applicationContainer: applicationContainer,
                         projectionContainer: projectionContainer,
@@ -541,6 +523,54 @@ actor CloudProjectionCoordinator: ModelActor {
                 }
             }
         }
+    }
+
+    /// Replays the idempotent reset tombstone write without loading or
+    /// publishing the local library container. Used only while a durable reset
+    /// intent gates normal launch. This saves locally to the mirrored store;
+    /// CloudKit delivery remains unconfirmed.
+    nonisolated static func markAllSubscriptionsDeletedForResetRecovery() async throws {
+        let coordinator = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<CloudProjectionCoordinator, Error>) in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let applicationContainer = try ModelContainerFactory.makeInMemory()
+                    let projectionContainer = try makeProjectionContainer()
+                    continuation.resume(returning: CloudProjectionCoordinator(
+                        applicationContainer: applicationContainer,
+                        projectionContainer: projectionContainer
+                    ))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+        do {
+            try await coordinator.markAllSubscriptionsDeleted()
+            await coordinator.stop()
+        } catch {
+            await coordinator.stop()
+            throw error
+        }
+    }
+
+    nonisolated private static func makeProjectionContainer() throws -> ModelContainer {
+        let schema = Schema([
+            CloudPodcastProjection.self,
+            CloudEpisodeStateProjection.self,
+            CloudQueueItemProjection.self,
+            CloudSettingProjection.self,
+            CloudBookmarkProjection.self,
+            CloudListeningSessionProjection.self,
+            CloudFolderProjection.self,
+        ])
+        let configuration = ModelConfiguration(
+            "CloudProjection",
+            schema: schema,
+            url: storeURL,
+            cloudKitDatabase: CloudKitLaunchPolicy.projectionDatabase()
+        )
+        return try ModelContainer(for: schema, configurations: configuration)
     }
 
 #if DEBUG
