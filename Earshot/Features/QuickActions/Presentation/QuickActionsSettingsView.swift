@@ -110,6 +110,11 @@ struct QuickActionsSettingsView: View {
                 ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
                     let name = action[keyPath: label]
                     let focusID = "\(content).\(action.id)"
+                    let movementActions = rowActions(
+                        name: name, focusID: focusID,
+                        state: state, index: index, count: actions.count,
+                        move: move
+                    )
                     Text(name)
                         .accessibilityLabel(rowLabel(
                             name, state: state, index: index, count: actions.count,
@@ -126,16 +131,10 @@ struct QuickActionsSettingsView: View {
                             .tint(state == .enabled ? .red : .green)
                             .disabled(state == .enabled && actions.count == 1 && !allowsEmptyEnabled)
                         }
-                        // Attach custom rotor actions after swipeActions so the
-                        // List row exposes Add/Remove and reorder actions together
-                        // instead of allowing the swipe-action modifier to mask
-                        // the row's Actions rotor.
-                        .rotorActions(rowActions(
-                            action: action, name: name, focusID: focusID,
-                            state: state, index: index, count: actions.count,
-                            move: move, transfer: transfer,
-                            allowsEmptyEnabled: allowsEmptyEnabled
-                        ))
+                        // Add/Remove already come from the native swipe action.
+                        // Attach only Enabled-row move actions to avoid duplicate
+                        // Add/Remove entries in VoiceOver's Actions rotor.
+                        .quickActionsRotorIfNeeded(movementActions)
                 }
                 // Available rows are only staged for adding. Reordering them
                 // has no effect on the enabled action order and creates a
@@ -145,29 +144,15 @@ struct QuickActionsSettingsView: View {
         }
     }
 
-    private func rowActions<A: Identifiable>(
-        action: A,
+    private func rowActions(
         name: String,
         focusID: String,
         state: ActionState,
         index: Int,
         count: Int,
-        move: @escaping (IndexSet, Int) -> Void,
-        transfer: @escaping (A) -> Void,
-        allowsEmptyEnabled: Bool
-    ) -> [QuickActionItem] where A.ID == String {
+        move: @escaping (IndexSet, Int) -> Void
+    ) -> [QuickActionItem] {
         var items: [QuickActionItem] = []
-        if state == .available || count > 1 || allowsEmptyEnabled {
-            items.append(QuickActionItem(
-                id: state.transferLabel,
-                label: state.transferLabel,
-                isDestructive: state == .enabled
-            ) {
-                transfer(action)
-                announceTransfer(name, state: state)
-                focusedActionID = focusID
-            })
-        }
         if state == .enabled {
             items += QuickActionMoveLogic.targets(index: index, count: count).map { target in
                 QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
@@ -216,6 +201,17 @@ struct QuickActionsSettingsView: View {
     }
 
     private func addQueueAction(_ action: QueueItemAction) { store.addQueueAction(action) }
+}
+
+private extension View {
+    @ViewBuilder
+    func quickActionsRotorIfNeeded(_ actions: [QuickActionItem]) -> some View {
+        if actions.isEmpty {
+            self
+        } else {
+            rotorActions(actions)
+        }
+    }
 }
 
 private enum ActionState: Equatable {
