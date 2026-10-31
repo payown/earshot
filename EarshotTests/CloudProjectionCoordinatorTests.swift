@@ -468,22 +468,26 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         remote.title = "Remote"
         projection.mainContext.insert(remote)
         try projection.mainContext.save()
-        var applyCount = 0
+        let applyCount = Mutex(0)
         let token = center.addObserver(
             forName: .earshotCloudProjectionDidApply,
             object: nil,
-            queue: .main
+            queue: nil
         ) { _ in
-            MainActor.assumeIsolated { applyCount += 1 }
+            applyCount.withLock { $0 += 1 }
         }
         defer { center.removeObserver(token) }
 
         for _ in 0..<100 {
             center.post(name: .earshotCloudKitImportDidFinish, object: nil)
         }
-        for _ in 0..<100 {
+        // The coordinator is deliberately pinned to a background serial
+        // executor. Give its scheduled reconciliation enough time under a
+        // loaded CI simulator instead of treating main-queue scheduling as a
+        // proxy for whether the projection was applied.
+        for _ in 0..<500 {
             if try ModelContext(app).fetchCount(FetchDescriptor<Podcast>()) == 1,
-               applyCount == 1 { break }
+               applyCount.withLock({ $0 }) == 1 { break }
             try await Task.sleep(for: .milliseconds(10))
         }
 
@@ -491,7 +495,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             try app.mainContext.fetchCount(FetchDescriptor<Podcast>()),
             1
         )
-        XCTAssertEqual(applyCount, 1)
+        XCTAssertEqual(applyCount.withLock { $0 }, 1)
 
         await coordinator.stop()
         let afterStop = CloudPodcastProjection()
@@ -505,7 +509,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             try app.mainContext.fetchCount(FetchDescriptor<Podcast>()),
             1
         )
-        XCTAssertEqual(applyCount, 1)
+        XCTAssertEqual(applyCount.withLock { $0 }, 1)
     }
 
     func testExistingSubscriptionsSeedOnlyCompactProjectionRows() async throws {
