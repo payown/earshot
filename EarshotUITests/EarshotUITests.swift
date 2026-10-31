@@ -496,7 +496,8 @@ final class EarshotUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying",
-            "-playerTransportActionLayoutTest", "-playerTransportActionOverflowTest"
+            "-playerTransportActionLayoutTest", "-playerTransportActionOverflowTest",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"
         ]
         app.launch()
 
@@ -506,6 +507,8 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(lastAction.waitForExistence(timeout: 5))
         row.swipeLeft()
         XCTAssertTrue(lastAction.isHittable)
+        XCTAssertGreaterThanOrEqual(lastAction.frame.minY, row.frame.minY - 1)
+        XCTAssertLessThanOrEqual(lastAction.frame.maxY, row.frame.maxY + 1)
     }
 
     func testAnchoredPlayerStabilityAndSliderEdges() { verifyAnchoredPlayer(largeText: false) }

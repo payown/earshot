@@ -618,7 +618,7 @@ struct NowPlayingScreen: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("player.transportActions")
             }
-            .frame(height: transportActionMinimumHeight)
+            .frame(minHeight: transportActionMinimumHeight)
         }
     }
 
