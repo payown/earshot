@@ -651,6 +651,49 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.releasePersistence()
     }
 
+    func testReselectingSameFolderThroughSymlinkDuringBlockedRemovalRecreatesFile() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let directory = parent.appending(path: "actual", directoryHint: .isDirectory)
+        let alias = parent.appending(path: "alias", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: directory)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let actualBookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let aliasBookmark = try alias.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        XCTAssertNotEqual(actualBookmark, aliasBookmark, "This regression must exercise distinct bookmark data for the same folder")
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "symlink-reselect-during-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover()
+        let service = ListeningPlacesService(removeObservedDeviceFile: { bookmark, deviceID, expected in
+            try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        await service.setEnabled(false)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.chooseFolder(alias)
+        await remover.resumeRemoval()
+        await stopping.value
+
+        for _ in 0..<100 where !FileManager.default.fileExists(atPath: file.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "A symlink alias to the same physical folder must receive the snapshot after the in-flight removal")
+        XCTAssertTrue(service.enabled)
+        XCTAssertEqual(service.folderName, alias.lastPathComponent)
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(contents.contains("60000"))
+        service.releasePersistence()
+    }
+
     func testStaleRemovalFailureDoesNotAffectReplacementFolderStatusOrSpeech() async throws {
         let firstDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-stale-remove-\(UUID().uuidString)", directoryHint: .isDirectory)
         let secondDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-new-folder-\(UUID().uuidString)", directoryHint: .isDirectory)
