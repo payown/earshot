@@ -567,7 +567,9 @@ struct NowPlayingScreen: View {
     // MARK: Transport
 
     /// Optional, user-ordered skip buttons configured under Settings > Quick
-    /// Actions. The primary back/play/forward row remains unchanged.
+    /// Actions. They fill a wrapping row-major grid above the fixed primary
+    /// controls, so every button stays visible and VoiceOver follows the same
+    /// left-to-right, top-to-bottom order as the configured list.
     @ViewBuilder
     private var additionalTransportRow: some View {
         let actions = TransportActionVisibility.visible(
@@ -576,29 +578,28 @@ struct NowPlayingScreen: View {
             forwardSeconds: player.skipForwardSeconds
         )
         if !actions.isEmpty {
-            ScrollView(.horizontal) {
-                HStack(spacing: Spacing.sm) {
-                    ForEach(actions) { action in
-                        Button {
-                            switch action.direction {
-                            case .backward: player.skipBack(seconds: action.seconds)
-                            case .forward: player.skipForward(seconds: action.seconds)
-                            }
-                        } label: {
-                            Text(action.buttonTitle)
-                                .font(.subheadline.weight(.semibold))
-                                .monospacedDigit()
-                                .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
-                                .contentShape(Rectangle())
+            let columns = [GridItem(.adaptive(minimum: 72), spacing: Spacing.sm)]
+            LazyVGrid(columns: columns, alignment: .center, spacing: Spacing.sm) {
+                ForEach(actions) { action in
+                    Button {
+                        switch action.direction {
+                        case .backward: player.skipBack(seconds: action.seconds)
+                        case .forward: player.skipForward(seconds: action.seconds)
                         }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel(action.label)
-                        .accessibilityIdentifier("player.transportAction.\(action.id)")
+                    } label: {
+                        Text(action.buttonTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel(action.label)
+                    .accessibilityIdentifier("player.transportAction.\(action.id)")
                 }
             }
-            .frame(minHeight: Spacing.minTouchTarget)
-            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity)
             .accessibilityElement(children: .contain)
         }
     }
