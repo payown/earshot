@@ -120,12 +120,27 @@ enum MigrationBackupManager {
     }
     /// Returns the newest verified snapshot or restorable pre-manifest backup.
     static func latestRestorableBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
+        verifiedBackupCandidates(at: storeURL)
+            .filter(isRestorableByCurrentBuild)
+            .max { $0.createdAt < $1.createdAt }
+    }
+
+    /// Returns the newest verified snapshot even when the current build cannot
+    /// reopen its source schema. Recovery can still use such a snapshot to
+    /// protect a user-consented erase; the UI must not offer to restore it.
+    static func latestVerifiedBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
+        verifiedBackupCandidates(at: storeURL).max { $0.createdAt < $1.createdAt }
+    }
+
+    private static func verifiedBackupCandidates(
+        at storeURL: URL
+    ) -> [MigrationBackupDescriptor] {
         let root = backupRoot(for: storeURL)
         guard let directories = try? FileManager.default.contentsOfDirectory(
             at: root,
             includingPropertiesForKeys: [.creationDateKey, .isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return nil }
+        ) else { return [] }
         let candidates = directories.compactMap { directory -> MigrationBackupDescriptor? in
             guard (try? directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             else { return nil }
@@ -140,8 +155,6 @@ enum MigrationBackupManager {
             return try? legacyDescriptor(in: directory)
         }
         return candidates
-            .filter(isRestorableByCurrentBuild)
-            .max { $0.createdAt < $1.createdAt }
     }
 
     /// Manifest-only lookup; restore performs full validation before file changes.
@@ -153,7 +166,7 @@ enum MigrationBackupManager {
     /// app when its source schema has a known migration route to the current
     /// schema. Restoring reinstalls the preserved source; normal migration then
     /// advances it before the library is opened.
-    private static func isRestorableByCurrentBuild(
+    static func isRestorableByCurrentBuild(
         _ backup: MigrationBackupDescriptor
     ) -> Bool {
         guard backup.targetSchemaMajor <= targetSchemaMajor else { return false }
@@ -179,7 +192,6 @@ enum MigrationBackupManager {
         let expectedRoot = backupRoot(for: storeURL).standardizedFileURL
         guard backup.directoryURL.deletingLastPathComponent().standardizedFileURL
                 == expectedRoot,
-              isRestorableByCurrentBuild(backup),
               try validate(backup) else {
             throw MigrationBackupError.snapshotInvalid
         }

@@ -355,6 +355,7 @@ final class AppRuntimeTests: XCTestCase {
             "This version of your library cannot be opened by Earshot, and no compatible upgrade is currently planned. Your library is unchanged and a verified safety backup is available."
         )
         XCTAssertTrue(screen.offersReset)
+        XCTAssertFalse(screen.offersRestore)
         XCTAssertEqual(screen.resetConfirmationTitle, "Erase your entire library?")
         XCTAssertEqual(
             screen.resetConfirmationMessage,
@@ -363,11 +364,6 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertEqual(
             screen.resetFailureMessage,
             "Your library was not erased and its files are unchanged. Earshot could not complete the erase safely. Close and reopen Earshot to try again. Deleting Earshot will also delete the safety backup."
-        )
-        XCTAssertTrue(
-            screen.restoreConfirmationMessage.contains(
-                "The restored library still cannot be opened by Earshot."
-            )
         )
     }
 
@@ -380,6 +376,44 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertEqual(
             screen.message,
             "Earshot cannot open this older version of your library and could not verify a safety backup. Your library has not been changed. Close Earshot to preserve the files."
+        )
+    }
+
+    func testRecoveryKeepsSafeEraseAndCompatibleRestoreBackupsSeparate() {
+        let safetyBackup = MigrationBackupDescriptor(
+            id: UUID(),
+            directoryURL: URL(fileURLWithPath: "/tmp/v4-safety-backup"),
+            createdAt: Date(timeIntervalSince1970: 1_786_000_000),
+            sourceSchemaMajor: 4,
+            targetSchemaMajor: 14,
+            sourceStoreIdentifier: "unsupported-fixture",
+            byteCount: 42_000_000,
+            format: .verifiedSnapshot,
+            successfulTargetOpenCount: 0
+        )
+        let compatibleBackup = MigrationBackupDescriptor(
+            id: UUID(),
+            directoryURL: URL(fileURLWithPath: "/tmp/v13-compatible-backup"),
+            createdAt: Date(timeIntervalSince1970: 1_786_000_100),
+            sourceSchemaMajor: 13,
+            targetSchemaMajor: 13,
+            sourceStoreIdentifier: "compatible-fixture",
+            byteCount: 42_000_000,
+            format: .verifiedSnapshot,
+            successfulTargetOpenCount: 0
+        )
+        let screen = StoreRecoveryScreen(
+            state: .storePredatesSupportedSchema(backup: safetyBackup),
+            backup: safetyBackup,
+            restoreBackup: compatibleBackup
+        )
+
+        XCTAssertTrue(screen.offersReset)
+        XCTAssertTrue(screen.offersRestore)
+        XCTAssertTrue(
+            screen.restoreConfirmationMessage.contains(
+                compatibleBackup.createdAt.formatted(date: .long, time: .shortened)
+            )
         )
     }
 

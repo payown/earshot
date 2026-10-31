@@ -698,11 +698,11 @@ final class DownloadManagerTests: XCTestCase {
         let bytes = Data("synthetic downloaded audio".utf8)
         try bytes.write(to: audio)
         func openStore(at storeDirectory: URL) throws -> ModelContainer {
-            let schema = Schema(versionedSchema: EarshotSchemaV13.self)
+            let schema = Schema(versionedSchema: EarshotSchemaV14.self)
             return try ModelContainer(for: schema, configurations:
-                ModelConfiguration("FutureMirrored", schema: Schema(EarshotSchemaV13.mirroredModels),
+                ModelConfiguration("FutureMirrored", schema: Schema(EarshotSchemaV14.mirroredModels),
                                    url: storeDirectory.appendingPathComponent("primary.store"), cloudKitDatabase: .none),
-                ModelConfiguration("DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                ModelConfiguration("DeviceLocal", schema: Schema(EarshotSchemaV14.localModels),
                                    url: storeDirectory.appendingPathComponent("local.store"), cloudKitDatabase: .none))
         }
         for outcome in [PendingDownloadTerminalEvent.Outcome.failed, .finished(fileName: audio.lastPathComponent)] {

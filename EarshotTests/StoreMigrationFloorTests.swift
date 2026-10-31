@@ -190,9 +190,14 @@ final class StoreMigrationFloorTests: XCTestCase {
             return XCTFail("a pre-V5 store must return recovery without a container")
         }
         XCTAssertTrue(recovery.isUnsupportedSchema)
-        XCTAssertNotNil(
+        let backup = try XCTUnwrap(
             recovery.recoveryBackup,
             "unsupported recovery must carry its verified snapshot into the first screen"
+        )
+        XCTAssertFalse(MigrationBackupManager.isRestorableByCurrentBuild(backup))
+        XCTAssertNoThrow(
+            try MigrationBackupManager.validateForDestructiveRecovery(backup, at: storeURL),
+            "a verified old-schema snapshot can protect an explicit erase"
         )
         XCTAssertEqual(try storedMajorVersion(), majorVersion)
         XCTAssertEqual(

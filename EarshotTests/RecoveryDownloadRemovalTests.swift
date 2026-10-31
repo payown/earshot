@@ -219,11 +219,11 @@ final class RecoveryVolumeSettingsTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         func open() throws -> ModelContainer {
-            let schema = Schema(versionedSchema: EarshotSchemaV13.self)
+            let schema = Schema(versionedSchema: EarshotSchemaV14.self)
             return try ModelContainer(for: schema, configurations:
-                ModelConfiguration("FutureMirrored", schema: Schema(EarshotSchemaV13.mirroredModels),
+                ModelConfiguration("FutureMirrored", schema: Schema(EarshotSchemaV14.mirroredModels),
                                    url: directory.appending(path: "primary.store"), cloudKitDatabase: .none),
-                ModelConfiguration("DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                ModelConfiguration("DeviceLocal", schema: Schema(EarshotSchemaV14.localModels),
                                    url: directory.appending(path: "local.store"), cloudKitDatabase: .none))
         }
         let feed = "https://example.com/feed"

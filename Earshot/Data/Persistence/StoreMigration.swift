@@ -806,25 +806,34 @@ enum StoreMigration {
             )
             let context = ModelContext(container)
             for row in expected.podcasts {
-                context.insert(LocalPodcastState(feedURL: row.feedURL, refreshedAt: row.refreshedAt))
+                let state = EarshotSchemaV12.LocalPodcastState()
+                state.feedURL = row.feedURL
+                state.refreshedAt = row.refreshedAt
+                context.insert(state)
             }
             for row in expected.episodes {
-                context.insert(LocalEpisodeState(
-                    podcastFeedURL: row.feedURL,
-                    episodeGUID: row.guid,
-                    downloadStatus: DownloadStatus(rawValue: row.statusRaw) ?? .none,
-                    downloadPath: row.path
-                ))
+                let state = EarshotSchemaV12.LocalEpisodeState()
+                state.podcastFeedURL = row.feedURL
+                state.episodeGUID = row.guid
+                state.downloadStatusRaw = row.statusRaw
+                state.downloadPath = row.path
+                context.insert(state)
             }
             for row in expected.settings {
-                context.insert(LocalAppSetting(key: row.key, value: row.value))
+                let setting = EarshotSchemaV12.LocalAppSetting()
+                setting.key = row.key
+                setting.value = row.value
+                context.insert(setting)
             }
             try context.save()
             guard try localSnapshot(in: context) == expected else {
                 throw CocoaError(.fileWriteUnknown)
             }
             try failIfInjected(at: .beforeSplitMarker)
-            try LocalAppSettingIdentity.setValue("1", for: splitCompletionKey, in: context)
+            let marker = EarshotSchemaV12.LocalAppSetting()
+            marker.key = splitCompletionKey
+            marker.value = "1"
+            context.insert(marker)
             try context.save()
             try failIfInjected(at: .afterSplitMarker)
         }
@@ -832,13 +841,13 @@ enum StoreMigration {
 
     private static func localSnapshot(in context: ModelContext) throws -> BridgeSnapshot {
         BridgeSnapshot(
-            podcasts: try context.fetch(FetchDescriptor<LocalPodcastState>())
+            podcasts: try context.fetch(FetchDescriptor<EarshotSchemaV12.LocalPodcastState>())
                 .map { PodcastStateSnapshot(feedURL: $0.feedURL, refreshedAt: $0.refreshedAt) }
                 .sorted { $0.feedURL < $1.feedURL },
-            episodes: try context.fetch(FetchDescriptor<LocalEpisodeState>())
+            episodes: try context.fetch(FetchDescriptor<EarshotSchemaV12.LocalEpisodeState>())
                 .map { EpisodeStateSnapshot(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID, statusRaw: $0.downloadStatusRaw, path: $0.downloadPath) }
                 .sorted { ($0.feedURL, $0.guid) < ($1.feedURL, $1.guid) },
-            settings: try context.fetch(FetchDescriptor<LocalAppSetting>())
+            settings: try context.fetch(FetchDescriptor<EarshotSchemaV12.LocalAppSetting>())
                 .filter { $0.key != splitCompletionKey }
                 .map { SettingSnapshot(key: $0.key, value: $0.value) }
                 .sorted { $0.key < $1.key }
