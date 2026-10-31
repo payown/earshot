@@ -567,9 +567,8 @@ struct NowPlayingScreen: View {
     // MARK: Transport
 
     /// Optional, user-ordered skip buttons configured under Settings > Quick
-    /// Actions. They fill a wrapping row-major grid above the fixed primary
-    /// controls, so every button stays visible and VoiceOver follows the same
-    /// left-to-right, top-to-bottom order as the configured list.
+    /// Actions. Rows wrap above the fixed primary controls and center as a group,
+    /// so the layout stays balanced while VoiceOver follows the configured order.
     @ViewBuilder
     private var additionalTransportRow: some View {
         let actions = TransportActionVisibility.visible(
@@ -578,8 +577,7 @@ struct NowPlayingScreen: View {
             forwardSeconds: player.skipForwardSeconds
         )
         if !actions.isEmpty {
-            let columns = [GridItem(.adaptive(minimum: 72), spacing: Spacing.sm)]
-            LazyVGrid(columns: columns, alignment: .center, spacing: Spacing.sm) {
+            CenteredTransportFlowLayout(horizontalSpacing: Spacing.sm, verticalSpacing: Spacing.sm) {
                 ForEach(actions) { action in
                     Button {
                         switch action.direction {
@@ -591,10 +589,11 @@ struct NowPlayingScreen: View {
                             .font(.subheadline.weight(.semibold))
                             .monospacedDigit()
                             .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
-                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, Spacing.xs)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tint)
                     .accessibilityLabel(action.label)
                     .accessibilityIdentifier("player.transportAction.\(action.id)")
                 }
@@ -1042,6 +1041,64 @@ struct NowPlayingScreen: View {
     /// Pluralizes a seconds count so VoiceOver never reads "1 seconds".
     private func secondsPhrase(_ seconds: Int) -> String {
         "\(seconds) second\(seconds == 1 ? "" : "s")"
+    }
+}
+
+/// Wraps configured transport actions into centered rows. A grid fills empty
+/// cells from the leading edge, which leaves a short final row visibly off
+/// center; this layout keeps each row centered without changing view order.
+private struct CenteredTransportFlowLayout: Layout {
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+
+    private struct Row {
+        var indices: [Int]
+        var width: CGFloat
+        var height: CGFloat
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let availableWidth = proposal.width ?? sizes.reduce(0) { $0 + $1.width }
+        let rows = makeRows(sizes: sizes, availableWidth: availableWidth)
+        let contentHeight = rows.reduce(0) { $0 + $1.height }
+            + CGFloat(max(0, rows.count - 1)) * verticalSpacing
+        return CGSize(width: proposal.width ?? (rows.map(\.width).max() ?? 0), height: contentHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let rows = makeRows(sizes: sizes, availableWidth: bounds.width)
+        var rowMinY = bounds.minY
+
+        for row in rows {
+            var x = bounds.minX + (bounds.width - row.width) / 2
+            for index in row.indices {
+                let size = sizes[index]
+                subviews[index].place(
+                    at: CGPoint(x: x + size.width / 2, y: rowMinY + row.height / 2),
+                    anchor: .center,
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + horizontalSpacing
+            }
+            rowMinY += row.height + verticalSpacing
+        }
+    }
+
+    private func makeRows(sizes: [CGSize], availableWidth: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        for (index, size) in sizes.enumerated() {
+            guard let lastIndex = rows.indices.last,
+                  rows[lastIndex].width + horizontalSpacing + size.width <= availableWidth else {
+                rows.append(Row(indices: [index], width: size.width, height: size.height))
+                continue
+            }
+            rows[lastIndex].indices.append(index)
+            rows[lastIndex].width += horizontalSpacing + size.width
+            rows[lastIndex].height = max(rows[lastIndex].height, size.height)
+        }
+        return rows
     }
 }
 
