@@ -287,6 +287,7 @@ final class ListeningPlacesService {
     @ObservationIgnored private let writeDeviceFile: @Sendable (Data, String, Data) async throws -> Void
     @ObservationIgnored private let replaceDeviceFile: (@Sendable (Data, String, Data?, Data) async throws -> Void)?
     @ObservationIgnored private let removeDeviceFile: @Sendable (Data, String) async throws -> Void
+    @ObservationIgnored private let removeObservedDeviceFile: (@Sendable (Data, String, Data?) async throws -> Void)?
     @ObservationIgnored private let canAnnounce: @MainActor () -> Bool
     @ObservationIgnored private let announceOlderFileFailure: @MainActor (String) -> Void
     @ObservationIgnored private let confirmOlderFile: @Sendable (Data, String, Data) async throws -> Bool
@@ -332,6 +333,13 @@ final class ListeningPlacesService {
         }
         self.removeDeviceFile = removeDeviceFile ?? { bookmark, deviceID in
             try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+        }
+        if removeDeviceFile == nil {
+            self.removeObservedDeviceFile = { bookmark, deviceID, expected in
+                try await transport.removeDeviceFileIfUnchanged(bookmarkData: bookmark, deviceID: deviceID, expected: expected)
+            }
+        } else {
+            self.removeObservedDeviceFile = nil
         }
         self.writeDeviceFile = writeDeviceFile ?? { bookmark, deviceID, data in
             try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: deviceID, data: data)
@@ -499,7 +507,12 @@ final class ListeningPlacesService {
                 Task { @MainActor [weak self] in await self?.writeSnapshot() }
                 return
             }
-            try await removeDeviceFile(bookmarkData, deviceID)
+            guard hasObservedDeviceFile else { throw ListeningPlacesFileError.deviceFileChanged }
+            if let removeObservedDeviceFile {
+                try await removeObservedDeviceFile(bookmarkData, deviceID, observedDeviceFile)
+            } else {
+                try await removeDeviceFile(bookmarkData, deviceID)
+            }
             // The file may have disappeared even if a concurrent settings
             // change superseded this operation; a replacement must be written.
             diskMayDifferFromKnownSnapshot = true
@@ -527,6 +540,7 @@ final class ListeningPlacesService {
             status = .notConfigured
         } catch {
             fail(error)
+            announceDeviceFileConflictIfNeeded(error)
         }
     }
 
@@ -676,12 +690,7 @@ final class ListeningPlacesService {
                    self.bookmarkData == bookmarkData {
                     fail(error)
                     reportedWriteFailure = true
-                    if case .deviceFileChanged? = error as? ListeningPlacesFileError,
-                       !announcedDeviceFileConflict,
-                       canAnnounce() {
-                        announcedDeviceFileConflict = true
-                        announceOlderFileFailure(error.localizedDescription)
-                    }
+                    announceDeviceFileConflictIfNeeded(error)
                 }
                 scheduleOlderFileFailureConfirmation(
                     error: error, generation: generation, bookmark: bookmarkData,
@@ -722,6 +731,14 @@ final class ListeningPlacesService {
         AppLog.data.error(
             "Listening Places write failed [\(cocoaError.domain, privacy: .public) \(cocoaError.code, privacy: .public)]: \(error.localizedDescription, privacy: .public)"
         )
+    }
+
+    private func announceDeviceFileConflictIfNeeded(_ error: Error) {
+        guard case .deviceFileChanged? = error as? ListeningPlacesFileError,
+              !announcedDeviceFileConflict,
+              canAnnounce() else { return }
+        announcedDeviceFileConflict = true
+        announceOlderFileFailure(error.localizedDescription)
     }
 
     private func contextIsCurrent(_ capturedBindingID: UUID) -> Bool {
