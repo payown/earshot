@@ -284,6 +284,7 @@ final class ListeningPlacesService {
     private(set) var status: Status = .notConfigured
 
     @ObservationIgnored private let transport: ListeningPlacesFileTransport
+    @ObservationIgnored private let readObservedDeviceFile: @Sendable (Data, String) async throws -> Data?
     @ObservationIgnored private let writeDeviceFile: @Sendable (Data, String, Data) async throws -> Void
     @ObservationIgnored private let replaceDeviceFile: (@Sendable (Data, String, Data?, Data) async throws -> Void)?
     @ObservationIgnored private let removeDeviceFile: @Sendable (Data, String) async throws -> Void
@@ -320,6 +321,8 @@ final class ListeningPlacesService {
         removeDeviceFile: (@Sendable (Data, String) async throws -> Void)? = nil,
         removeObservedDeviceFile: (@Sendable (Data, String, Data?) async throws -> Void)? = nil,
         writeDeviceFile: (@Sendable (Data, String, Data) async throws -> Void)? = nil,
+        replaceObservedDeviceFile: (@Sendable (Data, String, Data?, Data) async throws -> Void)? = nil,
+        readObservedDeviceFile: (@Sendable (Data, String) async throws -> Data?)? = nil,
         canAnnounce: (@MainActor () -> Bool)? = nil,
         announceOlderFileFailure: (@MainActor (String) -> Void)? = nil,
         confirmOlderFile: (@Sendable (Data, String, Data) async throws -> Bool)? = nil
@@ -327,6 +330,9 @@ final class ListeningPlacesService {
         let transport = ListeningPlacesFileTransport()
         let confirmationTransport = ListeningPlacesFileTransport()
         self.transport = transport
+        self.readObservedDeviceFile = readObservedDeviceFile ?? { bookmark, deviceID in
+            try await transport.readDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+        }
         self.canAnnounce = canAnnounce ?? { UIApplication.shared.applicationState == .active && UIAccessibility.isVoiceOverRunning }
         self.announceOlderFileFailure = announceOlderFileFailure ?? { Announcer.announce($0) }
         self.confirmOlderFile = confirmOlderFile ?? { bookmark, deviceID, contents in
@@ -347,7 +353,9 @@ final class ListeningPlacesService {
         self.writeDeviceFile = writeDeviceFile ?? { bookmark, deviceID, data in
             try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: deviceID, data: data)
         }
-        if writeDeviceFile == nil {
+        if let replaceObservedDeviceFile {
+            self.replaceDeviceFile = replaceObservedDeviceFile
+        } else if writeDeviceFile == nil {
             self.replaceDeviceFile = { bookmark, deviceID, expected, data in
                 try await transport.replaceDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: expected, with: data)
             }
@@ -508,23 +516,41 @@ final class ListeningPlacesService {
         writeGeneration += 1
         let generation = writeGeneration
         let capturedDeviceID = deviceID
+        let capturedBindingID = bindingID
         do {
             pendingWriteTask?.cancel()
             pendingWriteTask = nil
             await waitForInFlightFileWrites()
             guard generation == writeGeneration,
                   self.bookmarkData == bookmarkData,
-                  deviceID == capturedDeviceID else {
+                  deviceID == capturedDeviceID,
+                  bindingID == capturedBindingID,
+                  context != nil else {
                 Task { @MainActor [weak self] in await self?.writeSnapshot() }
                 return
             }
-            guard hasObservedDeviceFile else { throw ListeningPlacesFileError.deviceFileChanged }
+            if !hasObservedDeviceFile {
+                let reader = readObservedDeviceFile
+                let observed = try await reader(bookmarkData, capturedDeviceID)
+                guard generation == writeGeneration,
+                      self.bookmarkData == bookmarkData,
+                      deviceID == capturedDeviceID,
+                      bindingID == capturedBindingID,
+                      context != nil else {
+                    retryCurrentSnapshotAfterRemoval = enabled
+                    return
+                }
+                observedDeviceFile = observed
+                hasObservedDeviceFile = true
+            }
             if let removeObservedDeviceFile {
                 try await removeObservedDeviceFile(bookmarkData, capturedDeviceID, observedDeviceFile)
             } else {
                 try await removeDeviceFile(bookmarkData, capturedDeviceID)
             }
-            let removalStillOwnsFolder = self.bookmarkData == bookmarkData && deviceID == capturedDeviceID
+            let removalStillOwnsFolder = self.bookmarkData == bookmarkData
+                && deviceID == capturedDeviceID
+                && bindingID == capturedBindingID
             if removalStillOwnsFolder {
                 // Rebase before the generation check so a re-enable in the
                 // same folder writes against the now-absent file. A removal
@@ -535,7 +561,8 @@ final class ListeningPlacesService {
             }
             guard generation == writeGeneration,
                   self.bookmarkData == bookmarkData,
-                  deviceID == capturedDeviceID else {
+                  deviceID == capturedDeviceID,
+                  bindingID == capturedBindingID else {
                 retryCurrentSnapshotAfterRemoval = enabled
                 return
             }
@@ -559,7 +586,8 @@ final class ListeningPlacesService {
         } catch {
             guard generation == writeGeneration,
                   self.bookmarkData == bookmarkData,
-                  deviceID == capturedDeviceID else {
+                  deviceID == capturedDeviceID,
+                  bindingID == capturedBindingID else {
                 retryCurrentSnapshotAfterRemoval = enabled
                 return
             }
@@ -571,20 +599,26 @@ final class ListeningPlacesService {
     private func restoreExistingAndWrite() async {
         guard let bookmarkData, let context else { return }
         let generation = writeGeneration
+        let capturedBindingID = bindingID
+        let capturedDeviceID = deviceID
+        func stillOwnsRestoration() -> Bool {
+            generation == writeGeneration
+                && enabled
+                && self.bookmarkData == bookmarkData
+                && deviceID == capturedDeviceID
+                && bindingID == capturedBindingID
+                && self.context === context
+        }
         do {
             // Refresh an unmodified legacy README even when the snapshot has
             // not changed and therefore does not need a device-file write.
             // Documentation refresh must not prevent reading an existing device
             // file if a folder provider cannot update the README.
             try? await transport.prepareFolder(bookmarkData: bookmarkData)
-            guard !Task.isCancelled,
-                  generation == writeGeneration,
-                  enabled,
-                  self.bookmarkData == bookmarkData else { return }
-            if let data = try await transport.readDeviceFile(
-                bookmarkData: bookmarkData,
-                deviceID: deviceID
-            ) {
+            guard !Task.isCancelled, stillOwnsRestoration() else { return }
+            let reader = readObservedDeviceFile
+            if let data = try await reader(bookmarkData, capturedDeviceID) {
+                guard !Task.isCancelled, stillOwnsRestoration() else { return }
                 observedDeviceFile = data
                 hasObservedDeviceFile = true
                 announcedDeviceFileConflict = false
@@ -592,16 +626,14 @@ final class ListeningPlacesService {
                     modelContainer: context.container
                 )
                 let restored = try await loader.restore(data: data)
-                guard generation == writeGeneration,
-                      enabled,
-                      self.bookmarkData == bookmarkData else { return }
+                guard !Task.isCancelled, stillOwnsRestoration() else { return }
                 if data.count <= Self.maximumConfirmationBytes,
-                   restored.isOlderEarshotFile(deviceID: deviceID, currentVersion: AppInfo.version) {
+                   restored.isOlderEarshotFile(deviceID: capturedDeviceID, currentVersion: AppInfo.version) {
                     if olderFileObservation?.bookmark != bookmarkData
-                        || olderFileObservation?.deviceID != deviceID
-                        || olderFileObservation?.bindingID != bindingID
+                        || olderFileObservation?.deviceID != capturedDeviceID
+                        || olderFileObservation?.bindingID != capturedBindingID
                         || olderFileObservation?.contents != data {
-                        olderFileObservation = OlderFileObservation(bookmark: bookmarkData, deviceID: deviceID, bindingID: bindingID, contents: data)
+                        olderFileObservation = OlderFileObservation(bookmark: bookmarkData, deviceID: capturedDeviceID, bindingID: capturedBindingID, contents: data)
                     }
                 } else {
                     olderFileObservation = nil
@@ -610,19 +642,16 @@ final class ListeningPlacesService {
                 updatedAtByID = restored.updatedAtByID
                 signatures = restored.signatures
             } else {
+                guard !Task.isCancelled, stillOwnsRestoration() else { return }
                 observedDeviceFile = nil
                 hasObservedDeviceFile = true
                 announcedDeviceFileConflict = false
             }
-            guard generation == writeGeneration,
-                  enabled,
-                  self.bookmarkData == bookmarkData else { return }
+            guard !Task.isCancelled, stillOwnsRestoration() else { return }
             hasRestoredExisting = true
             await writeSnapshot()
         } catch {
-            guard generation == writeGeneration,
-                  enabled,
-                  self.bookmarkData == bookmarkData else { return }
+            guard !Task.isCancelled, stillOwnsRestoration() else { return }
             fail(error)
         }
     }
@@ -692,12 +721,21 @@ final class ListeningPlacesService {
                 throw ListeningPlacesFileError.deviceFileChanged
             }
             let expectedDeviceFile = observedDeviceFile
-            let write = Task {
+            let write = Task { [weak self] in
                 if let guardedWriter {
                     try await guardedWriter(bookmarkData, capturedDeviceID, expectedDeviceFile, data)
                 } else {
                     try await writer(bookmarkData, capturedDeviceID, data)
                 }
+                guard let self,
+                      self.bookmarkData == bookmarkData,
+                      self.deviceID == capturedDeviceID,
+                      self.bindingID == capturedBindingID else { return }
+                // Publish the successful CAS baseline before this tracked task
+                // completes. Waiters can then safely prepare a newer privacy
+                // snapshot even if this write's generation was superseded.
+                self.observedDeviceFile = data
+                self.hasObservedDeviceFile = true
             }
             inFlightFileWrite = write
             inFlightFileWriteID = writeID
