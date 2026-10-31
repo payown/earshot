@@ -2176,6 +2176,169 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try assertSettingSaveSurvivesReopen(resumed)
     }
 
+    func testInterruptedFreshV13WithOnlyMirroredFileResumesAndSaves() throws {
+        let schema = Schema(versionedSchema: EarshotMirroredSchemaV13.self)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(
+                    "FutureMirrored", schema: schema, url: storeURL,
+                    cloudKitDatabase: .none
+                )
+            )
+        }
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: localURL.path))
+
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL)
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testInterruptedFreshV13WithOnlyLocalFileResumesAndSaves() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: full,
+                configurations: ModelConfiguration(
+                    "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                    url: localURL, cloudKitDatabase: .none
+                )
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storeURL.path))
+
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL)
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testUnmarkedEmptyV13SplitStoresResumeToV14() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored",
+                        schema: Schema(versionedSchema: EarshotMirroredSchemaV13.self),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+        }
+
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL)
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testInterruptedUnmarkedV13FinalizationResumesMixedV14V13Pair() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored",
+                        schema: Schema(versionedSchema: EarshotMirroredSchemaV13.self),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+        }
+        StoreMigration.injectedFailurePoint = .afterFreshV9MirroredFinalization
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL)) { error in
+            XCTAssertEqual(
+                error as? StoreMigration.InjectedMigrationFailure,
+                .init(point: .afterFreshV9MirroredFinalization)
+            )
+        }
+        StoreMigration.injectedFailurePoint = nil
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL)
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testPopulatedUnmarkedV13SplitStoresFailClosedAndPreserveData() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            let container = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored",
+                        schema: Schema(versionedSchema: EarshotMirroredSchemaV13.self),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+            container.mainContext.insert(Podcast(
+                feedURL: "https://preserve-v13.example/feed", title: "Preserve V13"
+            ))
+            try container.mainContext.save()
+        }
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL)) { error in
+            guard case StoreOpenError.unreadable = error else {
+                return XCTFail("expected fail-closed recovery, got \(error)")
+            }
+        }
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        let preserved = try ModelContainer(
+            for: full,
+            configurations:
+                ModelConfiguration(
+                    "FutureMirrored",
+                    schema: Schema(versionedSchema: EarshotMirroredSchemaV13.self),
+                    url: storeURL, cloudKitDatabase: .none
+                ),
+                ModelConfiguration(
+                    "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                    url: localURL, cloudKitDatabase: .none
+                )
+        )
+        let podcasts = try preserved.mainContext.fetch(FetchDescriptor<Podcast>())
+        XCTAssertEqual(podcasts.map(\.title), ["Preserve V13"])
+    }
+
     func testOrphanedStoreSidecarNeverEntersMigrationPreparation() throws {
         let walURL = storeURL.deletingPathExtension()
             .appendingPathExtension("store-wal")

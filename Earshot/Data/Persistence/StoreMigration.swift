@@ -375,15 +375,15 @@ enum StoreMigration {
         }
 
         // A process death inside the initial two-configuration open can leave
-        // only one empty V9, V10, V11, or current file. Prove the existing
-        // configuration empty,
-        // advance it when needed, then create and verify the missing companion.
+        // only one empty V9–V13 or current file. Prove the existing configuration
+        // empty, advance it when needed, then create and verify the missing companion.
         let mirroredExists = FileManager.default.fileExists(atPath: url.path)
         let localExists = FileManager.default.fileExists(atPath: localURL.path)
         if mirroredExists != localExists {
             let existingURL = mirroredExists ? url : localURL
             if let existingMajor = try? storeMajorVersion(at: existingURL),
-               [9, 10, 11, 12, MigrationBackupManager.targetSchemaMajor].contains(existingMajor) {
+               [9, 10, 11, 12, 13, MigrationBackupManager.targetSchemaMajor]
+                    .contains(existingMajor) {
                 do {
                     let existingIsEmpty = if mirroredExists {
                         try isProvenEmptyMirroredStore(at: url, major: existingMajor)
@@ -395,7 +395,7 @@ enum StoreMigration {
                             underlying: CocoaError(.persistentStoreIncompatibleVersionHash)
                         )
                     }
-                    if existingMajor == 9 {
+                    if existingMajor == 9 || existingMajor == 13 {
                         if mirroredExists {
                             try finalizeMirroredStore(at: url)
                         } else {
@@ -485,7 +485,8 @@ enum StoreMigration {
            [9, 10, 11, 12, 13, MigrationBackupManager.targetSchemaMajor]
                 .contains(unmarkedLocalMajor),
            unmarkedMirroredMajor == 9 || unmarkedLocalMajor == 9
-                || unmarkedMirroredMajor == 12 || unmarkedLocalMajor == 12 {
+                || unmarkedMirroredMajor == 12 || unmarkedLocalMajor == 12
+                || unmarkedMirroredMajor == 13 || unmarkedLocalMajor == 13 {
             do {
                 guard try isProvenEmptyMirroredStore(
                     at: url, major: unmarkedMirroredMajor
@@ -496,11 +497,11 @@ enum StoreMigration {
                         underlying: CocoaError(.persistentStoreIncompatibleVersionHash)
                     )
                 }
-                if unmarkedMirroredMajor == 9 {
+                if unmarkedMirroredMajor == 9 || unmarkedMirroredMajor == 13 {
                     try finalizeMirroredStore(at: url)
                 }
                 try failIfInjected(at: .afterFreshV9MirroredFinalization)
-                if unmarkedLocalMajor == 9 {
+                if unmarkedLocalMajor == 9 || unmarkedLocalMajor == 13 {
                     try finalizeLocalStore(at: localURL)
                 }
                 let container = try openFinal(mirroredURL: url, localURL: localURL)

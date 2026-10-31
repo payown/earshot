@@ -35,6 +35,16 @@ final class StoreRecoveryTests: XCTestCase {
         FileManager.default.fileExists(atPath: storeURL.path)
     }
 
+    private func schemaMajor(at url: URL) throws -> Int {
+        let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite, at: url
+        )
+        let identifiers = try XCTUnwrap(
+            metadata[NSStoreModelVersionIdentifiersKey] as? [String]
+        )
+        return try XCTUnwrap(Int(identifiers[0].split(separator: ".").first ?? ""))
+    }
+
     private func v6Container() throws -> ModelContainer {
         let schema = Schema(versionedSchema: EarshotSchemaV6.self)
         return try ModelContainer(
@@ -360,6 +370,64 @@ final class StoreRecoveryTests: XCTestCase {
         try MigrationBackupManager.restore(legacy, at: storeURL)
 
         XCTAssertEqual(try episodeCount(), 1)
+    }
+
+    func testV13TargetBackupRestoresUnreadableV13StoresAfterUpgradeToV14() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            let container = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored", schema: Schema(versionedSchema: EarshotMirroredSchemaV13.self),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+            container.mainContext.insert(Podcast(
+                feedURL: "https://v13-backup.example/feed", title: "V13 backup fixture"
+            ))
+            let splitMarker = EarshotSchemaV13.LocalAppSetting()
+            splitMarker.key = StoreMigration.splitCompletionKey
+            splitMarker.value = "1"
+            let repairMarker = EarshotSchemaV13.LocalAppSetting()
+            repairMarker.key = StoreMigration.identityRepairCompletionKey
+            repairMarker.value = "1"
+            container.mainContext.insert(splitMarker)
+            container.mainContext.insert(repairMarker)
+            try container.mainContext.save()
+        }
+
+        let backup = try MigrationBackupManager.prepareVerifiedBackup(
+            at: storeURL, targetSchemaMajor: 13
+        )
+        XCTAssertEqual(backup.targetSchemaMajor, 13)
+
+        ModelContainerFactory.removeStoreFiles(at: storeURL)
+        try Data([0x00, 0x01, 0xFF]).write(to: storeURL)
+        try Data([0xA0, 0xB1, 0xC2]).write(to: localURL)
+
+        let retained = try XCTUnwrap(MigrationBackupManager.latestRestorableBackup(at: storeURL))
+        XCTAssertEqual(retained.id, backup.id)
+        XCTAssertEqual(retained.targetSchemaMajor, 13)
+        try MigrationBackupManager.restore(retained, at: storeURL)
+        XCTAssertEqual(try schemaMajor(at: storeURL), 13)
+        XCTAssertEqual(try schemaMajor(at: localURL), 13)
+
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        XCTAssertEqual(try schemaMajor(at: storeURL), 14)
+        XCTAssertEqual(try schemaMajor(at: localURL), 14)
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1
+        )
+        XCTAssertEqual(
+            try migrated.mainContext.fetch(FetchDescriptor<Podcast>()).first?.title,
+            "V13 backup fixture"
+        )
     }
 
     func testFailedRestoreRollsBackEveryCurrentStoreFile() throws {

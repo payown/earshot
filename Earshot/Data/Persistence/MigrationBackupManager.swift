@@ -140,13 +140,32 @@ enum MigrationBackupManager {
             return try? legacyDescriptor(in: directory)
         }
         return candidates
-            .filter { $0.targetSchemaMajor == targetSchemaMajor }
+            .filter(isRestorableByCurrentBuild)
             .max { $0.createdAt < $1.createdAt }
     }
 
     /// Manifest-only lookup; restore performs full validation before file changes.
     static func latestRecordedBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
         verifiedBackups(at: storeURL).first { $0.targetSchemaMajor == targetSchemaMajor }
+    }
+
+    /// A backup made by the immediately older app can still be restored by this
+    /// app when its source schema has a known migration route to the current
+    /// schema. Restoring reinstalls the preserved source; normal migration then
+    /// advances it before the library is opened.
+    private static func isRestorableByCurrentBuild(
+        _ backup: MigrationBackupDescriptor
+    ) -> Bool {
+        guard backup.targetSchemaMajor <= targetSchemaMajor else { return false }
+        let primaryRoute = knownPrimaryRoute(from: backup.sourceSchemaMajor)
+        guard primaryRoute.contains(backup.targetSchemaMajor),
+              primaryRoute.contains(targetSchemaMajor) else { return false }
+        if let localMajor = backup.localSourceSchemaMajor {
+            let localRoute = knownLocalRoute(from: localMajor)
+            guard localRoute.contains(backup.targetSchemaMajor),
+                  localRoute.contains(targetSchemaMajor) else { return false }
+        }
+        return true
     }
 
     /// Revalidates the exact backup offered by recovery immediately before any
@@ -160,6 +179,7 @@ enum MigrationBackupManager {
         let expectedRoot = backupRoot(for: storeURL).standardizedFileURL
         guard backup.directoryURL.deletingLastPathComponent().standardizedFileURL
                 == expectedRoot,
+              isRestorableByCurrentBuild(backup),
               try validate(backup) else {
             throw MigrationBackupError.snapshotInvalid
         }
@@ -404,7 +424,7 @@ enum MigrationBackupManager {
     static func restore(_ backup: MigrationBackupDescriptor, at storeURL: URL) throws {
         try recoverInterruptedErasure(at: storeURL)
         try recoverInterruptedRestore(at: storeURL)
-        guard backup.targetSchemaMajor == targetSchemaMajor,
+        guard isRestorableByCurrentBuild(backup),
               try validate(backup) else { throw MigrationBackupError.snapshotInvalid }
         let root = backupRoot(for: storeURL)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -587,8 +607,9 @@ enum MigrationBackupManager {
     /// A completed migration is retained through one independent later open.
     /// The first successful target open marks it; the next removes it.
     static func noteSuccessfulTargetOpen(at storeURL: URL, targetSchemaMajor: Int) {
+        guard targetSchemaMajor == self.targetSchemaMajor else { return }
         for descriptor in verifiedBackups(at: storeURL)
-        where descriptor.targetSchemaMajor == targetSchemaMajor {
+        where isRestorableByCurrentBuild(descriptor) {
             do {
                 var manifest = try readManifest(in: descriptor.directoryURL)
                 manifest.successfulTargetOpenCount += 1
@@ -603,7 +624,6 @@ enum MigrationBackupManager {
                 )
             }
         }
-        guard targetSchemaMajor == self.targetSchemaMajor else { return }
         noteSuccessfulLegacyTargetOpen(at: storeURL)
     }
     // MARK: - Catalog
