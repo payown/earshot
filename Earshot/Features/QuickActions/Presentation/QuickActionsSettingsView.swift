@@ -11,7 +11,7 @@ struct QuickActionsSettingsView: View {
     var body: some View {
         List {
             Section {
-                Text("Episode, Podcast, and Queue actions fill the VoiceOver Actions rotor; the first enabled action is the default double-tap. Add, remove, or reorder them. Player transport actions add skip buttons to the full player; you can remove all extras. A skip matching the primary interval in Playback settings is hidden from the extra-action lists and returns if that interval changes. New actions added by future updates appear in Available after you customize a list.")
+                Text("Episode, Podcast, and Queue actions fill the VoiceOver Actions rotor; the first enabled action is the default double-tap. Add, remove, or reorder them. Player skip increments add buttons to the full player. Rewind and Fast-forward actions configure each button's VoiceOver Actions rotor, including chapter and queue navigation; either button can perform either action. You can remove all player actions. A skip matching the primary interval in Playback settings is hidden from the extra-action lists and returns if that interval changes.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -55,12 +55,37 @@ struct QuickActionsSettingsView: View {
                           actions: visibleTransportActions, label: \.label,
                           move: { store.moveTransportActions(from: $0, to: $1, visibleActions: visibleTransportActions) },
                           transfer: store.removeTransportAction,
-                          allowsEmptyEnabled: true)
+                          allowsEmptyEnabled: true,
+                          hasDefaultAction: false)
             actionSection(content: "Player transport", state: .available,
                           actions: visibleAvailableTransportActions, label: \.label,
                           move: store.moveAvailableTransportActions,
                           transfer: store.addTransportAction,
-                          allowsEmptyEnabled: true)
+                          allowsEmptyEnabled: true,
+                          hasDefaultAction: false)
+
+            ForEach(PlayerTransportButton.allCases) { button in
+                actionSection(
+                    content: button.title,
+                    state: .enabled,
+                    actions: store.playerButtonActions(for: button),
+                    label: \.label,
+                    move: { store.movePlayerButtonActions(from: $0, to: $1, for: button) },
+                    transfer: { store.removePlayerButtonAction($0, from: button) },
+                    allowsEmptyEnabled: true,
+                    hasDefaultAction: false
+                )
+                actionSection(
+                    content: button.title,
+                    state: .available,
+                    actions: store.availablePlayerButtonActions(for: button),
+                    label: \.label,
+                    move: { store.moveAvailablePlayerButtonActions(from: $0, to: $1, for: button) },
+                    transfer: { store.addPlayerButtonAction($0, to: button) },
+                    allowsEmptyEnabled: true,
+                    hasDefaultAction: false
+                )
+            }
         }
         .navigationTitle("Quick Actions")
         .toolbar {
@@ -75,7 +100,8 @@ struct QuickActionsSettingsView: View {
         label: KeyPath<A, String>,
         move: @escaping (IndexSet, Int) -> Void,
         transfer: @escaping (A) -> Void,
-        allowsEmptyEnabled: Bool = false
+        allowsEmptyEnabled: Bool = false,
+        hasDefaultAction: Bool = true
     ) -> some View where A.ID == String {
         Section("\(content) actions — \(state.title)") {
             if actions.isEmpty {
@@ -87,9 +113,10 @@ struct QuickActionsSettingsView: View {
                     let focusID = "\(content).\(action.id)"
                     Text(name)
                         .accessibilityLabel(rowLabel(
-                            name, state: state, index: index, count: actions.count
+                            name, state: state, index: index, count: actions.count,
+                            hasDefaultAction: hasDefaultAction
                         ))
-                        .accessibilityHint(state.hint)
+                        .accessibilityHint(state.hint(hasDefaultAction: hasDefaultAction))
                         .accessibilityFocused($focusedActionID, equals: focusID)
                         .rotorActions(rowActions(
                             action: action, name: name, focusID: focusID,
@@ -151,9 +178,10 @@ struct QuickActionsSettingsView: View {
         _ label: String,
         state: ActionState,
         index: Int,
-        count: Int
+        count: Int,
+        hasDefaultAction: Bool
     ) -> String {
-        if state == .enabled, index == 0 {
+        if state == .enabled, index == 0, hasDefaultAction {
             return "\(label), enabled, default action, position 1 of \(count)"
         }
         return "\(label), \(state.spokenState), position \(index + 1) of \(count)"
@@ -190,9 +218,12 @@ private enum ActionState: Equatable {
     var spokenState: String { self == .enabled ? "enabled" : "available" }
     var transferLabel: String { self == .enabled ? "Remove" : "Add" }
     var emptyLabel: String { self == .enabled ? "No enabled actions" : "No available actions" }
-    var hint: String {
-        self == .enabled
-            ? "Remove or reorder with the Actions rotor. Position 1 is the default action."
+    func hint(hasDefaultAction: Bool) -> String {
+        if self == .enabled, hasDefaultAction {
+            return "Remove or reorder with the Actions rotor. Position 1 is the default action."
+        }
+        return self == .enabled
+            ? "Remove or reorder with the Actions rotor."
             : "Add or reorder with the Actions rotor."
     }
 }

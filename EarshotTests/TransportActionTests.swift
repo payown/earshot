@@ -11,6 +11,17 @@ final class TransportActionTests: XCTestCase {
         XCTAssertEqual(TransportAction.skipForward300.buttonTitle, "+5m")
     }
 
+    func testPlayerButtonRotorActionsKeepExistingVoiceOverLabels() {
+        XCTAssertEqual(PlayerButtonRotorAction.previousChapter.label, "Previous chapter")
+        XCTAssertEqual(PlayerButtonRotorAction.nextChapter.label, "Next chapter")
+        XCTAssertEqual(PlayerButtonRotorAction.previousInQueue.label, "Previous in Queue")
+        XCTAssertEqual(PlayerButtonRotorAction.nextInQueue.label, "Next in Queue")
+        XCTAssertEqual(
+            PlayerButtonRotorAction.markPlayedAndNextInQueue.label,
+            "Mark as played and next in Queue"
+        )
+    }
+
     func testVisibilityHidesOnlyThePrimaryIntervalForEachDirection() {
         let actions: [TransportAction] = [
             .skipBack15, .skipBack30, .skipForward30, .skipForward120,

@@ -612,17 +612,8 @@ struct NowPlayingScreen: View {
                 target: 64,
                 action: player.skipBack
             )
-            // Pair "Previous chapter" with Skip back as a VoiceOver custom action
-            // (#560), the same rotor-action pattern the artwork uses. Additive:
-            // the button keeps its default Skip back activation. Announces a clear
-            // "no chapters" response when the episode has none, never a silent no-op.
-            .accessibilityAction(named: "Previous chapter") {
-                player.previousChapterOrAnnounceNoChapters()
-            }
-            .accessibilityAction(named: "Previous in Queue") {
-                player.previousInQueue()
-            }
-            .accessibilityHint("Use Actions for more navigation options")
+            .rotorActions(playerButtonRotorActions(for: .rewind))
+            .accessibilityHint(playerButtonActionHint(for: .rewind))
 
             // Dynamic VoiceOver name reflecting the action the button performs
             // ("Play" when paused, "Pause" when playing), matching the mini bar.
@@ -647,21 +638,35 @@ struct NowPlayingScreen: View {
                 target: 64,
                 action: player.skipForward
             )
-            // Pair "Next chapter" with Skip forward as a VoiceOver custom action
-            // (#560); mirrors the Skip back / Previous chapter pairing above.
-            .accessibilityAction(named: "Next chapter") {
-                player.nextChapterOrAnnounceNoChapters()
-            }
-            .accessibilityAction(named: "Next in Queue") {
-                player.nextInQueue()
-            }
-            .accessibilityAction(named: "Mark as played and next in Queue") {
-                player.markCurrentPlayedAndNextInQueue()
-            }
-            .accessibilityHint("Use Actions for more navigation options")
+            .rotorActions(playerButtonRotorActions(for: .fastForward))
+            .accessibilityHint(playerButtonActionHint(for: .fastForward))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.sm)
+    }
+
+    private func playerButtonRotorActions(for button: PlayerTransportButton) -> [QuickActionItem] {
+        quickActions.playerButtonActions(for: button).map { action in
+            QuickActionItem(
+                id: "playerButton.\(button.rawValue).\(action.id)",
+                label: action.label,
+                isDestructive: false
+            ) {
+                switch action {
+                case .previousChapter: player.previousChapterOrAnnounceNoChapters()
+                case .nextChapter: player.nextChapterOrAnnounceNoChapters()
+                case .previousInQueue: player.previousInQueue()
+                case .nextInQueue: player.nextInQueue()
+                case .markPlayedAndNextInQueue: player.markCurrentPlayedAndNextInQueue()
+                }
+            }
+        }
+    }
+
+    private func playerButtonActionHint(for button: PlayerTransportButton) -> String {
+        quickActions.playerButtonActions(for: button).isEmpty
+            ? "No additional actions"
+            : "Use Actions for more navigation options"
     }
 
     private func transportButton(

@@ -130,6 +130,7 @@
 		4618A181C1A3CA3A43DBBA71 /* ITunesSearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D1FF1B05CD9DD1E0A619E9F /* ITunesSearchServiceTests.swift */; };
 		4700F225EAF1F681295FB6CB /* CloudSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 610DE11AB2FE2EA159285A77 /* CloudSyncSettingsView.swift */; };
 		4733ABD65AB3333A01DC5298 /* EarshotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB688696CCDAE1D14C0451D /* EarshotUITests.swift */; };
+		47A117E75CF35B7CAB1FE002 /* PlayerButtonRotorAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76382860A87849CC34A373E /* PlayerButtonRotorAction.swift */; };
 		47EDDE481CDF88C6BCED2701 /* DeferredTabContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E02C8BBC317D345B6C4FE5 /* DeferredTabContentTests.swift */; };
 		49A01198A1D4C6F0A2B7EF79 /* OPMLImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BB5D96E01928B51EDBFF641 /* OPMLImportCoordinator.swift */; };
 		49FA7FA0FD58D24FD216A65B /* CloudKitEventMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA6D87DE65511C67184C9D6 /* CloudKitEventMonitorTests.swift */; };
@@ -966,6 +967,7 @@
 		F6B08F0BCE39D733BDAFA99B /* TabBarBadgeApplierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarBadgeApplierTests.swift; sourceTree = "<group>"; };
 		F6ED9BD0B4AFCCE38A6031F3 /* InboxBadgeCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxBadgeCountTests.swift; sourceTree = "<group>"; };
 		F6EE4757B64A837E04D89E7E /* OPMLImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLImportService.swift; sourceTree = "<group>"; };
+		F76382860A87849CC34A373E /* PlayerButtonRotorAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerButtonRotorAction.swift; sourceTree = "<group>"; };
 		F8A0DDD2E1A5C5F0EB22F654 /* TranscriptParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptParserTests.swift; sourceTree = "<group>"; };
 		F92F5C58A196766B3E469943 /* PodcastSubscriptionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastSubscriptionStateTests.swift; sourceTree = "<group>"; };
 		FA719A9EE6C298B619478083 /* StatsPeriod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsPeriod.swift; sourceTree = "<group>"; };
@@ -1203,6 +1205,7 @@
 			children = (
 				B5F71AE13AFCDD1550650672 /* EpisodeAction.swift */,
 				75F9762C13BCD2647A7BBDAD /* EpisodeActionsBuilder.swift */,
+				F76382860A87849CC34A373E /* PlayerButtonRotorAction.swift */,
 				D18D4ED079A378065B95B8B7 /* PodcastAction.swift */,
 				CE11723CD083B143985A7C7C /* PodcastActionsBuilder.swift */,
 				33D8853AB932B8147D824DA5 /* QueueActionsBuilder.swift */,
@@ -2501,6 +2504,7 @@
 				F1E39C817138758F1B3F737C /* PlaybackSkipIntents.swift in Sources */,
 				6431563238F258D03A768B3C /* PlaybackStartup.swift in Sources */,
 				F97023CBFDDF6E5C82093D6F /* PlayerAudioSession.swift in Sources */,
+				47A117E75CF35B7CAB1FE002 /* PlayerButtonRotorAction.swift in Sources */,
 				C84A8A8808D8727FC8DC1C5C /* PlayerControlsSheet.swift in Sources */,
 				51EE602096FEE0FF490A7CBB /* PlayerService.swift in Sources */,
 				4A96AC7CA53D6D1AD19EDA3E /* Podcast.swift in Sources */,

@@ -16,6 +16,14 @@ final class QuickActionRepositoryTests: XCTestCase {
         XCTAssertEqual(repo.queueConfiguration(), QuickActionConfiguration(
             enabled: defaultQueueItemActions, available: []
         ))
+        XCTAssertEqual(
+            repo.playerButtonConfiguration(for: .rewind).enabled,
+            PlayerTransportButton.rewind.defaultActions
+        )
+        XCTAssertEqual(
+            repo.playerButtonConfiguration(for: .fastForward).enabled,
+            PlayerTransportButton.fastForward.defaultActions
+        )
     }
 
     func testEnabledAndAvailableOrdersRoundTripIndependently() {
@@ -196,5 +204,42 @@ final class QuickActionRepositoryTests: XCTestCase {
         XCTAssertEqual(repo.episodeOrder(), [.share])
         XCTAssertEqual(repo.queueOrder(), [.playNow])
         XCTAssertEqual(repo.transportConfiguration().enabled, [.skipForward120])
+    }
+
+    @MainActor
+    func testPlayerButtonRotorActionsCanBeMovedAndPersistedIndependently() {
+        let context = TestStore.freshContext()
+        let store = QuickActionStore()
+        store.configure(context: context)
+
+        XCTAssertEqual(store.rewindButtonActions, [.previousChapter, .previousInQueue])
+        XCTAssertEqual(
+            store.fastForwardButtonActions,
+            [.nextChapter, .nextInQueue, .markPlayedAndNextInQueue]
+        )
+
+        store.removePlayerButtonAction(.previousChapter, from: .rewind)
+        store.removePlayerButtonAction(.nextChapter, from: .fastForward)
+        store.addPlayerButtonAction(.nextChapter, to: .rewind)
+        store.addPlayerButtonAction(.previousChapter, to: .fastForward)
+
+        let relaunched = QuickActionStore()
+        relaunched.configure(context: context)
+        XCTAssertEqual(relaunched.rewindButtonActions, [.previousInQueue, .nextChapter])
+        XCTAssertEqual(
+            relaunched.fastForwardButtonActions,
+            [.nextInQueue, .markPlayedAndNextInQueue, .previousChapter]
+        )
+
+        for action in relaunched.rewindButtonActions {
+            relaunched.removePlayerButtonAction(action, from: .rewind)
+        }
+        for action in relaunched.fastForwardButtonActions {
+            relaunched.removePlayerButtonAction(action, from: .fastForward)
+        }
+        let withNoRotorActions = QuickActionStore()
+        withNoRotorActions.configure(context: context)
+        XCTAssertTrue(withNoRotorActions.rewindButtonActions.isEmpty)
+        XCTAssertTrue(withNoRotorActions.fastForwardButtonActions.isEmpty)
     }
 }
