@@ -32,8 +32,43 @@ actor ListeningPlacesFileTransport {
     func readDeviceFile(bookmarkData: Data, deviceID: String) throws -> Data? {
         try withFolder(bookmarkData: bookmarkData) { folder in
             let target = deviceFile(in: folder, deviceID: deviceID)
-            guard FileManager.default.fileExists(atPath: target.path) else { return nil }
-            return try Data(contentsOf: target)
+            var coordinationError: NSError?
+            var readError: Error?
+            var result: Data?
+            NSFileCoordinator().coordinate(readingItemAt: target, options: [], error: &coordinationError) { url in
+                do { result = try Data(contentsOf: url) }
+                catch {
+                    if (error as NSError).code != NSFileReadNoSuchFileError { readError = error }
+                }
+            }
+            if let coordinationError { throw coordinationError }
+            if let readError { throw readError }
+            return result
+        }
+    }
+
+    /// Replaces the device file only if its contents still match the last
+    /// coordinated observation. `expected == nil` means the file was absent.
+    func replaceDeviceFile(bookmarkData: Data, deviceID: String, expected: Data?, with data: Data) throws {
+        try withFolder(bookmarkData: bookmarkData) { folder in
+            let (_, devices) = try prepareLayout(in: folder)
+            let target = devices.appending(path: "\(deviceID).json")
+            var coordinationError: NSError?
+            var operationError: Error?
+            NSFileCoordinator().coordinate(writingItemAt: target, options: .forReplacing, error: &coordinationError) { url in
+                do {
+                    let actual: Data?
+                    do { actual = try Data(contentsOf: url) }
+                    catch {
+                        guard (error as NSError).code == NSFileReadNoSuchFileError else { throw error }
+                        actual = nil
+                    }
+                    guard actual == expected else { throw ListeningPlacesFileError.deviceFileChanged }
+                    try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                } catch { operationError = error }
+            }
+            if let coordinationError { throw coordinationError }
+            if let operationError { throw operationError }
         }
     }
 
@@ -69,6 +104,21 @@ actor ListeningPlacesFileTransport {
         try withFolder(bookmarkData: bookmarkData) { folder in
             _ = try prepareLayout(in: folder)
         }
+    }
+
+    /// Compares the resolved filesystem targets, so alternate bookmarks for
+    /// the same directory (for example, a symlink) are recognized as one
+    /// device-file location.
+    func refersToSameFolder(_ firstBookmark: Data, as secondBookmark: Data) throws -> Bool {
+        let firstFolder = try resolveFolder(firstBookmark)
+        let firstAccessed = firstFolder.startAccessingSecurityScopedResource()
+        defer { if firstAccessed { firstFolder.stopAccessingSecurityScopedResource() } }
+        let secondFolder = try resolveFolder(secondBookmark)
+        let secondAccessed = secondFolder.startAccessingSecurityScopedResource()
+        defer { if secondAccessed { secondFolder.stopAccessingSecurityScopedResource() } }
+        let first = firstFolder.standardizedFileURL.resolvingSymlinksInPath()
+        let second = secondFolder.standardizedFileURL.resolvingSymlinksInPath()
+        return first == second
     }
 
     func writeDeviceFile(bookmarkData: Data, deviceID: String, data: Data) throws {
@@ -110,6 +160,31 @@ actor ListeningPlacesFileTransport {
             }
             if let coordinationError { throw coordinationError }
             if let removalError { throw removalError }
+        }
+    }
+
+    /// Removes the device file only when it still matches the last observed
+    /// contents. An absent observation permits only an absent file.
+    func removeDeviceFileIfUnchanged(bookmarkData: Data, deviceID: String, expected: Data?) throws {
+        try withFolder(bookmarkData: bookmarkData) { folder in
+            let target = deviceFile(in: folder, deviceID: deviceID)
+            var coordinationError: NSError?
+            var operationError: Error?
+            NSFileCoordinator().coordinate(writingItemAt: target, options: .forDeleting, error: &coordinationError) { url in
+                do {
+                    let actual: Data?
+                    do { actual = try Data(contentsOf: url) }
+                    catch {
+                        guard (error as NSError).code == NSFileReadNoSuchFileError else { throw error }
+                        actual = nil
+                    }
+                    guard actual == expected else { throw ListeningPlacesFileError.deviceFileChanged }
+                    guard actual != nil else { return }
+                    try FileManager.default.removeItem(at: url)
+                } catch { operationError = error }
+            }
+            if let coordinationError { throw coordinationError }
+            if let operationError { throw operationError }
         }
     }
 
@@ -204,6 +279,13 @@ actor ListeningPlacesFileTransport {
         bookmarkData: Data,
         operation: (URL) throws -> T
     ) throws -> T {
+        let folder = try resolveFolder(bookmarkData)
+        let accessed = folder.startAccessingSecurityScopedResource()
+        defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
+        return try operation(folder)
+    }
+
+    private func resolveFolder(_ bookmarkData: Data) throws -> URL {
         var stale = false
         let folder = try URL(
             resolvingBookmarkData: bookmarkData,
@@ -212,9 +294,7 @@ actor ListeningPlacesFileTransport {
             bookmarkDataIsStale: &stale
         )
         guard !stale else { throw ListeningPlacesFileError.staleBookmark }
-        let accessed = folder.startAccessingSecurityScopedResource()
-        defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
-        return try operation(folder)
+        return folder
     }
 }
 
@@ -222,6 +302,7 @@ enum ListeningPlacesFileError: LocalizedError {
     case staleBookmark
     case couldNotCreateDirectory(String)
     case expectedDirectory(String)
+    case deviceFileChanged
 
     var errorDescription: String? {
         switch self {
@@ -230,6 +311,8 @@ enum ListeningPlacesFileError: LocalizedError {
             "The folder “\(name)” could not be created. Check that the selected location is available, then try again."
         case .expectedDirectory(let name):
             "A file named “\(name)” already exists where Earshot needs a folder. Rename or remove that file, then try again."
+        case .deviceFileChanged:
+            "The Listening Places file changed in its folder. Earshot left it untouched. Choose the folder again to review the current file before sharing."
         }
     }
 }

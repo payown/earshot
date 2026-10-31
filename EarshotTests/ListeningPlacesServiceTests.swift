@@ -473,6 +473,437 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertFalse(matches)
     }
 
+    func testGuardedDeviceFileReplacementPreservesChangedContents() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transport = ListeningPlacesFileTransport()
+        let bookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let original = Data("original provider contents".utf8)
+        let external = Data("changed by another app".utf8)
+        try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", data: original)
+        try external.write(to: deviceFile(in: directory), options: .atomic)
+
+        do {
+            try await transport.replaceDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", expected: original, with: Data("Earshot update".utf8))
+            XCTFail("A stale observation must not replace changed provider contents")
+        } catch ListeningPlacesFileError.deviceFileChanged {
+            XCTAssertEqual(try Data(contentsOf: deviceFile(in: directory)), external)
+        }
+    }
+
+    func testGuardedDeviceFileReplacementPreservesUnexpectedlyAppearingFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transport = ListeningPlacesFileTransport()
+        let bookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        try await transport.prepareFolder(bookmarkData: bookmark)
+        let external = Data("unrelated file created by provider user".utf8)
+        let target = directory.appending(path: "Listening Places/devices/1234abcd.json")
+        try external.write(to: target, options: .atomic)
+
+        do {
+            try await transport.replaceDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", expected: nil, with: Data("Earshot update".utf8))
+            XCTFail("A file that appeared after the absent observation must not be replaced")
+        } catch ListeningPlacesFileError.deviceFileChanged {
+            XCTAssertEqual(try Data(contentsOf: target), external)
+        }
+    }
+
+    func testGuardedDeviceFileRemovalPreservesChangedContents() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transport = ListeningPlacesFileTransport()
+        let bookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let original = Data("original provider contents".utf8)
+        let external = Data("changed by another app".utf8)
+        try await transport.writeDeviceFile(bookmarkData: bookmark, deviceID: "1234abcd", data: original)
+        try external.write(to: deviceFile(in: directory), options: .atomic)
+
+        do {
+            try await transport.removeDeviceFileIfUnchanged(bookmarkData: bookmark, deviceID: "1234abcd", expected: original)
+            XCTFail("A stale observation must not remove changed provider contents")
+        } catch ListeningPlacesFileError.deviceFileChanged {
+            XCTAssertEqual(try Data(contentsOf: deviceFile(in: directory)), external)
+        }
+    }
+
+    func testGuardedDeviceFileRemovalPreservesUnexpectedlyAppearingFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transport = ListeningPlacesFileTransport()
+        let bookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        try await transport.prepareFolder(bookmarkData: bookmark)
+        let external = Data("unrelated file created by provider user".utf8)
+        let target = directory.appending(path: "Listening Places/devices/1234abcd.json")
+        try external.write(to: target, options: .atomic)
+
+        do {
+            try await transport.removeDeviceFileIfUnchanged(bookmarkData: bookmark, deviceID: "1234abcd", expected: nil)
+            XCTFail("A file that appeared after the absent observation must not be removed")
+        } catch ListeningPlacesFileError.deviceFileChanged {
+            XCTAssertEqual(try Data(contentsOf: target), external)
+        }
+    }
+
+    func testStopSharingPreservesExternallyChangedDeviceFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Example Show")
+        let episode = Episode(guid: "remove-guard-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 42)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        var announcements: [String] = []
+        let service = ListeningPlacesService(canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        let external = Data("changed by another app".utf8)
+        try external.write(to: file, options: .atomic)
+
+        await service.stopSharingAndRemoveDeviceFile()
+
+        guard case .failed = service.status else { return XCTFail("A stale file must prevent removal") }
+        XCTAssertTrue(service.enabled)
+        XCTAssertEqual(try Data(contentsOf: file), external)
+        XCTAssertEqual(announcements.count, 1)
+        XCTAssertTrue(announcements[0].contains("left it untouched"))
+        service.releasePersistence()
+    }
+
+    func testReenableDuringBlockedRemovalRecreatesFileFromAbsentBaseline() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "reenable-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover()
+        let service = ListeningPlacesService(removeObservedDeviceFile: { bookmark, deviceID, expected in
+            try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        await service.setEnabled(false)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.setEnabled(true)
+        await remover.resumeRemoval()
+        await stopping.value
+
+        for _ in 0..<100 where !FileManager.default.fileExists(atPath: file.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "The successful removal must rebase to absent before retrying the enabled snapshot")
+        XCTAssertTrue(service.enabled)
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(contents.contains("60000"))
+        service.releasePersistence()
+    }
+
+    func testReselectingSameFolderDuringBlockedRemovalRecreatesFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "reselect-during-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover()
+        let service = ListeningPlacesService(removeObservedDeviceFile: { bookmark, deviceID, expected in
+            try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        await service.setEnabled(false)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.chooseFolder(directory)
+        await remover.resumeRemoval()
+        await stopping.value
+
+        for _ in 0..<100 where !FileManager.default.fileExists(atPath: file.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "Reselecting the same physical folder must rebase the completed removal to absent and recreate its snapshot")
+        XCTAssertTrue(service.enabled)
+        XCTAssertEqual(service.folderName, directory.lastPathComponent)
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(contents.contains("60000"))
+        service.releasePersistence()
+    }
+
+    func testReselectingSameFolderThroughSymlinkDuringBlockedRemovalRecreatesFile() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let directory = parent.appending(path: "actual", directoryHint: .isDirectory)
+        let alias = parent.appending(path: "alias", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: directory)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let actualBookmark = try directory.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let aliasBookmark = try alias.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        XCTAssertNotEqual(actualBookmark, aliasBookmark, "This regression must exercise distinct bookmark data for the same folder")
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "symlink-reselect-during-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover()
+        let service = ListeningPlacesService(removeObservedDeviceFile: { bookmark, deviceID, expected in
+            try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        await service.setEnabled(false)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.chooseFolder(alias)
+        await remover.resumeRemoval()
+        await stopping.value
+
+        for _ in 0..<100 where !FileManager.default.fileExists(atPath: file.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "A symlink alias to the same physical folder must receive the snapshot after the in-flight removal")
+        XCTAssertTrue(service.enabled)
+        XCTAssertEqual(service.folderName, alias.lastPathComponent)
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(contents.contains("60000"))
+        service.releasePersistence()
+    }
+
+    func testFolderSwitchDuringSuspendedIdentityComparisonCannotRebaseNewFolder() async throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let firstDirectory = parent.appending(path: "first", directoryHint: .isDirectory)
+        let alias = parent.appending(path: "alias", directoryHint: .isDirectory)
+        let secondDirectory = parent.appending(path: "second", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: firstDirectory)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "identity-switch-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover()
+        let comparator = SuspendedFolderIdentityComparator()
+        let service = ListeningPlacesService(
+            removeObservedDeviceFile: { bookmark, deviceID, expected in
+                try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+            },
+            refersToSameFolder: { first, second in await comparator.compare(first, second) }
+        )
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(firstDirectory)
+        let firstFile = try deviceFile(in: firstDirectory)
+        let firstSnapshot = try Data(contentsOf: firstFile)
+        await service.setEnabled(false)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.chooseFolder(alias)
+        await remover.resumeRemoval()
+        await comparator.waitUntilSuspended()
+        let secondDevices = secondDirectory.appending(path: "Listening Places/devices", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: secondDevices, withIntermediateDirectories: true)
+        let secondFile = secondDevices.appending(path: firstFile.lastPathComponent)
+        try firstSnapshot.write(to: secondFile)
+        await service.chooseFolder(secondDirectory)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondFile.path))
+        await comparator.resumeComparison(returning: true)
+        await stopping.value
+
+        for _ in 0..<100 {
+            if case .failed = service.status { break }
+            if let contents = try? String(contentsOf: secondFile, encoding: .utf8), contents.contains("60000") { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        if case .failed(let message) = service.status {
+            XCTFail("A stale identity comparison must not invalidate the new folder's observed baseline: \(message)")
+        }
+        XCTAssertEqual(service.folderName, secondDirectory.lastPathComponent)
+        let contents = try String(contentsOf: secondFile, encoding: .utf8)
+        XCTAssertTrue(contents.contains("60000"))
+        service.releasePersistence()
+    }
+
+    func testStaleRemovalFailureDoesNotAffectReplacementFolderStatusOrSpeech() async throws {
+        let firstDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-stale-remove-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let secondDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-new-folder-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: firstDirectory)
+            try? FileManager.default.removeItem(at: secondDirectory)
+        }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "stale-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover(failsAfterResume: true)
+        var announcements: [String] = []
+        let service = ListeningPlacesService(
+            removeObservedDeviceFile: { bookmark, deviceID, expected in
+                try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+            },
+            canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) }
+        )
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(firstDirectory)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.chooseFolder(secondDirectory)
+        await remover.resumeRemoval()
+        await stopping.value
+
+        let newDeviceDirectory = secondDirectory.appending(path: "Listening Places/devices", directoryHint: .isDirectory)
+        for _ in 0..<100 {
+            if let files = try? FileManager.default.contentsOfDirectory(at: newDeviceDirectory, includingPropertiesForKeys: nil), !files.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        if case .failed = service.status { XCTFail("A stale removal failure must not replace the current folder status") }
+        XCTAssertEqual(service.folderName, secondDirectory.lastPathComponent)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(at: newDeviceDirectory, includingPropertiesForKeys: nil).isEmpty)
+        XCTAssertTrue(announcements.isEmpty, "A stale failure must not be announced for the replacement folder")
+        service.releasePersistence()
+    }
+
+    func testRemovalAfterRelaunchWhileDisabledReadsBaselineAndRemovesFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "disabled-relaunch-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let firstLaunch = ListeningPlacesService()
+        firstLaunch.configure(context: container.mainContext)
+        await firstLaunch.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        await firstLaunch.setEnabled(false)
+        firstLaunch.releasePersistence()
+
+        let relaunched = ListeningPlacesService()
+        relaunched.configure(context: container.mainContext)
+        XCTAssertFalse(relaunched.enabled)
+        await relaunched.stopSharingAndRemoveDeviceFile()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(relaunched.status, .notConfigured)
+        relaunched.releasePersistence()
+    }
+
+    func testSlowRestoreFromPreviousFolderCannotReplaceCurrentObservedBaseline() async throws {
+        let oldDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-slow-old-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let newDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-slow-new-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: oldDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: newDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: oldDirectory)
+            try? FileManager.default.removeItem(at: newDirectory)
+        }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "slow-restore-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let initial = ListeningPlacesService()
+        initial.configure(context: container.mainContext)
+        await initial.chooseFolder(oldDirectory)
+        initial.releasePersistence()
+
+        let reader = SuspendedObservedListeningPlacesReader()
+        let service = ListeningPlacesService(readObservedDeviceFile: { bookmark, deviceID in
+            try await reader.read(bookmark: bookmark, deviceID: deviceID)
+        })
+        service.configure(context: container.mainContext)
+        let oldRestore = Task { await service.chooseFolder(oldDirectory) }
+        await reader.waitUntilSuspended()
+        await service.chooseFolder(newDirectory)
+        await reader.resumeRead()
+        await oldRestore.value
+
+        await service.setIncludeLabels(true)
+
+        let newFile = try deviceFile(in: newDirectory)
+        let contents = try String(contentsOf: newFile, encoding: .utf8)
+        XCTAssertTrue(contents.contains("Show"))
+        XCTAssertTrue(service.enabled)
+        guard case .lastWritten = service.status else { return XCTFail("The newer folder baseline should allow the privacy update") }
+        service.releasePersistence()
+    }
+
+    func testPrivacyRewriteUsesBaselineFromSupersededSuccessfulCompareAndReplace() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Private Show")
+        let episode = Episode(guid: "privacy-write-race", title: "Private Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let writer = SuspendedObservedListeningPlacesWriter()
+        let service = ListeningPlacesService(replaceObservedDeviceFile: { bookmark, deviceID, expected, data in
+            try await writer.replace(bookmark: bookmark, deviceID: deviceID, expected: expected, data: data)
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+
+        await writer.holdNextWrite()
+        let namesOn = Task { await service.setIncludeLabels(true) }
+        await writer.waitUntilSuspended()
+        let namesOff = Task { await service.setIncludeLabels(false) }
+        for _ in 0..<100 where service.includeLabels { await Task.yield() }
+        XCTAssertFalse(service.includeLabels)
+        await writer.resumeWrite()
+        await namesOn.value
+        await namesOff.value
+
+        let file = try deviceFile(in: directory)
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertFalse(contents.contains("Private Show"))
+        XCTAssertFalse(contents.contains("Private Episode"))
+        guard case .lastWritten = service.status else { return XCTFail("The privacy rewrite should succeed after the older compare-and-replace completes") }
+        service.releasePersistence()
+    }
+
     private func setSelfReportedApp(_ app: String, in file: URL) throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         json["app"] = app
@@ -1184,6 +1615,126 @@ private actor SuspendedListeningPlacesRemover {
             waiters.removeAll()
         }
         try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+    }
+}
+
+private actor SuspendedObservedListeningPlacesReader {
+    private let transport = ListeningPlacesFileTransport()
+    private var holdNext = true
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func resumeRead() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+
+    func read(bookmark: Data, deviceID: String) async throws -> Data? {
+        if holdNext {
+            holdNext = false
+            suspended = true
+            await withCheckedContinuation { continuation in
+                resumeContinuation = continuation
+                for waiter in waiters { waiter.resume() }
+                waiters.removeAll()
+            }
+        }
+        return try await transport.readDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+    }
+}
+
+private actor SuspendedObservedListeningPlacesWriter {
+    private let transport = ListeningPlacesFileTransport()
+    private var holdNext = false
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    func holdNextWrite() { holdNext = true }
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func resumeWrite() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+
+    func replace(bookmark: Data, deviceID: String, expected: Data?, data: Data) async throws {
+        if holdNext {
+            holdNext = false
+            suspended = true
+            await withCheckedContinuation { continuation in
+                resumeContinuation = continuation
+                for waiter in waiters { waiter.resume() }
+                waiters.removeAll()
+            }
+        }
+        try await transport.replaceDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: expected, with: data)
+    }
+}
+
+private actor SuspendedObservedListeningPlacesRemover {
+    private let transport = ListeningPlacesFileTransport()
+    private let failsAfterResume: Bool
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    init(failsAfterResume: Bool = false) { self.failsAfterResume = failsAfterResume }
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func resumeRemoval() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+
+    func remove(bookmark: Data, deviceID: String, expected: Data?) async throws {
+        suspended = true
+        await withCheckedContinuation { continuation in
+            resumeContinuation = continuation
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+        }
+        if failsAfterResume { throw ListeningPlacesFileError.deviceFileChanged }
+        try await transport.removeDeviceFileIfUnchanged(bookmarkData: bookmark, deviceID: deviceID, expected: expected)
+    }
+}
+
+private actor SuspendedFolderIdentityComparator {
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Bool, Never>?
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func resumeComparison(returning result: Bool) {
+        resumeContinuation?.resume(returning: result)
+        resumeContinuation = nil
+    }
+
+    func compare(_ first: Data, _ second: Data) async -> Bool {
+        suspended = true
+        return await withCheckedContinuation { continuation in
+            resumeContinuation = continuation
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+        }
     }
 }
 
