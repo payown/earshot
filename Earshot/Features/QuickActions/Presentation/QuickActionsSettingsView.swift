@@ -137,7 +137,10 @@ struct QuickActionsSettingsView: View {
                             allowsEmptyEnabled: allowsEmptyEnabled
                         ))
                 }
-                .onMove { move($0, $1) }
+                // Available rows are only staged for adding. Reordering them
+                // has no effect on the enabled action order and creates a
+                // separate VoiceOver reorder control in Edit mode.
+                .onMove(perform: state == .enabled ? move : nil)
             }
         }
     }
@@ -165,13 +168,15 @@ struct QuickActionsSettingsView: View {
                 focusedActionID = focusID
             })
         }
-        items += QuickActionMoveLogic.targets(index: index, count: count).map { target in
-            QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
-                move(IndexSet(integer: index), target.destinationOffset)
-                Announcer.announce(
-                    "Moved \(name) to position \(target.resultingIndex + 1) of \(count)"
-                )
-                focusedActionID = focusID
+        if state == .enabled {
+            items += QuickActionMoveLogic.targets(index: index, count: count).map { target in
+                QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
+                    move(IndexSet(integer: index), target.destinationOffset)
+                    Announcer.announce(
+                        "Moved \(name) to position \(target.resultingIndex + 1) of \(count)"
+                    )
+                    focusedActionID = focusID
+                }
             }
         }
         return items
@@ -227,6 +232,6 @@ private enum ActionState: Equatable {
         }
         return self == .enabled
             ? "Remove or reorder with the Actions rotor."
-            : "Add or reorder with the Actions rotor."
+            : "Add with the Actions rotor."
     }
 }
