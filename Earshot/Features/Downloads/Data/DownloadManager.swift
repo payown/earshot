@@ -178,6 +178,16 @@ struct DownloadStorageSnapshot: Equatable, Sendable {
 @MainActor
 @Observable
 final class DownloadManager {
+    private struct AttemptOwner: Hashable, Sendable {
+        let identityKey: String
+        let attemptID: String?
+    }
+
+    private struct DownloadWaiterKey: Hashable {
+        let identityKey: String
+        let attemptID: String?
+    }
+
     /// Keep each main-actor enrollment slice small enough that a very large
     /// filtered Inbox or Queue cannot monopolize VoiceOver or SwiftUI updates.
     private static let batchEnrollmentSize = 20
@@ -199,13 +209,18 @@ final class DownloadManager {
     /// Observer for `.earshotQueueDidChange`, so queued episodes auto-download.
     @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
     @ObservationIgnored private let startTransfer: (URL, String) -> Void
+    @ObservationIgnored private let saveContext: (ModelContext) throws -> Void
 
-    init(startTransfer: @escaping (URL, String) -> Void = { url, key in
-        let task = DownloadManager.session.downloadTask(with: url)
-        task.taskDescription = key
-        task.resume()
-    }) {
+    init(
+        startTransfer: @escaping (URL, String) -> Void = { url, key in
+            let task = DownloadManager.session.downloadTask(with: url)
+            task.taskDescription = key
+            task.resume()
+        },
+        saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() }
+    ) {
         self.startTransfer = startTransfer
+        self.saveContext = saveContext
     }
 
     #if DEBUG
@@ -460,6 +475,7 @@ final class DownloadManager {
         guard episode.downloadStatus != .downloaded,
               episode.downloadStatus != .downloading else { return }
         guard downloadsAllowed else {
+            episode.downloadAttemptID = nil
             ActiveDownload.setDownloadStatus(.pending, on: episode, in: context)
             save()
             if announceWaiting {
@@ -471,6 +487,7 @@ final class DownloadManager {
         guard let rawURL = URL(string: episode.audioURL),
               ["http", "https"].contains(rawURL.scheme?.lowercased() ?? ""),
               rawURL.host != nil else {
+            episode.downloadAttemptID = nil
             ActiveDownload.setDownloadStatus(.failed, on: episode, in: context)
             save()
             return
@@ -483,8 +500,20 @@ final class DownloadManager {
         // The ActiveDownload row and the .downloading write land in the SAME save
         // (#701): a row that lagged behind would leave this episode invisible to
         // reconcileStuckDownloads() and spinning forever — #544 returning.
+        if context.hasChanges, !save() { return }
+        let previousStatus = episode.downloadStatus
+        let previousAttemptID = episode.downloadAttemptID
+        let attemptID = UUID().uuidString
+        episode.downloadAttemptID = attemptID
         ActiveDownload.setDownloadStatus(.downloading, on: episode, in: context)
-        save()
+        guard save() else {
+            context.rollback()
+            // SwiftData rollback restores persisted rows, while these runtime
+            // projections need to be reset explicitly too.
+            episode.downloadAttemptID = previousAttemptID
+            episode.downloadStatus = previousStatus
+            return
+        }
 
         // taskDescription (unlike taskIdentifier) survives an app relaunch, so a
         // completion delivered after the app was killed still resolves the
@@ -496,7 +525,8 @@ final class DownloadManager {
         )
         let transferKey = DownloadTransferKey.key(
             identityKey: identityKey,
-            sourceURL: url
+            sourceURL: url,
+            attemptID: attemptID
         )
         startTransfer(url, transferKey)
         AppLog.networking.info("Download started in the background")
@@ -573,15 +603,17 @@ final class DownloadManager {
             return false
         }
         let key = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        let attemptID = episode.downloadAttemptID
+        let waiterKey = Self.waiterKey(identityKey: key, attemptID: attemptID)
         // No suspension between download(_:) returning and the waiter being
         // parked (this closure runs synchronously on the main actor), so the
         // terminal event can't slip past unobserved.
         return await withCheckedContinuation { continuation in
-            let id = Self.addWaiter(continuation, for: key)
+            let id = Self.addWaiter(continuation, for: waiterKey)
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                 // No-op when the terminal event already resolved this waiter.
-                Self.timeOutWaiter(id: id, for: key)
+                Self.timeOutWaiter(id: id, for: waiterKey)
             }
         }
     }
@@ -758,13 +790,17 @@ final class DownloadManager {
     /// the real file instead of a dead path (#575).
     func removeDownload(_ episode: Episode) {
         guard let context else { return }
+        let identityKey = DownloadTaskKey.key(
+            feedURL: episode.podcast?.feedURL, guid: episode.guid
+        )
+        let attemptID = episode.downloadAttemptID
         if episode.downloadStatus == .downloading {
-            Self.cancelDownload(identityKey: DownloadTaskKey.key(
-                feedURL: episode.podcast?.feedURL, guid: episode.guid
-            ))
+            Self.cancelDownload(identityKey: identityKey, attemptID: attemptID)
         }
+        Self.resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
         try? DownloadPaths.removeIfUnshared(storedValue: episode.downloadPath, for: episode, in: context)
         episode.downloadPath = nil
+        episode.downloadAttemptID = nil
         // Drops any ActiveDownload row too: removing a download mid-transfer must
         // not leave reconciliation chasing it (#701).
         ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
@@ -789,17 +825,26 @@ final class DownloadManager {
         }
         guard !episodes.isEmpty else { return }
 
-        let identityKeys = Set(episodes.map {
-            DownloadTaskKey.key(feedURL: $0.0.podcast?.feedURL, guid: $0.0.guid)
+        let owners = Set(episodes.map { episode, _ in
+            AttemptOwner(
+                identityKey: DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
+                attemptID: episode.downloadAttemptID
+            )
         })
-        await Self.cancelTasks(matchingIdentityKeys: identityKeys)
+        await Self.cancelTasks(matching: owners)
         for (episode, repair) in episodes {
-            Self.resolveWaiters(for: DownloadTaskKey.key(
+            let identityKey = DownloadTaskKey.key(
                 feedURL: episode.podcast?.feedURL, guid: episode.guid
-            ), success: false)
+            )
+            let attemptID = episode.downloadAttemptID
+            guard owners.contains(AttemptOwner(identityKey: identityKey, attemptID: attemptID)) else {
+                continue
+            }
+            Self.resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
             try? DownloadPaths.removeIfUnshared(storedValue: repair.staleDownloadPath, for: episode, in: context)
             try? DownloadPaths.removeIfUnshared(storedValue: episode.downloadPath, for: episode, in: context)
             episode.downloadPath = nil
+            episode.downloadAttemptID = nil
             ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
         }
         save()
@@ -865,16 +910,25 @@ final class DownloadManager {
         }
         guard !affected.isEmpty else { return 0 }
 
-        await Self.cancelAllTasks()
+        let owners = Dictionary(uniqueKeysWithValues: affected.map { episode in
+            (episode.persistentModelID, AttemptOwner(
+                identityKey: DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
+                attemptID: episode.downloadAttemptID
+            ))
+        })
+        await Self.cancelTasks(matching: Set(owners.values))
+        var cancelled = 0
         for episode in affected {
-            Self.resolveWaiters(for: DownloadTaskKey.key(
-                feedURL: episode.podcast?.feedURL, guid: episode.guid
-            ), success: false)
+            guard let owner = owners[episode.persistentModelID],
+                  episode.downloadAttemptID == owner.attemptID else { continue }
+            Self.resolveWaiters(for: owner.identityKey, attemptID: owner.attemptID, success: false)
+            episode.downloadAttemptID = nil
             ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+            cancelled += 1
         }
         save()
-        AppLog.networking.info("Cancelled \(affected.count) active download(s)")
-        return affected.count
+        AppLog.networking.info("Cancelled \(cancelled) active download(s)")
+        return cancelled
     }
 
     /// Removes every downloaded file and resets all download state in one pass —
@@ -909,31 +963,43 @@ final class DownloadManager {
         }
         guard !affected.isEmpty else { return 0 }
 
+        let snapshots = Dictionary(uniqueKeysWithValues: affected.map { episode in
+            (episode.persistentModelID, (episode.downloadPath, AttemptOwner(
+                identityKey: DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
+                attemptID: episode.downloadAttemptID
+            )))
+        })
+
         // Cancel live transfers BEFORE resetting state so a completion delivered
         // mid-clear can't write `downloadPath`/`.downloaded` back onto a row we
         // just cleared. Only reach for the shared background session when a
         // transfer is actually in flight — the common "delete downloaded files"
         // path never forces the session into existence.
         if hasInFlight {
-            await Self.cancelAllTasks()
+            await Self.cancelTasks(matching: Set(snapshots.values.map { $0.1 }))
         }
 
-        let removedOwners = Set(affected.compactMap { LocalStateStore.key(for: $0) })
+        let eligible = affected.filter { episode in
+            guard let snapshot = snapshots[episode.persistentModelID] else { return false }
+            return episode.downloadAttemptID == snapshot.1.attemptID
+        }
+        let removedOwners = Set(eligible.compactMap { LocalStateStore.key(for: $0) })
         let retainedFiles = try? DownloadPaths.referencedFileNames(excluding: removedOwners, in: context)
-        for episode in affected {
-            Self.resolveWaiters(for: DownloadTaskKey.key(
-                feedURL: episode.podcast?.feedURL, guid: episode.guid
-            ), success: false)
-            if let retainedFiles, let name = DownloadPaths.storedFileName(episode.downloadPath),
+        for episode in eligible {
+            guard let snapshot = snapshots[episode.persistentModelID] else { continue }
+            let owner = snapshot.1
+            Self.resolveWaiters(for: owner.identityKey, attemptID: owner.attemptID, success: false)
+            if let retainedFiles, let name = DownloadPaths.storedFileName(snapshot.0),
                !retainedFiles.contains(name) {
                 try? DownloadPaths.removeFile(named: name)
             }
             episode.downloadPath = nil
+            episode.downloadAttemptID = nil
             ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
         }
         save()
-        AppLog.networking.info("Cleared \(affected.count) download(s)")
-        return affected.count
+        AppLog.networking.info("Cleared \(eligible.count) download(s)")
+        return eligible.count
     }
 
     /// Cancels every task on the shared background session. Used by
@@ -944,24 +1010,32 @@ final class DownloadManager {
 
     /// Request cancellation without delaying synchronous episode actions. Resetting
     /// download state in the caller makes late terminal events discard their file.
-    static func cancelDownload(identityKey: String, using downloadSession: URLSession? = nil) {
-        resolveWaiters(for: identityKey, success: false)
+    static func cancelDownload(
+        identityKey: String, attemptID: String? = nil, using downloadSession: URLSession? = nil
+    ) {
+        resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
         (downloadSession ?? session).getAllTasks { tasks in
             for task in tasks {
                 guard let raw = task.taskDescription,
-                      DownloadTransferKey.identityKey(from: raw) == identityKey else { continue }
+                      Self.matches(raw, owner: AttemptOwner(identityKey: identityKey, attemptID: attemptID))
+                else { continue }
                 task.cancel()
             }
         }
     }
 
-    private static func cancelTasks(matchingIdentityKeys keys: Set<String>) async {
-        guard !keys.isEmpty else { return }
+    private static func cancelTasks(matching owners: Set<AttemptOwner>) async {
+        guard !owners.isEmpty else { return }
         for task in await allTasks() {
             guard let raw = task.taskDescription,
-                  keys.contains(DownloadTransferKey.identityKey(from: raw)) else { continue }
+                  owners.contains(where: { matches(raw, owner: $0) }) else { continue }
             task.cancel()
         }
+    }
+
+    nonisolated private static func matches(_ rawTaskKey: String, owner: AttemptOwner) -> Bool {
+        DownloadTransferKey.identityKey(from: rawTaskKey) == owner.identityKey
+            && DownloadTransferKey.parse(rawTaskKey)?.attemptID == owner.attemptID
     }
 
     /// A recovery marker may be removed only after cancellation callbacks have
@@ -1045,6 +1119,7 @@ final class DownloadManager {
                         if let url = correction.checkedURL,
                            FileManager.default.fileExists(atPath: url.path) { continue }
                         episode.downloadPath = nil
+                        episode.downloadAttemptID = nil
                         ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
                         reset += 1
                     }
@@ -1137,6 +1212,7 @@ final class DownloadManager {
         persist: (ModelContext) throws -> Void
     ) throws {
         let identityKey = DownloadTransferKey.identityKey(from: taskKey)
+        let attemptID = DownloadTransferKey.parse(taskKey)?.attemptID
         guard let episode else {
             // A local or remotely delivered unfollow can delete the episode
             // while its background URLSession task is still finishing. The
@@ -1145,14 +1221,20 @@ final class DownloadManager {
             // would leak device storage forever; never attempt to write through
             // the deleted SwiftData model.
             try removeFinishedFile(fileName, context: context)
-            resolveWaiters(for: identityKey, success: false)
+            resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
+            return
+        }
+        guard episode.downloadAttemptID == attemptID else {
+            try removeFinishedFile(fileName, context: context)
+            resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
+            AppLog.networking.notice("Ignored a completion from a superseded download attempt")
             return
         }
         // Replaying after a save succeeded but before acknowledgement must not
         // delete the file that the episode now owns.
         if episode.downloadStatus == .downloaded && episode.downloadPath == fileName {
             if context.hasChanges { try persist(context) }
-            resolveWaiters(for: identityKey, success: true)
+            resolveWaiters(for: identityKey, attemptID: attemptID, success: true)
             return
         }
         // A feed correction or explicit removal can supersede a background
@@ -1178,7 +1260,7 @@ final class DownloadManager {
         try LocalStateStore.setTerminalDownloadState(.downloaded, path: fileName, on: episode,
                                                      in: context, fetchRows: fetchLocalRows)
         try persist(context)
-        resolveWaiters(for: identityKey, success: true)
+        resolveWaiters(for: identityKey, attemptID: attemptID, success: true)
         // Status is durable and readable in Download activity. Per-episode
         // speech here can queue dozens of announcements after a bulk request;
         // users can read one live summary there, or opt into notifications below.
@@ -1221,17 +1303,25 @@ final class DownloadManager {
         fetchLocalRows: (EpisodeLocalKey, ModelContext) throws -> [LocalEpisodeState],
         persist: (ModelContext) throws -> Void
     ) throws {
+        let identityKey = DownloadTransferKey.identityKey(from: taskKey)
+        let attemptID = DownloadTransferKey.parse(taskKey)?.attemptID
         guard let episode else {
-            resolveWaiters(for: DownloadTransferKey.identityKey(from: taskKey), success: false)
+            resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
+            return
+        }
+        guard episode.downloadAttemptID == attemptID else {
+            resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
+            AppLog.networking.notice("Ignored a failure from a superseded download attempt")
             return
         }
         if let source = DownloadTransferKey.parse(taskKey).flatMap({ URL(string: $0.sourceURL) }),
            source != URL(string: episode.audioURL).map(SecureURL.preferredMediaHTTPS) {
+            resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
             return
         }
         if episode.downloadStatus == .failed {
             if context.hasChanges { try persist(context) }
-            resolveWaiters(for: DownloadTransferKey.identityKey(from: taskKey), success: false)
+            resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
             return
         }
         // Don't clobber a state that already moved on (e.g. the user removed it).
@@ -1239,7 +1329,7 @@ final class DownloadManager {
         try LocalStateStore.setTerminalDownloadState(.failed, path: episode.downloadPath, on: episode,
                                                      in: context, fetchRows: fetchLocalRows)
         try persist(context)
-        resolveWaiters(for: DownloadTransferKey.identityKey(from: taskKey), success: false)
+        resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
         AppLog.networking.error("Download failed: \(episode.title, privacy: .public)")
     }
 
@@ -1271,16 +1361,21 @@ final class DownloadManager {
     // MARK: downloadAndWait continuations (#576)
 
     /// Continuations parked by ``downloadAndWait(_:timeout:)``, keyed by the
-    /// composite task key. Each entry is resumed EXACTLY once: removal from
+    /// composite task key and its attempt token. Each entry is resumed exactly
+    /// once: removal from
     /// this dictionary before resuming is the single ownership point, and every
     /// access is main-actor-isolated, so the terminal event and the timeout
     /// task can't double-resume. Every waiter is paired with a timeout task, so
     /// none can leak if a terminal event never arrives.
     @ObservationIgnored private static var downloadWaiters:
-        [String: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)]] = [:]
+        [DownloadWaiterKey: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)]] = [:]
+
+    private static func waiterKey(identityKey: String, attemptID: String?) -> DownloadWaiterKey {
+        DownloadWaiterKey(identityKey: identityKey, attemptID: attemptID)
+    }
 
     private static func addWaiter(
-        _ continuation: CheckedContinuation<Bool, Never>, for key: String
+        _ continuation: CheckedContinuation<Bool, Never>, for key: DownloadWaiterKey
     ) -> UUID {
         let id = UUID()
         downloadWaiters[key, default: []].append((id: id, continuation: continuation))
@@ -1289,7 +1384,10 @@ final class DownloadManager {
 
     /// Resumes and removes every waiter parked for `key`. Called on the
     /// terminal complete/fail event. No-op when nothing is waiting.
-    private static func resolveWaiters(for key: String, success: Bool) {
+    private static func resolveWaiters(
+        for identityKey: String, attemptID: String?, success: Bool
+    ) {
+        let key = waiterKey(identityKey: identityKey, attemptID: attemptID)
         guard let parked = downloadWaiters.removeValue(forKey: key) else { return }
         for waiter in parked {
             waiter.continuation.resume(returning: success)
@@ -1299,7 +1397,7 @@ final class DownloadManager {
     /// Resumes exactly the ONE waiter identified by `id` with false. Called by
     /// that waiter's timeout task; no-op when the terminal event already
     /// resolved it. Other callers waiting on the same key keep waiting.
-    private static func timeOutWaiter(id: UUID, for key: String) {
+    private static func timeOutWaiter(id: UUID, for key: DownloadWaiterKey) {
         guard var parked = downloadWaiters[key],
               let index = parked.firstIndex(where: { $0.id == id }) else { return }
         let waiter = parked.remove(at: index)
@@ -1313,18 +1411,25 @@ final class DownloadManager {
     /// The one save path for download state (#576): logs failures instead of
     /// discarding them. Static so the delegate-driven terminal events (which
     /// run without an instance) share it with instance methods via ``save()``.
-    private static func save(_ context: ModelContext, action: String) {
-        guard context.hasChanges else { return }
+    @discardableResult
+    private static func save(
+        _ context: ModelContext, action: String,
+        operation: (ModelContext) throws -> Void
+    ) -> Bool {
+        guard context.hasChanges else { return true }
         do {
-            try context.save()
+            try operation(context)
+            return true
         } catch {
             AppLog.networking.error("Download \(action, privacy: .public) save failed: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
-    private func save() {
-        guard let context else { return }
-        Self.save(context, action: "state")
+    @discardableResult
+    private func save() -> Bool {
+        guard let context else { return false }
+        return Self.save(context, action: "state", operation: saveContext)
     }
 }
 
@@ -1365,11 +1470,14 @@ enum DownloadCleanup {
         _ episode: Episode, in context: ModelContext, ownership: BulkOwnership? = nil
     ) {
         guard episode.downloadStatus != .none || episode.downloadPath != nil else { return }
+        let identityKey = DownloadTaskKey.key(
+            feedURL: episode.podcast?.feedURL, guid: episode.guid
+        )
+        let attemptID = episode.downloadAttemptID
         if episode.downloadStatus == .downloading {
-            DownloadManager.cancelDownload(identityKey: DownloadTaskKey.key(
-                feedURL: episode.podcast?.feedURL, guid: episode.guid
-            ))
+            DownloadManager.cancelDownload(identityKey: identityKey, attemptID: attemptID)
         }
+        episode.downloadAttemptID = nil
         if let ownership {
             if let retainedFiles = ownership.retainedFiles,
                let name = DownloadPaths.storedFileName(episode.downloadPath),

@@ -20,12 +20,14 @@ enum StoreRecoveryState: Equatable {
 
     /// The store predates V5, Earshot's first public App Store schema. It is
     /// preserved until the user explicitly chooses recovery. Erasure is offered
-    /// only when this carries a verified, restorable snapshot.
+    /// only when this carries a verified safety snapshot. Restore is offered
+    /// separately only when that snapshot is compatible with this build.
     case storePredatesSupportedSchema(backup: MigrationBackupDescriptor?)
 
     /// The store could not be opened as any known schema (genuine corruption).
     /// Destructive recovery remains unavailable unless a previously verified,
-    /// restorable snapshot exists.
+    /// verified safety snapshot exists. Restore is offered separately only for
+    /// snapshots compatible with this build.
     case corruptStore
 
     var isBackupUnavailable: Bool {
@@ -148,7 +150,7 @@ enum ModelContainerFactory {
                 "Store schema V\(majorVersion) predates the supported V5 floor; leaving it intact pending user-consented recovery"
             )
             let backup = await Task.detached {
-                MigrationBackupManager.latestRestorableBackup(at: storeURL)
+                MigrationBackupManager.latestVerifiedBackup(at: url)
             }.value
             return .recovery(.storePredatesSupportedSchema(backup: backup))
         } catch {
@@ -199,7 +201,7 @@ enum ModelContainerFactory {
                 "Store schema V\(majorVersion) predates the supported V5 floor; leaving it intact pending user-consented recovery"
             )
             return .recovery(.storePredatesSupportedSchema(
-                backup: MigrationBackupManager.latestRestorableBackup(at: url)
+                backup: MigrationBackupManager.latestVerifiedBackup(at: url)
             ))
         } catch {
             // 3. Genuine corruption — surface an explicit, user-consented reset
@@ -276,13 +278,13 @@ enum ModelContainerFactory {
 
     /// An ephemeral in-memory container for tests and previews.
     static func makeInMemory() throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV13.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV14.self)
         let mirrored = ModelConfiguration(
-            "FutureMirrored", schema: Schema(EarshotSchemaV13.mirroredModels),
+            "FutureMirrored", schema: Schema(EarshotSchemaV14.mirroredModels),
             isStoredInMemoryOnly: true, cloudKitDatabase: .none
         )
         let local = ModelConfiguration(
-            "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+            "DeviceLocal", schema: Schema(EarshotSchemaV14.localModels),
             isStoredInMemoryOnly: true, cloudKitDatabase: .none
         )
         return try ModelContainer(for: schema, configurations: mirrored, local)

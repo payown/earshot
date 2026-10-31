@@ -58,7 +58,7 @@ enum MigrationBackupError: Error, Equatable, Sendable {
 /// Creates, catalogs, restores, and retires migration safety snapshots. A
 /// manifest is written last so a partial copy is never considered a backup.
 enum MigrationBackupManager {
-    static let targetSchemaMajor = 13
+    static let targetSchemaMajor = 14
     static let initialFreeSpaceMultiplier = 4.5
     static let retainedBackupFreeSpaceMultiplier = 3.5
     #if DEBUG
@@ -120,12 +120,27 @@ enum MigrationBackupManager {
     }
     /// Returns the newest verified snapshot or restorable pre-manifest backup.
     static func latestRestorableBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
+        verifiedBackupCandidates(at: storeURL)
+            .filter(isRestorableByCurrentBuild)
+            .max { $0.createdAt < $1.createdAt }
+    }
+
+    /// Returns the newest verified snapshot even when the current build cannot
+    /// reopen its source schema. Recovery can still use such a snapshot to
+    /// protect a user-consented erase; the UI must not offer to restore it.
+    static func latestVerifiedBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
+        verifiedBackupCandidates(at: storeURL).max { $0.createdAt < $1.createdAt }
+    }
+
+    private static func verifiedBackupCandidates(
+        at storeURL: URL
+    ) -> [MigrationBackupDescriptor] {
         let root = backupRoot(for: storeURL)
         guard let directories = try? FileManager.default.contentsOfDirectory(
             at: root,
             includingPropertiesForKeys: [.creationDateKey, .isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return nil }
+        ) else { return [] }
         let candidates = directories.compactMap { directory -> MigrationBackupDescriptor? in
             guard (try? directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             else { return nil }
@@ -140,13 +155,30 @@ enum MigrationBackupManager {
             return try? legacyDescriptor(in: directory)
         }
         return candidates
-            .filter { $0.targetSchemaMajor == targetSchemaMajor }
-            .max { $0.createdAt < $1.createdAt }
     }
 
     /// Manifest-only lookup; restore performs full validation before file changes.
     static func latestRecordedBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
         verifiedBackups(at: storeURL).first { $0.targetSchemaMajor == targetSchemaMajor }
+    }
+
+    /// A backup made by the immediately older app can still be restored by this
+    /// app when its source schema has a known migration route to the current
+    /// schema. Restoring reinstalls the preserved source; normal migration then
+    /// advances it before the library is opened.
+    static func isRestorableByCurrentBuild(
+        _ backup: MigrationBackupDescriptor
+    ) -> Bool {
+        guard backup.targetSchemaMajor <= targetSchemaMajor else { return false }
+        let primaryRoute = knownPrimaryRoute(from: backup.sourceSchemaMajor)
+        guard primaryRoute.contains(backup.targetSchemaMajor),
+              primaryRoute.contains(targetSchemaMajor) else { return false }
+        if let localMajor = backup.localSourceSchemaMajor {
+            let localRoute = knownLocalRoute(from: localMajor)
+            guard localRoute.contains(backup.targetSchemaMajor),
+                  localRoute.contains(targetSchemaMajor) else { return false }
+        }
+        return true
     }
 
     /// Revalidates the exact backup offered by recovery immediately before any
@@ -375,34 +407,36 @@ enum MigrationBackupManager {
 
     private static func knownPrimaryRoute(from sourceMajor: Int) -> Set<Int> {
         switch sourceMajor {
-        case 5: [5, 10, 12, 13]
-        case 6: [6, 7, 10, 12, 13]
-        case 7: [7, 10, 12, 13]
-        case 8, 9: [sourceMajor, 10, 12, 13]
-        case 10: [10, 12, 13]
-        case 11: [11, 12, 13]
-        case 12: [12, 13]
+        case 5: [5, 10, 12, 13, 14]
+        case 6: [6, 7, 10, 12, 13, 14]
+        case 7: [7, 10, 12, 13, 14]
+        case 8, 9: [sourceMajor, 10, 12, 13, 14]
+        case 10: [10, 12, 13, 14]
+        case 11: [11, 12, 13, 14]
+        case 12: [12, 13, 14]
+        case 13: [13, 14]
         default: []
         }
     }
 
     private static func knownLocalRoute(from sourceMajor: Int) -> Set<Int> {
         switch sourceMajor {
-        case 8, 9: [sourceMajor, 10, 11, 12, 13]
-        case 10: [10, 11, 12, 13]
-        case 11: [11, 12, 13]
-        case 12: [12, 13]
+        case 8, 9: [sourceMajor, 10, 11, 12, 13, 14]
+        case 10: [10, 11, 12, 13, 14]
+        case 11: [11, 12, 13, 14]
+        case 12: [12, 13, 14]
+        case 13: [13, 14]
         default: []
         }
     }
 
     private static func knownCreatedLocalRoute(from sourceMajor: Int) -> Set<Int> {
-        (5...7).contains(sourceMajor) ? [12, 13] : []
+        (5...7).contains(sourceMajor) ? [12, 13, 14] : []
     }
     static func restore(_ backup: MigrationBackupDescriptor, at storeURL: URL) throws {
         try recoverInterruptedErasure(at: storeURL)
         try recoverInterruptedRestore(at: storeURL)
-        guard backup.targetSchemaMajor == targetSchemaMajor,
+        guard isRestorableByCurrentBuild(backup),
               try validate(backup) else { throw MigrationBackupError.snapshotInvalid }
         let root = backupRoot(for: storeURL)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -585,8 +619,9 @@ enum MigrationBackupManager {
     /// A completed migration is retained through one independent later open.
     /// The first successful target open marks it; the next removes it.
     static func noteSuccessfulTargetOpen(at storeURL: URL, targetSchemaMajor: Int) {
+        guard targetSchemaMajor == self.targetSchemaMajor else { return }
         for descriptor in verifiedBackups(at: storeURL)
-        where descriptor.targetSchemaMajor == targetSchemaMajor {
+        where isRestorableByCurrentBuild(descriptor) {
             do {
                 var manifest = try readManifest(in: descriptor.directoryURL)
                 manifest.successfulTargetOpenCount += 1
@@ -601,7 +636,6 @@ enum MigrationBackupManager {
                 )
             }
         }
-        guard targetSchemaMajor == self.targetSchemaMajor else { return }
         noteSuccessfulLegacyTargetOpen(at: storeURL)
     }
     // MARK: - Catalog

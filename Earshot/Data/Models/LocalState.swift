@@ -4,13 +4,17 @@ import SwiftData
 final class LocalRuntimeState: @unchecked Sendable {
     static let shared = LocalRuntimeState()
     private let lock = NSLock()
-    private var episodes: [String: (DownloadStatus, String?)] = [:]
+    private var episodes: [String: (DownloadStatus, String?, String?)] = [:]
     private var podcasts: [String: Date?] = [:]
-    func episode(_ id: PersistentIdentifier) -> (DownloadStatus, String?)? {
+    func episode(_ id: PersistentIdentifier) -> (DownloadStatus, String?, String?)? {
         lock.withLock { episodes[String(describing: id)] }
     }
-    func setEpisode(_ id: PersistentIdentifier, status: DownloadStatus, path: String?) {
-        lock.withLock { episodes[String(describing: id)] = (status, path) }
+    func setEpisode(
+        _ id: PersistentIdentifier, status: DownloadStatus, path: String?, downloadAttemptID: String?
+    ) {
+        lock.withLock {
+            episodes[String(describing: id)] = (status, path, downloadAttemptID)
+        }
     }
     func removeEpisode(_ id: PersistentIdentifier) {
         _ = lock.withLock { episodes.removeValue(forKey: String(describing: id)) }
@@ -49,6 +53,9 @@ final class LocalEpisodeState {
     var episodeGUID: String = ""
     var downloadStatusRaw: String = DownloadStatus.none.rawValue
     var downloadPath: String?
+    /// The unique owner of the most recent transfer. Retained through terminal
+    /// state so a journal replay can be idempotent, cleared when intent is reset.
+    var downloadAttemptID: String? = nil
     /// `nil` follows the global setting; a raw `off` explicitly disables boost
     /// for this episode even when the global setting is enabled.
     var volumeBoostRaw: String?
@@ -63,13 +70,15 @@ final class LocalEpisodeState {
         episodeGUID: String,
         downloadStatus: DownloadStatus = .none,
         downloadPath: String? = nil,
-        volumeBoost: VolumeBoostLevel? = nil
+        volumeBoost: VolumeBoostLevel? = nil,
+        downloadAttemptID: String? = nil
     ) {
         self.podcastFeedURL = FeedURLIdentity.canonical(podcastFeedURL)
         self.episodeGUID = episodeGUID
         self.downloadStatusRaw = downloadStatus.rawValue
         self.downloadPath = downloadPath
         self.volumeBoostRaw = volumeBoost?.rawValue
+        self.downloadAttemptID = downloadAttemptID
     }
 
     var volumeBoost: VolumeBoostLevel? {
