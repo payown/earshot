@@ -439,8 +439,14 @@ actor CloudProjectionCoordinator: ModelActor {
     private var bookmarkObserver: NSObjectProtocol?
     private var historyObserver: NSObjectProtocol?
     private var folderObserver: NSObjectProtocol?
-    private var reconcileTask: Task<Void, Never>?
+    private var reconcileTask: Task<Void, Error>?
+    private var reconcileTaskID: UUID?
+    private var reconciliationRequestedWhileRunning = false
+    private var isStopped = false
+    private var activeReconciliationCount = 0
+    private var reconciliationDrainWaiters: [CheckedContinuation<Void, Never>] = []
     private var pendingRemotePodcastDeletionFeedURLs: Set<String> = []
+    private var pendingRemotePodcastDeletionTasks: [String: Task<Void, Never>] = [:]
     private var knownLocalFeedURLs: Set<String> = []
     private var knownLocalBookmarkIDs: Set<String> = []
     private var knownLocalSessionIDs: Set<String> = []
@@ -457,6 +463,8 @@ actor CloudProjectionCoordinator: ModelActor {
     private var isApplyingRemote = false
     #if DEBUG
     private var resetSaveCheckpointForTesting: (@Sendable () -> Void)?
+    private var scheduledReconciliationCheckpointForTesting: (@Sendable () async -> Void)?
+    private var directReconciliationCheckpointForTesting: (@Sendable () async -> Void)?
     #endif
 
     private init(
@@ -603,6 +611,18 @@ actor CloudProjectionCoordinator: ModelActor {
         resetSaveCheckpointForTesting = checkpoint
     }
 
+    func setScheduledReconciliationCheckpointForTesting(
+        _ checkpoint: @escaping @Sendable () async -> Void
+    ) {
+        scheduledReconciliationCheckpointForTesting = checkpoint
+    }
+
+    func setDirectReconciliationCheckpointForTesting(
+        _ checkpoint: @escaping @Sendable () async -> Void
+    ) {
+        directReconciliationCheckpointForTesting = checkpoint
+    }
+
     nonisolated static func makeForTesting(
         applicationContainer: ModelContainer,
         projectionContainer: ModelContainer,
@@ -643,6 +663,7 @@ actor CloudProjectionCoordinator: ModelActor {
 #endif
 
     func start(performInitialReconciliation: Bool = true) async throws {
+        guard !isStopped else { return }
         refreshContextsFromStore()
         guard importObserver == nil else { return }
         importObserver = center.addObserver(
@@ -723,6 +744,24 @@ actor CloudProjectionCoordinator: ModelActor {
             Task { await self?.handleLocalFolderChange() }
         }
         guard performInitialReconciliation else { return }
+        let taskID = UUID()
+        let task = Task<Void, Error> { [weak self] in
+            guard let self else { return }
+            try await self.runInitialReconciliation()
+        }
+        reconcileTaskID = taskID
+        reconcileTask = task
+        do {
+            try await task.value
+        } catch {
+            finishReconciliationTask(id: taskID)
+            throw error
+        }
+        finishReconciliationTask(id: taskID)
+    }
+
+    private func runInitialReconciliation() async throws {
+        guard !isStopped else { return }
         guard seedInstrumentationEnabled() else {
             try await reconcile()
             return
@@ -749,7 +788,7 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     private func handleLocalSubscriptionChange(feedURL: String?, settingsOnly: Bool) {
-        guard !isApplyingRemote else { return }
+        guard !isStopped, !isApplyingRemote else { return }
         do {
             try publishLocalSubscriptionGraphChange(feedURL: feedURL)
             // A saved scalar edit only needs its outbound projection. Full
@@ -764,6 +803,7 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     func publishLocalSubscriptionGraphChange(feedURL: String?) throws {
+        try requireWriterAdmission()
         if let feedURL {
             try publishLocalSubscriptionChange(feedURL: feedURL)
         } else {
@@ -772,7 +812,7 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     private func handleLocalEpisodeStateChanges(_ snapshots: [EpisodeUserStateSnapshot]) {
-        guard !isApplyingRemote else { return }
+        guard !isStopped, !isApplyingRemote else { return }
         do {
             try publishLocalEpisodeStateChanges(snapshots: snapshots)
         } catch {
@@ -785,12 +825,12 @@ actor CloudProjectionCoordinator: ModelActor {
     private func scheduleReconciliationUnlessApplyingRemote() {
         // Reconciliation itself posts the Inbox notification after applying
         // remote state. Only an external catalog refresh needs another pass.
-        guard !isApplyingRemote else { return }
+        guard !isStopped, !isApplyingRemote else { return }
         scheduleReconciliation()
     }
 
     private func handleLocalQueueChange() {
-        guard !isApplyingRemote else { return }
+        guard !isStopped, !isApplyingRemote else { return }
         do { try publishLocalQueueChanges() }
         catch {
             AppLog.data.error(
@@ -800,7 +840,7 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     private func handleLocalSettingChange(_ key: String) {
-        guard !isApplyingRemote else { return }
+        guard !isStopped, !isApplyingRemote else { return }
         do { try publishLocalSettingChange(key: key) }
         catch {
             AppLog.data.error(
@@ -810,7 +850,7 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     private func handleLocalBookmarkChange() {
-        guard !isApplyingRemote else { return }
+        guard !isStopped, !isApplyingRemote else { return }
         do { try publishLocalBookmarkChanges() }
         catch {
             AppLog.data.error(
@@ -820,7 +860,7 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     private func handleLocalListeningHistoryChange() {
-        guard !isApplyingRemote else { return }
+        guard !isStopped, !isApplyingRemote else { return }
         do { try publishLocalListeningHistoryChanges() }
         catch {
             AppLog.data.error(
@@ -830,7 +870,7 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     private func handleLocalFolderChange() {
-        guard !isApplyingRemote else { return }
+        guard !isStopped, !isApplyingRemote else { return }
         do { try publishLocalFolderChanges() }
         catch {
             AppLog.data.error(
@@ -882,6 +922,11 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     func stop() async {
+        // Close admission before removing observers or awaiting work. A queued
+        // callback or a late scheduler can still reach this actor after observer
+        // removal, but every writer/reconcile entry point now rejects it.
+        isStopped = true
+        reconciliationRequestedWhileRunning = false
         if let importObserver {
             center.removeObserver(importObserver)
             self.importObserver = nil
@@ -918,37 +963,85 @@ actor CloudProjectionCoordinator: ModelActor {
             center.removeObserver(folderObserver)
             self.folderObserver = nil
         }
-        reconcileTask?.cancel()
-        _ = await reconcileTask?.value
+        let task = reconcileTask
+        task?.cancel()
+        _ = await task?.result
         reconcileTask = nil
+        reconcileTaskID = nil
+        let deletionTasks = Array(pendingRemotePodcastDeletionTasks.values)
+        pendingRemotePodcastDeletionTasks.removeAll()
+        pendingRemotePodcastDeletionFeedURLs.removeAll()
+        for task in deletionTasks { task.cancel() }
+        for task in deletionTasks { await task.value }
+        await waitForActiveReconciliationsToDrain()
     }
 
     private func scheduleReconciliation() {
-        guard reconcileTask == nil else { return }
-        reconcileTask = Task { [weak self] in
-            await self?.runScheduledReconciliation()
+        guard !isStopped else { return }
+        guard reconcileTask == nil else {
+            reconciliationRequestedWhileRunning = true
+            return
+        }
+        let taskID = UUID()
+        reconcileTaskID = taskID
+        // Keep the background priority while retaining the task so stop() can
+        // cancel and join it. Detached work is never left untracked.
+        reconcileTask = Task.detached(priority: .background) { [weak self] in
+            await self?.runScheduledReconciliation(taskID: taskID)
         }
     }
 
     /// Starts the cold-launch pass without making RootView's main-actor
-    /// activation await it. The detached caller supplies background priority;
-    /// the coordinator retains the child so `stop()` can still cancel and join
-    /// it during reset or account replacement.
-    nonisolated func scheduleInitialReconciliationInBackground() {
-        Task.detached(priority: .background) { [weak self] in
-            await self?.scheduleReconciliation()
+    /// activation await reconciliation itself. The coordinator owns the
+    /// background task so `stop()` can cancel and join it during reset or
+    /// account replacement.
+    func scheduleInitialReconciliationInBackground() {
+        scheduleReconciliation()
+    }
+
+    private func runScheduledReconciliation(taskID: UUID) async {
+        defer { finishReconciliationTask(id: taskID) }
+        do {
+            #if DEBUG
+            if let scheduledReconciliationCheckpointForTesting {
+                await scheduledReconciliationCheckpointForTesting()
+            }
+            #endif
+            guard !isStopped, !Task.isCancelled else { return }
+            try await reconcile()
+        } catch {
+            if !isStopped, !(error is CancellationError) {
+                AppLog.data.error(
+                    "Cloud projection reconciliation failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
     }
 
-    private func runScheduledReconciliation() async {
-        defer { reconcileTask = nil }
-        do {
-            try await reconcile()
-        } catch {
-            AppLog.data.error(
-                "Cloud projection reconciliation failed: \(error.localizedDescription, privacy: .public)"
-            )
-        }
+    private func finishReconciliationTask(id: UUID) {
+        guard reconcileTaskID == id else { return }
+        reconcileTask = nil
+        reconcileTaskID = nil
+        guard !isStopped, reconciliationRequestedWhileRunning else { return }
+        reconciliationRequestedWhileRunning = false
+        scheduleReconciliation()
+    }
+
+    private func requireWriterAdmission() throws {
+        guard !isStopped else { throw ResetProjectionError.coordinatorStopped }
+    }
+
+    private func waitForActiveReconciliationsToDrain() async {
+        guard activeReconciliationCount > 0 else { return }
+        await withCheckedContinuation { reconciliationDrainWaiters.append($0) }
+    }
+
+    private func finishActiveReconciliation() {
+        activeReconciliationCount -= 1
+        guard activeReconciliationCount == 0 else { return }
+        let waiters = reconciliationDrainWaiters
+        reconciliationDrainWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     /// External application and CloudKit contexts can save while this actor is
@@ -1020,6 +1113,15 @@ actor CloudProjectionCoordinator: ModelActor {
     /// Applies remote subscriptions before projecting local subscriptions. An
     /// empty new device therefore cannot overwrite a populated account.
     func reconcile() async throws {
+        guard !isStopped, !Task.isCancelled else { return }
+        activeReconciliationCount += 1
+        defer { finishActiveReconciliation() }
+        #if DEBUG
+        if let directReconciliationCheckpointForTesting {
+            await directReconciliationCheckpointForTesting()
+        }
+        #endif
+        guard !isStopped, !Task.isCancelled else { return }
         refreshContextsFromStore()
         guard !isApplyingRemote else { return }
         isApplyingRemote = true
@@ -1047,6 +1149,8 @@ actor CloudProjectionCoordinator: ModelActor {
         for feedURL in activeRemoteFeeds {
             applicationChanged = try await applyRemoteActiveSubscription(feedURL: feedURL)
                 || applicationChanged
+            try Task.checkCancellation()
+            guard !isStopped else { return }
         }
         refreshContextsFromStore()
         let appContext = modelContext
@@ -1169,6 +1273,8 @@ actor CloudProjectionCoordinator: ModelActor {
             appContext: appContext,
             cloudContext: cloudContext
         )
+        try Task.checkCancellation()
+        guard !isStopped else { return }
         applicationChanged = queueChanged || applicationChanged
         if queueChanged {
             postProjectionChange(.earshotQueueDidChange)
@@ -1221,7 +1327,7 @@ actor CloudProjectionCoordinator: ModelActor {
     /// that SwiftData invalidated between two property reads.
     private func scheduleRemotePodcastDeletion(_ podcast: Podcast, feedURL: String) {
         let key = FeedURLIdentity.canonical(feedURL)
-        guard pendingRemotePodcastDeletionFeedURLs.insert(key).inserted else { return }
+        guard !isStopped, pendingRemotePodcastDeletionFeedURLs.insert(key).inserted else { return }
 
         center.post(
             name: .earshotWillDeleteEpisodes,
@@ -1230,19 +1336,26 @@ actor CloudProjectionCoordinator: ModelActor {
         )
 
         let deletionDelay = remotePodcastDeletionDelayNanoseconds
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: deletionDelay)
+        pendingRemotePodcastDeletionTasks[key] = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: deletionDelay)
+            } catch {
+                return
+            }
             await self?.finishRemotePodcastDeletion(key: key)
         }
     }
 
     private func finishRemotePodcastDeletion(key: String) async {
         defer { pendingRemotePodcastDeletionFeedURLs.remove(key) }
+        defer { pendingRemotePodcastDeletionTasks[key] = nil }
+        guard !isStopped, !Task.isCancelled else { return }
 
         // Cold-launch feed refresh and CloudKit import can begin together. Let
         // any refresh unwind before deleting its Podcast, or that refresh can
         // save newly fetched Episodes after the cascade and leave them detached.
         await BackgroundFeedRefresher.cancelAndWait()
+        guard !isStopped, !Task.isCancelled else { return }
 
         // A rapid refollow may clear the tombstone while dismissal is in flight.
         let rows = (try? projectionContext.fetch(
@@ -1378,6 +1491,7 @@ actor CloudProjectionCoordinator: ModelActor {
         onlyMissingOwnRows: Bool = false,
         activatingFeedURL: String? = nil
     ) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         let appContext = modelContext
         let cloudContext = projectionContext
@@ -1512,6 +1626,7 @@ actor CloudProjectionCoordinator: ModelActor {
         onlyIfCloudEmpty: Bool = false,
         activatingFeedURL: String? = nil
     ) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         let appContext = modelContext
         let cloudContext = projectionContext
@@ -1707,6 +1822,7 @@ actor CloudProjectionCoordinator: ModelActor {
         onlyIfCloudEmpty: Bool = false,
         activatingFeedURL: String? = nil
     ) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         let appContext = modelContext
         let cloudContext = projectionContext
@@ -1745,6 +1861,7 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     func publishLocalSettingChange(key: String, now: Date = .now) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         guard AppSettingScope.isMirrored(key) else { return }
         let canonical = AppSettingIdentity.canonicalKey(key)
@@ -1776,6 +1893,7 @@ actor CloudProjectionCoordinator: ModelActor {
         onlyIfCloudEmpty: Bool = false,
         activatingFeedURL: String? = nil
     ) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         let appContext = modelContext
         let cloudContext = projectionContext
@@ -1845,6 +1963,7 @@ actor CloudProjectionCoordinator: ModelActor {
     func publishLocalListeningHistoryChanges(
         now: Date = .now, activatingFeedURL: String? = nil
     ) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         let appContext = modelContext
         let cloudContext = projectionContext
@@ -1921,6 +2040,7 @@ actor CloudProjectionCoordinator: ModelActor {
         onlyIfCloudEmpty: Bool = false,
         activatingFeedURL: String? = nil
     ) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         let appContext = modelContext
         let cloudContext = projectionContext
@@ -2097,6 +2217,7 @@ actor CloudProjectionCoordinator: ModelActor {
         snapshots: [EpisodeUserStateSnapshot],
         now: Date = .now
     ) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         guard !snapshots.isEmpty else { return }
         let cloudContext = projectionContext
@@ -2177,6 +2298,7 @@ actor CloudProjectionCoordinator: ModelActor {
     /// boundary. The CloudKit upload may be delayed, but a force quit cannot lose
     /// the local projection operation because its SQLite save has completed.
     func publishLocalSubscriptionChanges(now: Date = .now) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         try publishPendingUnfollowIntents()
         refreshContextsFromStore()
@@ -2258,6 +2380,7 @@ actor CloudProjectionCoordinator: ModelActor {
     /// repeatedly while a slider is adjusted. Both lookups use stable feed URL
     /// keys, keeping the work independent of library size.
     func publishLocalSubscriptionChange(feedURL: String, now: Date = .now) throws {
+        try requireWriterAdmission()
         refreshContextsFromStore()
         let requestedFeed = FeedURLIdentity.canonical(feedURL)
         if try PendingCloudUnfollowIntent.feedURLs(in: modelContext).contains(requestedFeed) {
@@ -2470,6 +2593,7 @@ actor CloudProjectionCoordinator: ModelActor {
     /// or prevent another projection writer from changing the same rows.
     enum ResetProjectionError: Error {
         case uncommittedProjectionChanges
+        case coordinatorStopped
     }
 
     func markAllSubscriptionsDeleted(
@@ -2968,12 +3092,16 @@ actor CloudProjectionCoordinator: ModelActor {
             }
             try await queueApplicationCheckpoint("episodes-resolved:\(inverseCount)")
         }
+        try Task.checkCancellation()
+        guard !isStopped else { return false }
 
         let changed = try await Self.applyRemoteQueuePlan(
             plan,
             applicationContainer: modelContainer,
             checkpoint: queueApplicationCheckpoint
         )
+        try Task.checkCancellation()
+        guard !isStopped else { return false }
         if cloudContext.hasChanges { try cloudContext.save() }
         return changed
     }

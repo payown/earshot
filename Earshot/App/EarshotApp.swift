@@ -1233,7 +1233,7 @@ final class AppRuntime {
             }
             cloudProjectionCoordinator = coordinator
             cloudSyncAvailability = .available
-            coordinator.scheduleInitialReconciliationInBackground()
+            await coordinator.scheduleInitialReconciliationInBackground()
         }
         cloudProjectionActivationTask = task
         defer { cloudProjectionActivationTask = nil }

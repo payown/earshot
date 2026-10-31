@@ -185,6 +185,7 @@
 		6431563238F258D03A768B3C /* PlaybackStartup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176D270ABFB38F7C3BBA92BA /* PlaybackStartup.swift */; };
 		64B9A72723184B0AA8EEADD4 /* EpisodeRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8B9B6240BDE0DB59C089BFE /* EpisodeRepository.swift */; };
 		651413D825AAF35CB3DCE919 /* NewEpisodeNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C881C6AA6E3FFC84B921982 /* NewEpisodeNotification.swift */; };
+		6944E9289E162BBDCFEDDBFA /* InterruptedLibraryResetScreenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97200FC28FC4705AD9270214 /* InterruptedLibraryResetScreenTests.swift */; };
 		69EF05CA2664706F91AA2EC4 /* LargeLibraryMemoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F992A474580C7C064FBD876 /* LargeLibraryMemoryTests.swift */; };
 		6B4B5E747208FDACF6B17DCB /* DownloadTaskKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D55EC6AA8BCBCED17585511 /* DownloadTaskKeyTests.swift */; };
 		6BFBDA7F10F2975F3DE4C732 /* EpisodeAudioExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C874241F9AB6024EBB87ECE9 /* EpisodeAudioExport.swift */; };
@@ -778,6 +779,7 @@
 		94347B9412E35CBD85FC2705 /* EpisodeListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeListView.swift; sourceTree = "<group>"; };
 		95512638806EFA0B84CDF9AF /* CatalogEpisodeQueueRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogEpisodeQueueRepositoryTests.swift; sourceTree = "<group>"; };
 		968DDB6EC4A09753178E5D28 /* TipJarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipJarView.swift; sourceTree = "<group>"; };
+		97200FC28FC4705AD9270214 /* InterruptedLibraryResetScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterruptedLibraryResetScreenTests.swift; sourceTree = "<group>"; };
 		97BC7755B6A24655BBBFE0FD /* PodcastSubscriptionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastSubscriptionState.swift; sourceTree = "<group>"; };
 		97C81D1C9F7DF5E9A775E965 /* PersonalAudioStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalAudioStorage.swift; sourceTree = "<group>"; };
 		99B2109D775D5AD589BB90AC /* FolderRunController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRunController.swift; sourceTree = "<group>"; };
@@ -1350,6 +1352,7 @@
 				21426D34A6272D33878D6A13 /* InboxExpirationServiceTests.swift */,
 				17E95BEBF055BA2A6E2302DA /* InboxHistoryMaintenanceTests.swift */,
 				7092097FBC4AAAB612B1E42E /* InterruptedLibraryResetRuntimeTests.swift */,
+				97200FC28FC4705AD9270214 /* InterruptedLibraryResetScreenTests.swift */,
 				7D1FF1B05CD9DD1E0A619E9F /* ITunesSearchServiceTests.swift */,
 				0303EB1FC8E9E6060BE5B24E /* KeepFinishedQueueTests.swift */,
 				3F992A474580C7C064FBD876 /* LargeLibraryMemoryTests.swift */,
@@ -2698,6 +2701,7 @@
 				D0EAF35C0542B99058B990D8 /* InboxExpirationServiceTests.swift in Sources */,
 				C4F7C0544F3894E1B221C17C /* InboxHistoryMaintenanceTests.swift in Sources */,
 				D5ED87DDDE46BF02D54F8B19 /* InterruptedLibraryResetRuntimeTests.swift in Sources */,
+				6944E9289E162BBDCFEDDBFA /* InterruptedLibraryResetScreenTests.swift in Sources */,
 				B043A5A38E32CF938B36BA18 /* KeepFinishedQueueTests.swift in Sources */,
 				69EF05CA2664706F91AA2EC4 /* LargeLibraryMemoryTests.swift in Sources */,
 				3A6C8B842101B32D0269EA31 /* LibraryPlaybackIntentTests.swift in Sources */,
