@@ -67,6 +67,9 @@ enum QuickActionContentType: String, Codable, CaseIterable {
     case episode
     case podcast
     case queueItem
+    case playerTransport
+    case playerRewindButton
+    case playerFastForwardButton
 }
 
 /// The screen Earshot opens to on launch. Mirrors the Flutter `LaunchScreen`.

@@ -467,6 +467,50 @@ final class EarshotUITests: XCTestCase {
         XCTAssertEqual(rename.value as? String, originalName)
     }
 
+    func testPlayerTransportActionsFillTopRowWidth() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying",
+            "-playerTransportActionLayoutTest"
+        ]
+        app.launch()
+
+        let back = app.buttons["player.transportAction.skipBack120"]
+        let forward = app.buttons["player.transportAction.skipForward300"]
+        let position = app.descendants(matching: .any).matching(identifier: "player.position").firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        XCTAssertTrue(forward.exists)
+        XCTAssertTrue(position.exists)
+        XCTAssertTrue(back.isHittable)
+        XCTAssertTrue(forward.isHittable)
+        XCTAssertEqual((back.frame.midX + forward.frame.midX) / 2, app.frame.midX, accuracy: 2)
+        XCTAssertEqual(back.frame.minX, position.frame.minX, accuracy: 4,
+                       "The first action should align with the leading edge of the player controls")
+        XCTAssertEqual(forward.frame.maxX, position.frame.maxX, accuracy: 4,
+                       "The last action should align with the trailing edge of the player controls")
+        XCTAssertLessThan(back.frame.maxY, position.frame.minY,
+                          "The configured actions should sit in one row above the position slider")
+    }
+
+    func testPlayerTransportActionRowScrollsWhenItOverflows() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying",
+            "-playerTransportActionLayoutTest", "-playerTransportActionOverflowTest",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+
+        let row = app.scrollViews["player.transportActions"]
+        let lastAction = app.buttons["player.transportAction.skipBack10"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(lastAction.waitForExistence(timeout: 5))
+        row.swipeLeft()
+        XCTAssertTrue(lastAction.isHittable)
+        XCTAssertGreaterThanOrEqual(lastAction.frame.minY, row.frame.minY - 1)
+        XCTAssertLessThanOrEqual(lastAction.frame.maxY, row.frame.maxY + 1)
+    }
+
     func testAnchoredPlayerStabilityAndSliderEdges() { verifyAnchoredPlayer(largeText: false) }
     func testAnchoredPlayerStabilityAtLargestText() { verifyAnchoredPlayer(largeText: true) }
 
@@ -483,6 +527,8 @@ final class EarshotUITests: XCTestCase {
         let controls = [position, app.buttons["player.gobackward"], play, app.buttons["player.goforward"], route, notes]
         let initial = controls.map(\.frame)
         XCTAssertGreaterThanOrEqual(position.frame.height, 56)
+        XCTAssertEqual(position.frame.midX, app.frame.midX, accuracy: 2,
+                       "VoiceOver's playback-position focus frame should span the player center, not sit at the trailing edge")
         XCTAssertTrue(play.isHittable)
         XCTAssertLessThanOrEqual(play.frame.maxY, app.frame.maxY)
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Episode artwork")).firstMatch.exists)
