@@ -289,7 +289,7 @@ enum StoreMigration {
         return false
     }
 
-    /// Opens the current split V13 store, advances V8/V9/V10/V11/V12 stores, or
+    /// Opens the current split V14 store, advances supported older stores, or
     /// upgrades a supported V5/V6/V7 store through a bounded local-state preflight.
     /// V5 is the evidence-backed production floor: public App Store build 155
     /// created V5, while TestFlight build 161 created V6. Earlier SwiftData
@@ -312,7 +312,7 @@ enum StoreMigration {
         let localURL = localStoreURL(for: url)
         try rejectStoresNewerThanApp(mirroredURL: url, localURL: localURL)
 
-        // A settled V13 launch needs one final two-store open and the bounded
+        // A settled V14 launch needs one final two-store open and the bounded
         // projection of device-local rows. Read-only metadata classification
         // comes first so an older store can never be opened as V10 without the
         // migration safety gate below.
@@ -885,13 +885,14 @@ enum StoreMigration {
                 )
                 return rows.contains { $0.value == "1" }
             }
-            guard [10, 11, 12, 13].contains(major) else { return false }
+            guard [10, 11, 12, 13, 14].contains(major) else { return false }
             let full: Schema
             switch major {
             case 10: full = Schema(versionedSchema: EarshotSchemaV10.self)
             case 11: full = Schema(versionedSchema: EarshotSchemaV11.self)
             case 12: full = Schema(versionedSchema: EarshotSchemaV12.self)
-            default: full = Schema(versionedSchema: EarshotSchemaV13.self)
+            case 13: full = Schema(versionedSchema: EarshotSchemaV13.self)
+            default: full = Schema(versionedSchema: EarshotSchemaV14.self)
             }
             let container = try ModelContainer(
                 for: full,
@@ -912,6 +913,22 @@ enum StoreMigration {
                 let key = splitCompletionKey
                 return try ModelContext(container).fetch(
                     FetchDescriptor<EarshotSchemaV11.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                ).contains { $0.value == "1" }
+            }
+            if major == 12 {
+                let key = splitCompletionKey
+                return try ModelContext(container).fetch(
+                    FetchDescriptor<EarshotSchemaV12.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                ).contains { $0.value == "1" }
+            }
+            if major == 13 {
+                let key = splitCompletionKey
+                return try ModelContext(container).fetch(
+                    FetchDescriptor<EarshotSchemaV13.LocalAppSetting>(
                         predicate: #Predicate { $0.key == key }
                     )
                 ).contains { $0.value == "1" }
@@ -923,7 +940,7 @@ enum StoreMigration {
     }
 
     private static func hasIdentityRepairCompletionMarker(at localURL: URL) -> Bool {
-        guard let major = try? storeMajorVersion(at: localURL), [10, 11, 12, 13].contains(major) else {
+        guard let major = try? storeMajorVersion(at: localURL), [10, 11, 12, 13, 14].contains(major) else {
             return false
         }
         return (try? autoreleasepool {
@@ -932,7 +949,8 @@ enum StoreMigration {
             case 10: full = Schema(versionedSchema: EarshotSchemaV10.self)
             case 11: full = Schema(versionedSchema: EarshotSchemaV11.self)
             case 12: full = Schema(versionedSchema: EarshotSchemaV12.self)
-            default: full = Schema(versionedSchema: EarshotSchemaV13.self)
+            case 13: full = Schema(versionedSchema: EarshotSchemaV13.self)
+            default: full = Schema(versionedSchema: EarshotSchemaV14.self)
             }
             let container = try ModelContainer(
                 for: full,
@@ -957,6 +975,22 @@ enum StoreMigration {
                     )
                 ).contains { $0.value == "1" }
             }
+            if major == 12 {
+                let key = identityRepairCompletionKey
+                return try ModelContext(container).fetch(
+                    FetchDescriptor<EarshotSchemaV12.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                ).contains { $0.value == "1" }
+            }
+            if major == 13 {
+                let key = identityRepairCompletionKey
+                return try ModelContext(container).fetch(
+                    FetchDescriptor<EarshotSchemaV13.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                ).contains { $0.value == "1" }
+            }
             return LocalAppSettingIdentity.value(
                 for: identityRepairCompletionKey, in: ModelContext(container)
             ) == "1"
@@ -964,14 +998,14 @@ enum StoreMigration {
     }
 
     private static func openFinal(mirroredURL: URL, localURL: URL) throws -> ModelContainer {
-        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let full = Schema(versionedSchema: EarshotSchemaV14.self)
         let mirrored = ModelConfiguration(
-            "FutureMirrored", schema: Schema(EarshotSchemaV13.mirroredModels),
+            "FutureMirrored", schema: Schema(EarshotSchemaV14.mirroredModels),
             url: mirroredURL,
             cloudKitDatabase: CloudKitLaunchPolicy.mirroredDatabase()
         )
         let local = ModelConfiguration(
-            "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+            "DeviceLocal", schema: Schema(EarshotSchemaV14.localModels),
             url: localURL, cloudKitDatabase: .none
         )
         return try ModelContainer(for: full, configurations: mirrored, local)
@@ -1110,6 +1144,27 @@ enum StoreMigration {
                     && context.fetchCount(FetchDescriptor<QuickActionConfig>()) == 0
                     && context.fetchCount(FetchDescriptor<AppSetting>()) == 0
                     && context.fetchCount(FetchDescriptor<EpisodeFolderMembership>()) == 0
+            case 14:
+                let schema = Schema(versionedSchema: EarshotMirroredSchemaV14.self)
+                let container = try ModelContainer(
+                    for: schema,
+                    configurations: ModelConfiguration(
+                        "FutureMirrored", schema: schema, url: url,
+                        cloudKitDatabase: .none
+                    )
+                )
+                let context = ModelContext(container)
+                return try context.fetchCount(FetchDescriptor<Podcast>()) == 0
+                    && context.fetchCount(FetchDescriptor<Episode>()) == 0
+                    && context.fetchCount(FetchDescriptor<QueueItem>()) == 0
+                    && context.fetchCount(FetchDescriptor<ListeningSession>()) == 0
+                    && context.fetchCount(FetchDescriptor<Bookmark>()) == 0
+                    && context.fetchCount(FetchDescriptor<PodcastFolder>()) == 0
+                    && context.fetchCount(FetchDescriptor<FolderMembership>()) == 0
+                    && context.fetchCount(FetchDescriptor<RecentlyExpired>()) == 0
+                    && context.fetchCount(FetchDescriptor<QuickActionConfig>()) == 0
+                    && context.fetchCount(FetchDescriptor<AppSetting>()) == 0
+                    && context.fetchCount(FetchDescriptor<EpisodeFolderMembership>()) == 0
             default:
                 return false
             }
@@ -1210,15 +1265,29 @@ enum StoreMigration {
                     )
                 )
                 let context = ModelContext(container)
-                return try context.fetchCount(FetchDescriptor<LocalPodcastState>()) == 0
-                    && context.fetchCount(FetchDescriptor<LocalEpisodeState>()) == 0
-                    && context.fetchCount(FetchDescriptor<LocalAppSetting>()) == 0
+                return try context.fetchCount(FetchDescriptor<EarshotSchemaV12.LocalPodcastState>()) == 0
+                    && context.fetchCount(FetchDescriptor<EarshotSchemaV12.LocalEpisodeState>()) == 0
+                    && context.fetchCount(FetchDescriptor<EarshotSchemaV12.LocalAppSetting>()) == 0
             case 13:
                 let schema = Schema(versionedSchema: EarshotSchemaV13.self)
                 let container = try ModelContainer(
                     for: schema,
                     configurations: ModelConfiguration(
                         "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                        url: url, cloudKitDatabase: .none
+                    )
+                )
+                let context = ModelContext(container)
+                return try context.fetchCount(FetchDescriptor<EarshotSchemaV13.LocalPodcastState>()) == 0
+                    && context.fetchCount(FetchDescriptor<EarshotSchemaV13.LocalEpisodeState>()) == 0
+                    && context.fetchCount(FetchDescriptor<EarshotSchemaV13.LocalAppSetting>()) == 0
+                    && context.fetchCount(FetchDescriptor<EarshotSchemaV13.PersonalAudioItem>()) == 0
+            case 14:
+                let schema = Schema(versionedSchema: EarshotSchemaV14.self)
+                let container = try ModelContainer(
+                    for: schema,
+                    configurations: ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV14.localModels),
                         url: url, cloudKitDatabase: .none
                     )
                 )
@@ -1285,9 +1354,12 @@ enum StoreMigration {
             case 11:
                 break
             case 12:
-                try advanceUnchangedStoreVersion(at: url, to: 13)
+                try advanceUnchangedStoreVersion(at: url, to: 14)
                 return
             case 13:
+                try advanceUnchangedStoreVersion(at: url, to: 14)
+                return
+            case 14:
                 return
             default:
                 throw CocoaError(.persistentStoreIncompatibleVersionHash)
@@ -1295,10 +1367,10 @@ enum StoreMigration {
             if major <= 10 {
                 try failIfInjected(at: .afterMirroredV10Preparation)
                 try migrateMirroredV10StoreToV12(at: url)
-                try advanceUnchangedStoreVersion(at: url, to: 13)
+                try advanceUnchangedStoreVersion(at: url, to: 14)
             } else if major == 11 {
                 try migrateMirroredV11Store(at: url)
-                try advanceUnchangedStoreVersion(at: url, to: 13)
+                try advanceUnchangedStoreVersion(at: url, to: 14)
             }
         }
     }
@@ -1307,9 +1379,13 @@ enum StoreMigration {
         let major = try storeMajorVersion(at: url)
         switch major {
         case 13:
+            try migrateLocalV13Store(at: url)
+            return
+        case 14:
             return
         case 12:
             try migrateLocalV12Store(at: url)
+            try migrateLocalV13Store(at: url)
             return
         case 8:
             try migrateFullV8Store(at: url, configurationName: "DeviceLocal")
@@ -1328,6 +1404,7 @@ enum StoreMigration {
         }
         try migrateLocalV11Store(at: url)
         try migrateLocalV12Store(at: url)
+        try migrateLocalV13Store(at: url)
     }
 
     private static func migrateFullV8Store(
@@ -1434,6 +1511,18 @@ enum StoreMigration {
             migrationPlan: EarshotV12ToV13MigrationPlan.self,
             configurations: ModelConfiguration(
                 "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                url: url, cloudKitDatabase: .none
+            )
+        )
+    }
+
+    private static func migrateLocalV13Store(at url: URL) throws {
+        let full = Schema(versionedSchema: EarshotSchemaV14.self)
+        _ = try ModelContainer(
+            for: full,
+            migrationPlan: EarshotV13ToV14MigrationPlan.self,
+            configurations: ModelConfiguration(
+                "DeviceLocal", schema: Schema(EarshotSchemaV14.localModels),
                 url: url, cloudKitDatabase: .none
             )
         )
