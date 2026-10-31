@@ -1852,7 +1852,7 @@ final class DownloadEventRetrierTests: XCTestCase {
         retrier.cancelAll()
     }
 
-    func testRecoveredJournalResubmitsAfterEarlierRetriesExhausted() async throws {
+    func testUndurableJournalEventIsWithheldUntilRecoveryThenAcknowledgedOnce() async throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("journal-replay-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1862,7 +1862,6 @@ final class DownloadEventRetrierTests: XCTestCase {
         let event = journal.record(taskKey: "live", outcome: .failed)
         let gate = JournalRetryGate()
         let retryStarted = expectation(description: "journal retry waiting")
-        let exhausted = expectation(description: "earlier acknowledgement retries exhausted")
         let recovered = expectation(description: "event acknowledged after recovery")
         let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [.zero]) { _ in
             retryStarted.fulfill()
@@ -1876,17 +1875,18 @@ final class DownloadEventRetrierTests: XCTestCase {
                 DownloadManager.submitJournalEvent(event, delegate: delegate, retrier: retrier) { event in
                     attempts.count += 1
                     let acknowledged = journal.acknowledge(event.id)
-                    if attempts.count == 2 { exhausted.fulfill() }
                     if acknowledged { recovered.fulfill() }
                     return acknowledged
                 }
             }
         }
-        await fulfillment(of: [retryStarted, exhausted], timeout: 3)
+        await fulfillment(of: [retryStarted], timeout: 3)
+        XCTAssertEqual(attempts.count, 0, "Undurable callbacks must not reach the store handler")
+        XCTAssertEqual(journal.pendingEvents(), [event], "The in-memory event remains available")
         reader.allowReads()
         await gate.release()
         await fulfillment(of: [recovered], timeout: 3)
-        XCTAssertEqual(attempts.count, 3)
+        XCTAssertEqual(attempts.count, 1)
         XCTAssertTrue(journal.pendingEvents().isEmpty)
 
         // A stale replay snapshot must not apply an acknowledged event again.
@@ -1894,7 +1894,7 @@ final class DownloadEventRetrierTests: XCTestCase {
             attempts.count += 1
             return true
         }
-        XCTAssertEqual(attempts.count, 3)
+        XCTAssertEqual(attempts.count, 1)
         retrier.cancelAll()
     }
 }

@@ -480,8 +480,10 @@ enum StoreMigration {
         let unmarkedMirroredMajor = try? storeMajorVersion(at: url)
         let unmarkedLocalMajor = try? storeMajorVersion(at: localURL)
         if let unmarkedMirroredMajor, let unmarkedLocalMajor,
-           [9, 10, 11, 12, 13].contains(unmarkedMirroredMajor),
-           [9, 10, 11, 12, 13].contains(unmarkedLocalMajor),
+           [9, 10, 11, 12, 13, MigrationBackupManager.targetSchemaMajor]
+                .contains(unmarkedMirroredMajor),
+           [9, 10, 11, 12, 13, MigrationBackupManager.targetSchemaMajor]
+                .contains(unmarkedLocalMajor),
            unmarkedMirroredMajor == 9 || unmarkedLocalMajor == 9
                 || unmarkedMirroredMajor == 12 || unmarkedLocalMajor == 12 {
             do {

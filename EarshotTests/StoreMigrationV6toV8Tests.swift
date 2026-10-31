@@ -2235,7 +2235,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try assertSettingSaveSurvivesReopen(resumed)
     }
 
-    func testInterruptedFreshV9FinalizationResumesMixedV10V9PairAndSaves() throws {
+    func testInterruptedFreshV9FinalizationResumesMixedV14V9PairAndSaves() throws {
         let schema = Schema(versionedSchema: EarshotSchemaV9.self)
         let localURL = StoreMigration.localStoreURL(for: storeURL)
         try autoreleasepool {
