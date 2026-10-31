@@ -318,6 +318,7 @@ final class ListeningPlacesService {
 
     init(
         removeDeviceFile: (@Sendable (Data, String) async throws -> Void)? = nil,
+        removeObservedDeviceFile: (@Sendable (Data, String, Data?) async throws -> Void)? = nil,
         writeDeviceFile: (@Sendable (Data, String, Data) async throws -> Void)? = nil,
         canAnnounce: (@MainActor () -> Bool)? = nil,
         announceOlderFileFailure: (@MainActor (String) -> Void)? = nil,
@@ -334,7 +335,9 @@ final class ListeningPlacesService {
         self.removeDeviceFile = removeDeviceFile ?? { bookmark, deviceID in
             try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
         }
-        if removeDeviceFile == nil {
+        if let removeObservedDeviceFile {
+            self.removeObservedDeviceFile = removeObservedDeviceFile
+        } else if removeDeviceFile == nil {
             self.removeObservedDeviceFile = { bookmark, deviceID, expected in
                 try await transport.removeDeviceFileIfUnchanged(bookmarkData: bookmark, deviceID: deviceID, expected: expected)
             }
@@ -495,30 +498,45 @@ final class ListeningPlacesService {
         guard let bookmarkData, !removingDeviceFile else { return }
         pendingOlderFileConfirmation = nil
         removingDeviceFile = true
-        defer { removingDeviceFile = false }
+        var retryCurrentSnapshotAfterRemoval = false
+        defer {
+            removingDeviceFile = false
+            if retryCurrentSnapshotAfterRemoval {
+                Task { @MainActor [weak self] in await self?.writeSnapshot() }
+            }
+        }
         writeGeneration += 1
         let generation = writeGeneration
+        let capturedDeviceID = deviceID
         do {
             pendingWriteTask?.cancel()
             pendingWriteTask = nil
             await waitForInFlightFileWrites()
             guard generation == writeGeneration,
-                  self.bookmarkData == bookmarkData else {
+                  self.bookmarkData == bookmarkData,
+                  deviceID == capturedDeviceID else {
                 Task { @MainActor [weak self] in await self?.writeSnapshot() }
                 return
             }
             guard hasObservedDeviceFile else { throw ListeningPlacesFileError.deviceFileChanged }
             if let removeObservedDeviceFile {
-                try await removeObservedDeviceFile(bookmarkData, deviceID, observedDeviceFile)
+                try await removeObservedDeviceFile(bookmarkData, capturedDeviceID, observedDeviceFile)
             } else {
-                try await removeDeviceFile(bookmarkData, deviceID)
+                try await removeDeviceFile(bookmarkData, capturedDeviceID)
             }
-            // The file may have disappeared even if a concurrent settings
-            // change superseded this operation; a replacement must be written.
-            diskMayDifferFromKnownSnapshot = true
+            let removalStillOwnsFolder = self.bookmarkData == bookmarkData && deviceID == capturedDeviceID
+            if removalStillOwnsFolder {
+                // Rebase before the generation check so a re-enable in the
+                // same folder writes against the now-absent file. A removal
+                // for an old folder must not replace a newer folder's baseline.
+                observedDeviceFile = nil
+                hasObservedDeviceFile = true
+                diskMayDifferFromKnownSnapshot = true
+            }
             guard generation == writeGeneration,
-                  self.bookmarkData == bookmarkData else {
-                Task { @MainActor [weak self] in await self?.writeSnapshot() }
+                  self.bookmarkData == bookmarkData,
+                  deviceID == capturedDeviceID else {
+                retryCurrentSnapshotAfterRemoval = enabled
                 return
             }
             enabled = false
@@ -539,6 +557,12 @@ final class ListeningPlacesService {
             pendingZeroSnapshots = [:]
             status = .notConfigured
         } catch {
+            guard generation == writeGeneration,
+                  self.bookmarkData == bookmarkData,
+                  deviceID == capturedDeviceID else {
+                retryCurrentSnapshotAfterRemoval = enabled
+                return
+            }
             fail(error)
             announceDeviceFileConflictIfNeeded(error)
         }
