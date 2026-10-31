@@ -29,6 +29,15 @@ final class QuickActionRepository {
         resolve(.queueItem, all: QueueItemAction.allCases, fallback: defaultQueueItemActions)
     }
 
+    func transportConfiguration() -> QuickActionConfiguration<TransportAction> {
+        resolve(
+            .playerTransport,
+            all: TransportAction.allCases,
+            fallback: defaultTransportActions,
+            allowsEmptyEnabled: true
+        )
+    }
+
     func episodeOrder() -> [EpisodeAction] { episodeConfiguration().enabled }
     func podcastOrder() -> [PodcastAction] { podcastConfiguration().enabled }
     func queueOrder() -> [QueueItemAction] { queueConfiguration().enabled }
@@ -45,12 +54,22 @@ final class QuickActionRepository {
         store(.queueItem, enabled: value.enabled.map(\.rawValue), available: value.available.map(\.rawValue))
     }
 
+    func setTransportConfiguration(_ value: QuickActionConfiguration<TransportAction>) {
+        store(
+            .playerTransport,
+            enabled: value.enabled.map(\.rawValue),
+            available: value.available.map(\.rawValue),
+            allowsEmptyEnabled: true
+        )
+    }
+
     // MARK: Internals
 
     private func resolve<A: RawRepresentable & Equatable>(
         _ type: QuickActionContentType,
         all: [A],
-        fallback: [A]
+        fallback: [A],
+        allowsEmptyEnabled: Bool = false
     ) -> QuickActionConfiguration<A> where A.RawValue == String {
         let storedKeys = configs(for: type).map(\.actionKey)
         guard !storedKeys.isEmpty else {
@@ -87,7 +106,7 @@ final class QuickActionRepository {
         available.removeAll { enabledKeys.contains($0.rawValue) }
         let present = Set((enabled + available).map(\.rawValue))
         available += all.filter { !present.contains($0.rawValue) }
-        if enabled.isEmpty, let first = available.first {
+        if enabled.isEmpty, !allowsEmptyEnabled, let first = available.first {
             enabled = [first]
             available.removeFirst()
         }
@@ -97,9 +116,10 @@ final class QuickActionRepository {
     private func store(
         _ type: QuickActionContentType,
         enabled: [String],
-        available: [String]
+        available: [String],
+        allowsEmptyEnabled: Bool = false
     ) {
-        guard !enabled.isEmpty else { return }
+        guard allowsEmptyEnabled || !enabled.isEmpty else { return }
         configs(for: type).forEach(context.delete)
         let keys = enabled.map { Self.enabledPrefix + $0 }
             + available.map { Self.availablePrefix + $0 }

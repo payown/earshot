@@ -5,12 +5,13 @@ import SwiftUI
 /// double-tap; only enabled actions populate the VoiceOver Actions rotor.
 struct QuickActionsSettingsView: View {
     @Environment(QuickActionStore.self) private var store
+    @Environment(SettingsStore.self) private var settings
     @AccessibilityFocusState private var focusedActionID: String?
 
     var body: some View {
         List {
             Section {
-                Text("The first enabled action is the default double-tap. Enabled actions fill the VoiceOver Actions rotor. Remove actions you do not use, or add them back from Available. At least one action stays enabled. New actions added by future updates appear in Available after you customize a list.")
+                Text("Episode, Podcast, and Queue actions fill the VoiceOver Actions rotor; the first enabled action is the default double-tap. Add, remove, or reorder them. Player transport actions add skip buttons to the full player; you can remove all extras. A skip matching the primary interval in Playback settings is hidden from the extra-action lists and returns if that interval changes. New actions added by future updates appear in Available after you customize a list.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -39,6 +40,27 @@ struct QuickActionsSettingsView: View {
                           actions: store.availableQueueActions, label: \.label,
                           move: store.moveAvailableQueueActions,
                           transfer: addQueueAction)
+
+            let visibleTransportActions = TransportActionVisibility.visible(
+                store.transportActions,
+                backSeconds: settings.skipBackSeconds,
+                forwardSeconds: settings.skipForwardSeconds
+            )
+            let visibleAvailableTransportActions = TransportActionVisibility.visible(
+                store.availableTransportActions,
+                backSeconds: settings.skipBackSeconds,
+                forwardSeconds: settings.skipForwardSeconds
+            )
+            actionSection(content: "Player transport", state: .enabled,
+                          actions: visibleTransportActions, label: \.label,
+                          move: { store.moveTransportActions(from: $0, to: $1, visibleActions: visibleTransportActions) },
+                          transfer: store.removeTransportAction,
+                          allowsEmptyEnabled: true)
+            actionSection(content: "Player transport", state: .available,
+                          actions: visibleAvailableTransportActions, label: \.label,
+                          move: store.moveAvailableTransportActions,
+                          transfer: store.addTransportAction,
+                          allowsEmptyEnabled: true)
         }
         .navigationTitle("Quick Actions")
         .toolbar {
@@ -52,7 +74,8 @@ struct QuickActionsSettingsView: View {
         actions: [A],
         label: KeyPath<A, String>,
         move: @escaping (IndexSet, Int) -> Void,
-        transfer: @escaping (A) -> Void
+        transfer: @escaping (A) -> Void,
+        allowsEmptyEnabled: Bool = false
     ) -> some View where A.ID == String {
         Section("\(content) actions — \(state.title)") {
             if actions.isEmpty {
@@ -71,7 +94,8 @@ struct QuickActionsSettingsView: View {
                         .rotorActions(rowActions(
                             action: action, name: name, focusID: focusID,
                             state: state, index: index, count: actions.count,
-                            move: move, transfer: transfer
+                            move: move, transfer: transfer,
+                            allowsEmptyEnabled: allowsEmptyEnabled
                         ))
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(state.transferLabel) {
@@ -80,7 +104,7 @@ struct QuickActionsSettingsView: View {
                                 focusedActionID = focusID
                             }
                             .tint(state == .enabled ? .red : .green)
-                            .disabled(state == .enabled && actions.count == 1)
+                            .disabled(state == .enabled && actions.count == 1 && !allowsEmptyEnabled)
                         }
                 }
                 .onMove { move($0, $1) }
@@ -96,10 +120,11 @@ struct QuickActionsSettingsView: View {
         index: Int,
         count: Int,
         move: @escaping (IndexSet, Int) -> Void,
-        transfer: @escaping (A) -> Void
+        transfer: @escaping (A) -> Void,
+        allowsEmptyEnabled: Bool
     ) -> [QuickActionItem] where A.ID == String {
         var items: [QuickActionItem] = []
-        if state == .available || count > 1 {
+        if state == .available || count > 1 || allowsEmptyEnabled {
             items.append(QuickActionItem(
                 id: state.transferLabel,
                 label: state.transferLabel,
