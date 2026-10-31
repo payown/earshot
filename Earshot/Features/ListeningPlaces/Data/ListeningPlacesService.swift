@@ -292,6 +292,7 @@ final class ListeningPlacesService {
     @ObservationIgnored private let canAnnounce: @MainActor () -> Bool
     @ObservationIgnored private let announceOlderFileFailure: @MainActor (String) -> Void
     @ObservationIgnored private let confirmOlderFile: @Sendable (Data, String, Data) async throws -> Bool
+    @ObservationIgnored private let refersToSameFolder: @Sendable (Data, Data) async throws -> Bool
     @ObservationIgnored private var bindingID = UUID()
     @ObservationIgnored private var olderFileObservation: OlderFileObservation?
     // Keep the slot until the provider really returns, including across rebinds.
@@ -325,7 +326,8 @@ final class ListeningPlacesService {
         readObservedDeviceFile: (@Sendable (Data, String) async throws -> Data?)? = nil,
         canAnnounce: (@MainActor () -> Bool)? = nil,
         announceOlderFileFailure: (@MainActor (String) -> Void)? = nil,
-        confirmOlderFile: (@Sendable (Data, String, Data) async throws -> Bool)? = nil
+        confirmOlderFile: (@Sendable (Data, String, Data) async throws -> Bool)? = nil,
+        refersToSameFolder: (@Sendable (Data, Data) async throws -> Bool)? = nil
     ) {
         let transport = ListeningPlacesFileTransport()
         let confirmationTransport = ListeningPlacesFileTransport()
@@ -337,6 +339,9 @@ final class ListeningPlacesService {
         self.announceOlderFileFailure = announceOlderFileFailure ?? { Announcer.announce($0) }
         self.confirmOlderFile = confirmOlderFile ?? { bookmark, deviceID, contents in
             try await confirmationTransport.confirmsDeviceFile(bookmarkData: bookmark, deviceID: deviceID, expected: contents)
+        }
+        self.refersToSameFolder = refersToSameFolder ?? { first, second in
+            try await transport.refersToSameFolder(first, as: second)
         }
         self.removeDeviceFile = removeDeviceFile ?? { bookmark, deviceID in
             try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
@@ -549,15 +554,25 @@ final class ListeningPlacesService {
                 try await removeDeviceFile(bookmarkData, capturedDeviceID)
             }
             let currentBookmark = self.bookmarkData
+            let comparisonBindingID = bindingID
+            let comparisonDeviceID = deviceID
             let samePhysicalFolder: Bool
             if currentBookmark == bookmarkData {
                 samePhysicalFolder = true
             } else if let currentBookmark {
-                samePhysicalFolder = (try? await transport.refersToSameFolder(bookmarkData, as: currentBookmark)) ?? false
+                samePhysicalFolder = (try? await refersToSameFolder(bookmarkData, currentBookmark)) ?? false
             } else {
                 samePhysicalFolder = false
             }
-            let removalStillOwnsFolder = samePhysicalFolder && deviceID == capturedDeviceID
+            // Identity resolution suspends this MainActor method. A folder
+            // switch during that await must not let the old removal rebase the
+            // newly selected folder's baseline.
+            let comparisonStillOwnsSelection = self.bookmarkData == currentBookmark
+                && bindingID == comparisonBindingID
+                && deviceID == comparisonDeviceID
+            let removalStillOwnsFolder = samePhysicalFolder
+                && comparisonStillOwnsSelection
+                && comparisonDeviceID == capturedDeviceID
             if removalStillOwnsFolder {
                 // A binding can be renewed with a different bookmark (such as
                 // a symlink alias) while removal is suspended. Rebase only if

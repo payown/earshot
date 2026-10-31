@@ -110,8 +110,14 @@ actor ListeningPlacesFileTransport {
     /// the same directory (for example, a symlink) are recognized as one
     /// device-file location.
     func refersToSameFolder(_ firstBookmark: Data, as secondBookmark: Data) throws -> Bool {
-        let first = try resolveFolder(firstBookmark).standardizedFileURL.resolvingSymlinksInPath()
-        let second = try resolveFolder(secondBookmark).standardizedFileURL.resolvingSymlinksInPath()
+        let firstFolder = try resolveFolder(firstBookmark)
+        let firstAccessed = firstFolder.startAccessingSecurityScopedResource()
+        defer { if firstAccessed { firstFolder.stopAccessingSecurityScopedResource() } }
+        let secondFolder = try resolveFolder(secondBookmark)
+        let secondAccessed = secondFolder.startAccessingSecurityScopedResource()
+        defer { if secondAccessed { secondFolder.stopAccessingSecurityScopedResource() } }
+        let first = firstFolder.standardizedFileURL.resolvingSymlinksInPath()
+        let second = secondFolder.standardizedFileURL.resolvingSymlinksInPath()
         return first == second
     }
 
