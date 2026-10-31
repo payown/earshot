@@ -578,6 +578,88 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.releasePersistence()
     }
 
+    func testReenableDuringBlockedRemovalRecreatesFileFromAbsentBaseline() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "reenable-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover()
+        let service = ListeningPlacesService(removeObservedDeviceFile: { bookmark, deviceID, expected in
+            try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        await service.setEnabled(false)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.setEnabled(true)
+        await remover.resumeRemoval()
+        await stopping.value
+
+        for _ in 0..<100 where !FileManager.default.fileExists(atPath: file.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "The successful removal must rebase to absent before retrying the enabled snapshot")
+        XCTAssertTrue(service.enabled)
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(contents.contains("60000"))
+        service.releasePersistence()
+    }
+
+    func testStaleRemovalFailureDoesNotAffectReplacementFolderStatusOrSpeech() async throws {
+        let firstDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-stale-remove-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let secondDirectory = FileManager.default.temporaryDirectory.appending(path: "listening-places-new-folder-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: firstDirectory)
+            try? FileManager.default.removeItem(at: secondDirectory)
+        }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "stale-remove-guid", title: "Episode", audioURL: "https://example.com/audio.mp3", durationSeconds: 600, positionSeconds: 60)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let remover = SuspendedObservedListeningPlacesRemover(failsAfterResume: true)
+        var announcements: [String] = []
+        let service = ListeningPlacesService(
+            removeObservedDeviceFile: { bookmark, deviceID, expected in
+                try await remover.remove(bookmark: bookmark, deviceID: deviceID, expected: expected)
+            },
+            canAnnounce: { true }, announceOlderFileFailure: { announcements.append($0) }
+        )
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(firstDirectory)
+
+        let stopping = Task { await service.stopSharingAndRemoveDeviceFile() }
+        await remover.waitUntilSuspended()
+        await service.chooseFolder(secondDirectory)
+        await remover.resumeRemoval()
+        await stopping.value
+
+        let newDeviceDirectory = secondDirectory.appending(path: "Listening Places/devices", directoryHint: .isDirectory)
+        for _ in 0..<100 {
+            if let files = try? FileManager.default.contentsOfDirectory(at: newDeviceDirectory, includingPropertiesForKeys: nil), !files.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        if case .failed = service.status { XCTFail("A stale removal failure must not replace the current folder status") }
+        XCTAssertEqual(service.folderName, secondDirectory.lastPathComponent)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(at: newDeviceDirectory, includingPropertiesForKeys: nil).isEmpty)
+        XCTAssertTrue(announcements.isEmpty, "A stale failure must not be announced for the replacement folder")
+        service.releasePersistence()
+    }
+
     private func setSelfReportedApp(_ app: String, in file: URL) throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         json["app"] = app
@@ -1289,6 +1371,37 @@ private actor SuspendedListeningPlacesRemover {
             waiters.removeAll()
         }
         try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+    }
+}
+
+private actor SuspendedObservedListeningPlacesRemover {
+    private let transport = ListeningPlacesFileTransport()
+    private let failsAfterResume: Bool
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    init(failsAfterResume: Bool = false) { self.failsAfterResume = failsAfterResume }
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func resumeRemoval() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+
+    func remove(bookmark: Data, deviceID: String, expected: Data?) async throws {
+        suspended = true
+        await withCheckedContinuation { continuation in
+            resumeContinuation = continuation
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+        }
+        if failsAfterResume { throw ListeningPlacesFileError.deviceFileChanged }
+        try await transport.removeDeviceFileIfUnchanged(bookmarkData: bookmark, deviceID: deviceID, expected: expected)
     }
 }
 
