@@ -29,6 +29,43 @@ final class DownloadAttemptOwnershipTests: XCTestCase {
         PendingDownloadTerminalEvent(taskKey: key, outcome: outcome)
     }
 
+    func testAttemptSaveFailureDoesNotEnqueueOrLeaveAttemptStateBehind() async throws {
+        let context = TestStore.freshContext()
+        let episode = try makeEpisode(context, guid: "attempt-save-failure")
+        var transferKeys: [String] = []
+        var failuresRemaining = 1
+        let manager = DownloadManager(
+            startTransfer: { _, key in transferKeys.append(key) },
+            saveContext: { target in
+                if failuresRemaining > 0 {
+                    failuresRemaining -= 1
+                    throw AttemptSaveTestError.injected
+                }
+                try target.save()
+            }
+        )
+        manager.configureForTesting(context: context, isOnWifi: true)
+
+        await manager.download(episode)
+
+        XCTAssertTrue(transferKeys.isEmpty)
+        XCTAssertEqual(episode.downloadStatus, .none)
+        XCTAssertNil(episode.downloadAttemptID)
+        XCTAssertTrue(LocalStateStore.episodeRows(for: try XCTUnwrap(LocalStateStore.key(for: episode)), in: context).isEmpty)
+
+        await manager.download(episode)
+
+        XCTAssertEqual(transferKeys.count, 1)
+        let attemptID = try XCTUnwrap(DownloadTransferKey.parse(transferKeys[0])?.attemptID)
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+        XCTAssertEqual(episode.downloadAttemptID, attemptID)
+        XCTAssertEqual(
+            LocalStateStore.episodeRows(for: try XCTUnwrap(LocalStateStore.key(for: episode)), in: context)
+                .first?.downloadAttemptID,
+            attemptID
+        )
+    }
+
     func testSameSourceCancelRetryIgnoresOldFailureAndPreservesNewWaiter() async throws {
         let context = TestStore.freshContext()
         let episode = try makeEpisode(context, guid: "same-source-retry")
@@ -191,3 +228,5 @@ private final class AttemptHoldingURLProtocol: URLProtocol {
     override func startLoading() {}
     override func stopLoading() {}
 }
+
+private enum AttemptSaveTestError: Error { case injected }

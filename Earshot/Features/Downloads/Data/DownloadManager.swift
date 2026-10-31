@@ -209,13 +209,18 @@ final class DownloadManager {
     /// Observer for `.earshotQueueDidChange`, so queued episodes auto-download.
     @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
     @ObservationIgnored private let startTransfer: (URL, String) -> Void
+    @ObservationIgnored private let saveContext: (ModelContext) throws -> Void
 
-    init(startTransfer: @escaping (URL, String) -> Void = { url, key in
-        let task = DownloadManager.session.downloadTask(with: url)
-        task.taskDescription = key
-        task.resume()
-    }) {
+    init(
+        startTransfer: @escaping (URL, String) -> Void = { url, key in
+            let task = DownloadManager.session.downloadTask(with: url)
+            task.taskDescription = key
+            task.resume()
+        },
+        saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() }
+    ) {
         self.startTransfer = startTransfer
+        self.saveContext = saveContext
     }
 
     #if DEBUG
@@ -495,10 +500,20 @@ final class DownloadManager {
         // The ActiveDownload row and the .downloading write land in the SAME save
         // (#701): a row that lagged behind would leave this episode invisible to
         // reconcileStuckDownloads() and spinning forever — #544 returning.
+        if context.hasChanges, !save() { return }
+        let previousStatus = episode.downloadStatus
+        let previousAttemptID = episode.downloadAttemptID
         let attemptID = UUID().uuidString
         episode.downloadAttemptID = attemptID
         ActiveDownload.setDownloadStatus(.downloading, on: episode, in: context)
-        save()
+        guard save() else {
+            context.rollback()
+            // SwiftData rollback restores persisted rows, while these runtime
+            // projections need to be reset explicitly too.
+            episode.downloadAttemptID = previousAttemptID
+            episode.downloadStatus = previousStatus
+            return
+        }
 
         // taskDescription (unlike taskIdentifier) survives an app relaunch, so a
         // completion delivered after the app was killed still resolves the
@@ -1396,18 +1411,25 @@ final class DownloadManager {
     /// The one save path for download state (#576): logs failures instead of
     /// discarding them. Static so the delegate-driven terminal events (which
     /// run without an instance) share it with instance methods via ``save()``.
-    private static func save(_ context: ModelContext, action: String) {
-        guard context.hasChanges else { return }
+    @discardableResult
+    private static func save(
+        _ context: ModelContext, action: String,
+        operation: (ModelContext) throws -> Void
+    ) -> Bool {
+        guard context.hasChanges else { return true }
         do {
-            try context.save()
+            try operation(context)
+            return true
         } catch {
             AppLog.networking.error("Download \(action, privacy: .public) save failed: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
-    private func save() {
-        guard let context else { return }
-        Self.save(context, action: "state")
+    @discardableResult
+    private func save() -> Bool {
+        guard let context else { return false }
+        return Self.save(context, action: "state", operation: saveContext)
     }
 }
 
