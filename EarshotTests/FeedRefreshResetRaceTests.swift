@@ -36,21 +36,86 @@ private actor InFlightFeedFetcher: FeedFetching {
     func wasCancelledByOwner() -> Bool { observedCancellation }
 }
 
-private actor LaunchStartSignal {
+private actor LaunchOperationGate {
     private var started = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var released = false
+    private var cancellationObserved = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var cancellationWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
+    private var cancellationTimeoutTasks: [UUID: Task<Void, Never>] = [:]
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
 
-    func markStarted() {
+    func holdOperationUntilReleased() async {
         started = true
-        let pending = waiters
-        waiters.removeAll()
+        let pending = startWaiters
+        startWaiters.removeAll()
         for waiter in pending { waiter.resume() }
+
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if released {
+                    continuation.resume()
+                } else {
+                    releaseContinuation = continuation
+                }
+            }
+        } onCancel: {
+            Task { await self.markCancellationObserved() }
+        }
     }
 
-    func wait() async {
-        guard !started else { return }
-        await withCheckedContinuation { waiters.append($0) }
+    private func markCancellationObserved() {
+        cancellationObserved = true
+        let pending = cancellationWaiters
+        cancellationWaiters.removeAll()
+        for (id, waiter) in pending {
+            cancellationTimeoutTasks.removeValue(forKey: id)?.cancel()
+            waiter.resume(returning: true)
+        }
     }
+
+    func waitUntilStarted() async {
+        guard !started else { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func waitUntilCancelled(timeout: Duration = .seconds(5)) async -> Bool {
+        guard !cancellationObserved else { return true }
+        let id = UUID()
+        return await withCheckedContinuation { continuation in
+            cancellationWaiters[id] = continuation
+            cancellationTimeoutTasks[id] = Task { [weak self] in
+                do {
+                    try await Task.sleep(for: timeout)
+                } catch {
+                    return
+                }
+                await self?.finishCancellationWaiter(id)
+            }
+        }
+    }
+
+    private func finishCancellationWaiter(_ id: UUID) {
+        guard let waiter = cancellationWaiters.removeValue(forKey: id) else { return }
+        cancellationTimeoutTasks[id] = nil
+        waiter.resume(returning: cancellationObserved)
+    }
+
+    func release() {
+        released = true
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+private actor LaunchContainerCapture {
+    private var container: ModelContainer?
+    func set(_ container: ModelContainer) { self.container = container }
+    func get() -> ModelContainer? { container }
+}
+
+private enum ResetRaceFixtureError: Error {
+    case storeUnavailable
 }
 
 private actor OneFailedRefreshFeed: FeedFetching {
@@ -411,21 +476,34 @@ final class FeedRefreshResetRaceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let primary = applicationSupport.appending(path: "default.store")
-        guard case .ready = await ModelContainerFactory.makeShared(
-            using: StoreMigrationEngine(), at: primary
-        ) else { return XCTFail("disposable store did not open") }
+        let sentinelFeedURL = "https://reset-fixture.example/podcast.xml"
+        let sentinelSettingKey = "reset.fixture.sentinel"
+        try await seedDisposableStore(
+            at: primary,
+            feedURL: sentinelFeedURL,
+            settingKey: sentinelSettingKey
+        )
 
-        let launchStarted = LaunchStartSignal()
+        let launchGate = LaunchOperationGate()
+        let launchContainerCapture = LaunchContainerCapture()
         let launchOperation: StoreLaunchOperation = { _ in
-            await launchStarted.markStarted()
-            try? await Task.sleep(for: .milliseconds(100))
-            return await ModelContainerFactory.makeShared(
+            await launchGate.holdOperationUntilReleased()
+            let load = await ModelContainerFactory.makeShared(
                 using: StoreMigrationEngine(), at: primary
             )
+            if case .ready(let container) = load {
+                await launchContainerCapture.set(container)
+            }
+            return load
         }
         let runtime = AppRuntime(
             mode: .testHost,
             launchOperation: launchOperation,
+            replacementLoadOperation: {
+                await ModelContainerFactory.makeShared(
+                    using: StoreMigrationEngine(), at: primary
+                )
+            },
             fileResetOperation: {
                 await SettingsReset.performFileReset(
                     applicationSupport: applicationSupport,
@@ -436,15 +514,33 @@ final class FeedRefreshResetRaceTests: XCTestCase {
         )
 
         runtime.startLaunchIfNeeded()
-        await launchStarted.wait()
-        let reset = await runtime.resetLocalData()
+        await launchGate.waitUntilStarted()
+        let resetTask = Task { await runtime.resetLocalData() }
+        let cancellationObserved = await launchGate.waitUntilCancelled()
+        XCTAssertTrue(cancellationObserved, "Reset must cancel the in-flight launch before awaiting it")
+        XCTAssertTrue(runtime.isResettingLocalData,
+                      "Reset should remain in progress while the launch operation is held")
+        // Always unblock the deliberately non-cooperative launch operation,
+        // even when reset stops cancelling it. That keeps a regression a bounded
+        // assertion failure instead of leaving reset or the test hung.
+        await launchGate.release()
+        let reset = await resetTask.value
 
         XCTAssertTrue(reset)
-        XCTAssertFalse(ModelContainerFactory.hasStoreFiles(at: primary))
+        XCTAssertTrue(ModelContainerFactory.hasStoreFiles(at: primary))
         let replacement = try XCTUnwrap(runtime.readyContainer)
+        let capturedLaunchContainer = await launchContainerCapture.get()
+        let cancelledLaunchContainer = try XCTUnwrap(capturedLaunchContainer)
+        XCTAssertFalse(replacement === cancelledLaunchContainer,
+                       "The replacement container must supersede the cancelled launch result")
         let replacementSettings = AppSettingsStore(context: replacement.mainContext)
         XCTAssertTrue(replacementSettings.podcastCapGatingIntroduced())
         XCTAssertEqual(replacementSettings.grandfatheredPodcastCount(), 0)
+        try assertResetSentinelsAbsent(
+            from: replacement,
+            feedURL: sentinelFeedURL,
+            settingKey: sentinelSettingKey
+        )
     }
 
     func testResetCancelsInFlightRefreshBeforeDisposableFileReset() async throws {
@@ -475,8 +571,22 @@ final class FeedRefreshResetRaceTests: XCTestCase {
         try FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
+        let primary = applicationSupport.appending(path: "default.store")
+        let sentinelFeedURL = "https://reset-refresh-fixture.example/podcast.xml"
+        let sentinelSettingKey = "reset.refresh.fixture.sentinel"
+        try await seedDisposableStore(
+            at: primary,
+            feedURL: sentinelFeedURL,
+            settingKey: sentinelSettingKey
+        )
+
         let runtime = AppRuntime(
             mode: .testHost,
+            replacementLoadOperation: {
+                await ModelContainerFactory.makeShared(
+                    using: StoreMigrationEngine(), at: primary
+                )
+            },
             fileResetOperation: {
                 await SettingsReset.performFileReset(
                     applicationSupport: applicationSupport,
@@ -491,9 +601,41 @@ final class FeedRefreshResetRaceTests: XCTestCase {
 
         XCTAssertTrue(reset)
         XCTAssertFalse(refreshResult)
-        XCTAssertFalse(ModelContainerFactory.hasStoreFiles(
-            at: applicationSupport.appending(path: "default.store")
-        ))
+        XCTAssertTrue(ModelContainerFactory.hasStoreFiles(at: primary))
+        let replacement = try XCTUnwrap(runtime.readyContainer)
+        try assertResetSentinelsAbsent(
+            from: replacement,
+            feedURL: sentinelFeedURL,
+            settingKey: sentinelSettingKey
+        )
+    }
+
+    private func seedDisposableStore(
+        at url: URL,
+        feedURL: String,
+        settingKey: String
+    ) async throws {
+        let load = await ModelContainerFactory.makeShared(
+            using: StoreMigrationEngine(), at: url
+        )
+        guard case .ready(let container) = load else {
+            throw ResetRaceFixtureError.storeUnavailable
+        }
+        container.mainContext.insert(Podcast(feedURL: feedURL, title: "Reset sentinel"))
+        container.mainContext.insert(AppSetting(key: settingKey, value: "must be deleted"))
+        try container.mainContext.save()
+    }
+
+    private func assertResetSentinelsAbsent(
+        from container: ModelContainer,
+        feedURL: String,
+        settingKey: String
+    ) throws {
+        let podcasts = try container.mainContext.fetch(FetchDescriptor<Podcast>())
+        XCTAssertFalse(podcasts.contains { $0.feedURL == feedURL },
+                       "The replacement store must not retain the pre-reset podcast")
+        XCTAssertNil(AppSettingsStore(context: container.mainContext).rawValue(settingKey),
+                     "The replacement store must not retain the pre-reset setting")
     }
 
     func testFiveRunShippingResetTimingWithRefreshCancellationPath() async throws {

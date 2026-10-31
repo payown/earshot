@@ -145,6 +145,7 @@ private final class SystemLaunchAnnouncer: LaunchAnnouncing {
 typealias StoreLaunchOperation = @MainActor (
     _ progress: @escaping @MainActor (StoreMigrationProgress) -> Void
 ) async -> StoreLoad
+typealias StoreReplacementLoadOperation = @MainActor @Sendable () async -> StoreLoad
 
 typealias LaunchSleepOperation = @Sendable (Duration) async throws -> Void
 typealias RecoveryDownloadUsageOperation = @MainActor @Sendable () async -> Int64
@@ -211,6 +212,7 @@ final class AppRuntime {
 
     private let mode: Mode
     private let launchOperation: StoreLaunchOperation
+    private let replacementLoadOperation: StoreReplacementLoadOperation
     private let launchAnnouncer: any LaunchAnnouncing
     private let launchSleep: LaunchSleepOperation
     private let recoveryDownloadUsage: RecoveryDownloadUsageOperation
@@ -259,6 +261,7 @@ final class AppRuntime {
         showsLaunchPreparation: Bool? = nil,
         recoveryBackup: MigrationBackupDescriptor? = nil,
         launchOperation: StoreLaunchOperation? = nil,
+        replacementLoadOperation: StoreReplacementLoadOperation? = nil,
         launchAnnouncer: (any LaunchAnnouncing)? = nil,
         recoveryDownloadUsage: @escaping RecoveryDownloadUsageOperation = {
             await DownloadManager.recoveryDownloadUsage()
@@ -292,6 +295,9 @@ final class AppRuntime {
         self.showsLaunchPreparation = showsLaunchPreparation ?? false
         self.recoveryBackup = recoveryBackup
         self.launchOperation = launchOperation ?? Self.productionLaunch
+        self.replacementLoadOperation = replacementLoadOperation ?? {
+            await ModelContainerFactory.makeShared(using: StoreMigrationEngine())
+        }
         self.launchAnnouncer = launchAnnouncer ?? SystemLaunchAnnouncer.shared
         self.recoveryDownloadUsage = recoveryDownloadUsage
         self.recoveryDownloadRemoval = recoveryDownloadRemoval
@@ -1013,8 +1019,7 @@ final class AppRuntime {
                     return false
                 }
             }
-            let engine = StoreMigrationEngine()
-            let load = await ModelContainerFactory.makeShared(using: engine)
+            let load = await self.replacementLoadOperation()
             guard case .ready(let container) = load else { return false }
             // Seed one-time launch settings before publishing the replacement
             // container. Publishing first lets RootView synchronously save while
