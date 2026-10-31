@@ -2106,7 +2106,7 @@ final class DownloadEventJournalTests: XCTestCase {
         XCTAssertEqual(DownloadEventJournal(url: journalURL).pendingEvents(), [first, second])
     }
 
-    func testPreviouslyUnreadableJournalCanBeLoadedWithoutLosingNewEvent() throws {
+    func testPreviouslyUnreadableJournalIsPersistedBeforeAcknowledgement() throws {
         try Data("unreadable".utf8).write(to: journalURL)
         let journal = DownloadEventJournal(url: journalURL)
         let newEvent = journal.record(taskKey: "new", outcome: .failed)
@@ -2116,6 +2116,9 @@ final class DownloadEventJournalTests: XCTestCase {
         let oldEvent = replacement.record(taskKey: "old", outcome: .failed)
         try Data(contentsOf: replacementURL).write(to: journalURL, options: .atomic)
 
+        XCTAssertFalse(journal.acknowledge(newEvent.id),
+                       "An in-memory event cannot be acknowledged until it is durable")
+        XCTAssertEqual(journal.eventsForReplayIfDurable(), [oldEvent, newEvent])
         XCTAssertTrue(journal.acknowledge(newEvent.id))
         XCTAssertEqual(journal.pendingEvents(), [oldEvent])
         XCTAssertEqual(DownloadEventJournal(url: journalURL).pendingEvents(), [oldEvent])
@@ -2135,26 +2138,35 @@ final class DownloadEventJournalTests: XCTestCase {
         XCTAssertEqual(journal.pendingEvents().count, 1)
     }
 
-    func testDelayedReadableJournalReplaysEvenIfAnotherReaderLoadsIt() async throws {
+    func testDelayedReadableJournalDeliversOnlyAfterEventIsDurable() async throws {
         let persisted = DownloadEventJournal(url: journalURL)
         let oldEvent = persisted.record(taskKey: "old", outcome: .failed)
         let reader = JournalReadProbe()
         let journal = DownloadEventJournal(url: journalURL, read: reader.read)
         let liveEvent = journal.record(taskKey: "live", outcome: .failed)
         let delivered = JournalDeliveryProbe()
-        let replayed = expectation(description: "previously unreadable event replayed")
-        let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [.zero]) { _ in
-            reader.allowReads()
-            // Reconciliation can load the journal before the retry's own read.
-            _ = journal.pendingEventsIfReadable()
-        }
+        let replayed = expectation(description: "persisted events replayed")
+        let retryStarted = expectation(description: "durability retry started")
+        let gate = JournalRetryGate()
+        let delegate = DownloadSessionDelegate(
+            journal: journal,
+            retryDelays: [.zero],
+            retrySleep: { _ in
+                retryStarted.fulfill()
+                await gate.wait()
+            }
+        )
         delegate.installTerminalHandler { event, _ in
             delivered.record(event)
-            if event.id == oldEvent.id { replayed.fulfill() }
+            if delivered.events.count == 2 { replayed.fulfill() }
         }
+        await fulfillment(of: [retryStarted], timeout: 2)
+        XCTAssertTrue(delivered.events.isEmpty, "Events must not dispatch before persistence succeeds")
+        reader.allowReads()
+        await gate.release()
         await fulfillment(of: [replayed], timeout: 2)
         try await Task.sleep(for: .milliseconds(50))
-        XCTAssertEqual(delivered.events, [liveEvent, oldEvent, liveEvent])
+        XCTAssertEqual(delivered.events, [oldEvent, liveEvent])
         XCTAssertEqual(journal.pendingEvents(), [oldEvent, liveEvent])
     }
 
