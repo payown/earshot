@@ -18,6 +18,20 @@ final class QuickActionSettingsRotorActionTests: XCTestCase {
         XCTAssertTrue(actions.first?.isDestructive == true)
     }
 
+    func testPlayerTransportActionsUseHorizontalMoveLabels() {
+        let actions = QuickActionSettingsRotorActionBuilder.actions(
+            state: .enabled,
+            index: 1,
+            count: 3,
+            allowsEmptyEnabled: true,
+            moveDirection: .horizontal
+        )
+
+        XCTAssertEqual(actions.map(\.label), [
+            "Remove", "Move to far left", "Move left", "Move right", "Move to far right"
+        ])
+    }
+
     func testAvailableActionHasExactlyOneAdd() {
         let actions = QuickActionSettingsRotorActionBuilder.actions(
             state: .available,
