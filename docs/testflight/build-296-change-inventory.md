@@ -23,13 +23,13 @@ Version 1.2.5, build 296, Chapter 104. App Store Connect build
 - The uploaded build is `VALID`. Its en-US TestFlight notes match Chapter 104.
 - Internal Testing Group has all-build access, so build 296 was available to
   that group without a separate build assignment. Its internal beta state is
-  `IN_BETA_TESTING`; external beta state is `READY_FOR_BETA_SUBMISSION`.
-- App Store Connect reports automatic notifications enabled. The upload did
-  not require a separate group assignment; individual notification delivery
-  was not confirmed.
+  `IN_BETA_TESTING`.
+- Build 296 is explicitly assigned to Public Testers. Apple's beta review is
+  `APPROVED`, and the external beta state is `IN_BETA_TESTING`.
+- App Store Connect reports automatic notifications enabled. Individual
+  notification delivery was not confirmed.
 
 ## Distribution
 
-- Build 296 was uploaded to the Internal Testing Group. It was not submitted
-  for external beta review or assigned to Public Testers.
+- Build 296 is available to both Internal Testing Group and Public Testers.
 - Branch: `testflight/transport-horizontal-296`.
