@@ -1,6 +1,6 @@
 # Listening Places on Apple silicon Mac: investigation and fix plan
 
-**Status:** investigation planned; no Mac reproduction, fix, or TestFlight build claimed  
+**Status:** investigation in progress; no Mac reproduction or validated iCloud fix claimed  
 **Feedback record:** StartTesting `3ccc95fe-4526-46cb-831f-d693b575674a`  
 **Reported build:** App Store 1.2.4 (274), Mac running macOS 27.2  
 **Review base:** `origin/main` at `1f0a5fb0`, Earshot 1.2.5 (284)  
@@ -10,7 +10,9 @@
 
 - `0494fc84` changes the opt-in feedback block to label the iOS-on-Mac runtime as Mac/macOS, while keeping iPhone formatting. The actual macOS version still needs a live Mac app check.
 - `f2954f8f` prevents a superseded folder-selection failure from overwriting the current status and adds privacy-safe stage/error-code logging for folder preparation, bookmark resolution, directory coordination/creation, README creation, restore, and replacement. It does not change the file-provider access sequence or claim to fix the reported iCloud failure.
+- `cb79997a` coordinates first README creation in the iCloud File Provider directory. This removes an uncoordinated write from folder preparation; a real Mac iCloud test is still required to establish whether it contributes to the reported failure.
 - The focused iPhone 17 Pro simulator run passed 52 Listening Places and feedback tests with no failures or skips. A Mac-designed-for-iPhone test destination is available, but an unsigned test install was rejected by code-signature verification. Do not replace the installed production/development Earshot app with a test runner just to run this suite.
+- A separate focused Listening Places test run and a generic iOS Release build passed after the README change. The Mac currently has Earshot 1.2.5 (285); TestFlight 1.2.5 (296) is active in both tester groups, both of which enable Apple silicon Mac testing. Build 296 is a comparison baseline and does not include these worktree changes.
 - The installed Mac app could not yet be inspected through the available UI route. Physical Mac reproduction and the underlying provider error remain the next gate.
 
 ## Outcome and boundaries
