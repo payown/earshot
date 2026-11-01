@@ -1,7 +1,6 @@
 import Foundation
 
-/// One non-drag move a VoiceOver user can perform on a Quick Actions row, in the
-/// same vocabulary the Queue screen exposes: Move to top / up / down / to bottom.
+/// One non-drag move a VoiceOver user can perform on a Quick Actions row.
 ///
 /// `destinationOffset` is expressed in `Array.move(fromOffsets:toOffset:)` terms
 /// (the pre-removal insertion index), so a caller can wire it straight to the
@@ -10,39 +9,58 @@ import Foundation
 /// "Moved … to position N of M" and to keep accessibility focus on the row.
 struct QuickActionMoveTarget: Equatable {
     let label: String
+    let announcementDirection: String
     let destinationOffset: Int
     let resultingIndex: Int
 }
 
+enum QuickActionMoveDirection: Equatable {
+    case vertical
+    case horizontal
+}
+
 /// Pure logic for the accessible-reorder actions offered on a Quick Actions row.
-/// Mirrors the Queue's "Move to top / up / down / to bottom" set but, unlike the
-/// Queue (which reorders persisted `QueueItem`s through the repository), operates
-/// on a plain index/count pair so it can be unit-tested without any store.
+/// Uses vertical wording for ordinary lists and horizontal wording for the
+/// Player transport row, whose buttons are displayed left to right.
 ///
-/// Boundary actions are suppressed the way the Queue suppresses them: the first
-/// row offers only the two "down" moves, the last row only the two "up" moves,
-/// and a single-element (or empty) set offers nothing.
+/// Boundary actions are suppressed: the first row offers only forward moves,
+/// the last row only backward moves, and a single-element set offers nothing.
 enum QuickActionMoveLogic {
-    /// The move actions to offer on the row at `index` within a set of `count`
-    /// rows, in rotor order: Move to top, Move up, Move down, Move to bottom —
-    /// with redundant edges dropped.
-    static func targets(index: Int, count: Int) -> [QuickActionMoveTarget] {
+    /// Returns actions in first-to-last order, suppressing unavailable moves at
+    /// either edge. `destinationOffset` remains the same array move operation.
+    static func targets(
+        index: Int,
+        count: Int,
+        direction: QuickActionMoveDirection = .vertical
+    ) -> [QuickActionMoveTarget] {
         guard count > 1, index >= 0, index < count else { return [] }
         var result: [QuickActionMoveTarget] = []
+        let startLabel = direction == .horizontal ? "Move to far left" : "Move to top"
+        let previousLabel = direction == .horizontal ? "Move left" : "Move up"
+        let nextLabel = direction == .horizontal ? "Move right" : "Move down"
+        let endLabel = direction == .horizontal ? "Move to far right" : "Move to bottom"
+        let startAnnouncement = direction == .horizontal ? "to the far left" : "to the top"
+        let previousAnnouncement = direction == .horizontal ? "left" : "up"
+        let nextAnnouncement = direction == .horizontal ? "right" : "down"
+        let endAnnouncement = direction == .horizontal ? "to the far right" : "to the bottom"
         if index > 0 {
             result.append(QuickActionMoveTarget(
-                label: "Move to top", destinationOffset: 0, resultingIndex: 0))
+                label: startLabel, announcementDirection: startAnnouncement,
+                destinationOffset: 0, resultingIndex: 0))
             result.append(QuickActionMoveTarget(
-                label: "Move up", destinationOffset: index - 1, resultingIndex: index - 1))
+                label: previousLabel, announcementDirection: previousAnnouncement,
+                destinationOffset: index - 1, resultingIndex: index - 1))
         }
         if index < count - 1 {
             // `move(fromOffsets:toOffset:)` inserts before the original element at
-            // `toOffset`; moving down one means skipping the next element, hence
-            // `index + 2`. Moving to the bottom inserts past the end at `count`.
+            // `toOffset`; moving forward one skips the next element, hence
+            // `index + 2`. Moving to the end inserts past the array at `count`.
             result.append(QuickActionMoveTarget(
-                label: "Move down", destinationOffset: index + 2, resultingIndex: index + 1))
+                label: nextLabel, announcementDirection: nextAnnouncement,
+                destinationOffset: index + 2, resultingIndex: index + 1))
             result.append(QuickActionMoveTarget(
-                label: "Move to bottom", destinationOffset: count, resultingIndex: count - 1))
+                label: endLabel, announcementDirection: endAnnouncement,
+                destinationOffset: count, resultingIndex: count - 1))
         }
         return result
     }

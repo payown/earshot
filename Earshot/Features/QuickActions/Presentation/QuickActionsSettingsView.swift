@@ -54,6 +54,7 @@ struct QuickActionsSettingsView: View {
                           actions: visibleTransportActions, label: \.label,
                           move: { store.moveTransportActions(from: $0, to: $1, visibleActions: visibleTransportActions) },
                           transfer: store.removeTransportAction,
+                          moveDirection: .horizontal,
                           allowsEmptyEnabled: true,
                           hasDefaultAction: false)
             actionSection(content: "Player transport", state: .available,
@@ -99,6 +100,7 @@ struct QuickActionsSettingsView: View {
         label: KeyPath<A, String>,
         move: @escaping (IndexSet, Int) -> Void,
         transfer: @escaping (A) -> Void,
+        moveDirection: QuickActionMoveDirection = .vertical,
         allowsEmptyEnabled: Bool = false,
         hasDefaultAction: Bool = true
     ) -> some View where A.ID == String {
@@ -119,6 +121,7 @@ struct QuickActionsSettingsView: View {
                         count: actions.count,
                         hasDefaultAction: hasDefaultAction,
                         allowsEmptyEnabled: allowsEmptyEnabled,
+                        moveDirection: moveDirection,
                         move: move,
                         transfer: transfer
                     )
@@ -141,6 +144,7 @@ struct QuickActionsSettingsView: View {
         count: Int,
         hasDefaultAction: Bool,
         allowsEmptyEnabled: Bool,
+        moveDirection: QuickActionMoveDirection,
         move: @escaping (IndexSet, Int) -> Void,
         transfer: @escaping (A) -> Void
     ) -> some View where A.ID == String {
@@ -148,7 +152,8 @@ struct QuickActionsSettingsView: View {
             state: state,
             index: index,
             count: count,
-            allowsEmptyEnabled: allowsEmptyEnabled
+            allowsEmptyEnabled: allowsEmptyEnabled,
+            moveDirection: moveDirection
         ).map { actionSpec in
             QuickActionItem(
                 id: actionSpec.id,
@@ -164,7 +169,7 @@ struct QuickActionsSettingsView: View {
                 case .move(let target):
                     move(IndexSet(integer: index), target.destinationOffset)
                     Announcer.announce(
-                        "Moved \(name) to position \(target.resultingIndex + 1) of \(count)"
+                        "Moved \(name) \(target.announcementDirection), position \(target.resultingIndex + 1) of \(count)"
                     )
                     focusedActionID = focusID
                 }
@@ -344,14 +349,17 @@ enum QuickActionSettingsRotorActionBuilder {
         state: ActionState,
         index: Int,
         count: Int,
-        allowsEmptyEnabled: Bool = false
+        allowsEmptyEnabled: Bool = false,
+        moveDirection: QuickActionMoveDirection = .vertical
     ) -> [QuickActionSettingsRotorAction] {
         var result: [QuickActionSettingsRotorAction] = []
         if state == .available || count > 1 || allowsEmptyEnabled {
             result.append(.transfer(state))
         }
         if state == .enabled {
-            let moveActions = QuickActionMoveLogic.targets(index: index, count: count)
+            let moveActions = QuickActionMoveLogic.targets(
+                index: index, count: count, direction: moveDirection
+            )
                 .map(QuickActionSettingsRotorAction.move)
             result += moveActions
         }

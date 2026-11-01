@@ -79,6 +79,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 - Kashe expects one clear VoiceOver action for each Quick Actions row; on a
   transport action, she can remove it once and still use the move actions
   (Chapter 103).
+- Kashe reorders the player's horizontal transport buttons by the direction
+  she hears them move (Chapter 104).
 - Kashe checks a name from a paused interview outside a client visit and tests
   VoiceOver after unlocking before going inside (Chapter 101).
 
@@ -3699,3 +3701,21 @@ She went back to the row and opened the actions again. This time there was one R
 Renata called from the car. “Are you ready?”
 
 “The button is,” Kashe said. “Give me a second.”
+
+Chapter 104 - Build 296
+
+What to try first:
+
+Please install this as an update over build 295. In Settings > Quick Actions > Player transport, open VoiceOver Actions for an enabled button between two others. Move it left, then right. Confirm VoiceOver says the direction and its new position, and that the button moves to the matching place across the player's transport row. Try moving a button at either end and confirm only the available directions are offered. Other Quick Actions lists should still say Move up and Move down.
+
+These horizontal transport controls grew from feedback by Robin and other Earshot users. If a direction, position announcement, or resulting button order does not match, tell me which action you moved and what VoiceOver said.
+
+Kashe was setting up the player before a long drive. She wanted the two-minute skip beside Play, where her hand expected to find it. The actions offered “Move left” and “Move right.” She moved it once, heard its new position, and found it beside Play on the screen.
+
+Renata had asked why a button that moved left was called “Move up.” Kashe tried the new wording at both ends of the row, then opened the Queue actions. Those still moved up and down.
+
+“That one makes sense,” she said.
+
+“The button?” Renata asked.
+
+“Both of them.”
