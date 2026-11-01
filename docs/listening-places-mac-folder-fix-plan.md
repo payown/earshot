@@ -1,6 +1,6 @@
 # Listening Places on Apple silicon Mac: investigation and fix plan
 
-**Status:** Mac reproduction and bookmark failure identified; build 297 preparing for internal physical Mac validation
+**Status:** Mac reproduction and bookmark failure identified; build 297 in internal TestFlight testing, physical Mac validation pending
 **Feedback record:** StartTesting `3ccc95fe-4526-46cb-831f-d693b575674a`  
 **Reported build:** App Store 1.2.4 (274), Mac running macOS 27.2  
 **Review base:** `origin/main` at `914d7789`, Earshot 1.2.5 (296)
@@ -17,6 +17,7 @@
 - TestFlight 1.2.5 (296) reproduced the report on this Apple silicon Mac with a fresh local Downloads folder: Selected folder stayed None and the status named the chosen folder as unable to open. The macOS unified log at the failure emitted `kCFURLBookmarkCreationMinimalBookmarkMask cannot be used with scoped bookmarks`, followed by Earshot's `NSCocoaErrorDomain 256` failure. This identifies bookmark creation, before directory or device-file I/O, as the failure in this reproduction. It also makes an iCloud-specific provider fault unnecessary to explain Marco's report. The user's exact iCloud folder has not been tested.
 - A code change now chooses a full bookmark in the iOS-on-Mac runtime while retaining the minimal bookmark on iPhone/iPad. Apple documents that `withSecurityScope` and `minimalBookmark` cannot be combined. The Mac picker URL evidently carries a scope even when Earshot does not explicitly request the former flag. This is the leading correction, not yet validated in a running fixed Mac app.
 - Commit `dc8c8eb3` contains that correction and a regression test for the platform-dependent bookmark options. The focused Listening Places and feedback suites passed 53/53 on iPhone 17 Pro iOS 26.3.1 simulator after rebasing onto current main. The full local test run passed 2,703 tests, skipped 34, and failed 0, with the repository's StoreKit skip policy before that rebase. The generic iOS Release build passed. A signed Mac-designed-for-iPad Debug build compiled. Its manually assembled temporary Mac wrapper launched a process but did not show an accessible window; this cannot be counted as a physical fix test. The Mac unit-test attempt was blocked by a local UI-test-runner provisioning profile that lacks this Mac, unrelated to the product failure.
+- Build 297 (1.2.5) was signed, uploaded, and processed as `VALID` on November 1. App Store Connect reports `IN_BETA_TESTING` internally, the Internal Testing Group as its only group, and Apple silicon Mac availability enabled for that group. The complete Chapter 105 notes match `docs/kashe.md`. No Public Testers assignment or build notification was requested. This Mac's TestFlight account showed Earshot under Previously Tested with “The developer removed you from the test program.” With Michael's approval, that Apple Account was added to the Internal Testing Group and a fresh TestFlight invitation was sent. TestFlight still showed the old state after refresh, so invitation acceptance, installation, and physical fix validation remain pending.
 
 ## Outcome and boundaries
 
