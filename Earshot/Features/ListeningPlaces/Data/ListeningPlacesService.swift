@@ -284,6 +284,7 @@ final class ListeningPlacesService {
     private(set) var status: Status = .notConfigured
 
     @ObservationIgnored private let transport: ListeningPlacesFileTransport
+    @ObservationIgnored private let prepareFolder: @Sendable (Data) async throws -> Void
     @ObservationIgnored private let readObservedDeviceFile: @Sendable (Data, String) async throws -> Data?
     @ObservationIgnored private let writeDeviceFile: @Sendable (Data, String, Data) async throws -> Void
     @ObservationIgnored private let replaceDeviceFile: (@Sendable (Data, String, Data?, Data) async throws -> Void)?
@@ -327,11 +328,15 @@ final class ListeningPlacesService {
         canAnnounce: (@MainActor () -> Bool)? = nil,
         announceOlderFileFailure: (@MainActor (String) -> Void)? = nil,
         confirmOlderFile: (@Sendable (Data, String, Data) async throws -> Bool)? = nil,
-        refersToSameFolder: (@Sendable (Data, Data) async throws -> Bool)? = nil
+        refersToSameFolder: (@Sendable (Data, Data) async throws -> Bool)? = nil,
+        prepareFolder: (@Sendable (Data) async throws -> Void)? = nil
     ) {
         let transport = ListeningPlacesFileTransport()
         let confirmationTransport = ListeningPlacesFileTransport()
         self.transport = transport
+        self.prepareFolder = prepareFolder ?? { bookmark in
+            try await transport.prepareFolder(bookmarkData: bookmark)
+        }
         self.readObservedDeviceFile = readObservedDeviceFile ?? { bookmark, deviceID in
             try await transport.readDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
         }
@@ -441,6 +446,9 @@ final class ListeningPlacesService {
         writeGeneration += 1
         let generation = writeGeneration
         let accessed = url.startAccessingSecurityScopedResource()
+        if !accessed {
+            AppLog.data.warning("Listening Places selected folder did not start security-scoped access")
+        }
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
 
         do {
@@ -449,7 +457,7 @@ final class ListeningPlacesService {
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
-            try await transport.prepareFolder(bookmarkData: bookmark)
+            try await prepareFolder(bookmark)
             guard generation == writeGeneration else { return }
             bindingID = UUID()
             olderFileObservation = nil
@@ -470,7 +478,7 @@ final class ListeningPlacesService {
             pendingZeroSnapshots = [:]
             await restoreExistingAndWrite()
         } catch {
-            fail(error)
+            if generation == writeGeneration { fail(error) }
         }
     }
 
@@ -674,6 +682,7 @@ final class ListeningPlacesService {
             await writeSnapshot()
         } catch {
             guard !Task.isCancelled, stillOwnsRestoration() else { return }
+            logFailureStage("restore snapshot", error)
             fail(error)
         }
     }
@@ -772,6 +781,7 @@ final class ListeningPlacesService {
             } catch {
                 if !(error is CancellationError), generation == writeGeneration, enabled,
                    self.bookmarkData == bookmarkData {
+                    logFailureStage("replace device file", error)
                     fail(error)
                     reportedWriteFailure = true
                     announceDeviceFileConflictIfNeeded(error)
@@ -813,7 +823,14 @@ final class ListeningPlacesService {
         status = .failed(error.localizedDescription)
         let cocoaError = error as NSError
         AppLog.data.error(
-            "Listening Places write failed [\(cocoaError.domain, privacy: .public) \(cocoaError.code, privacy: .public)]: \(error.localizedDescription, privacy: .public)"
+            "Listening Places operation failed [\(cocoaError.domain, privacy: .public) \(cocoaError.code, privacy: .public)]"
+        )
+    }
+
+    private func logFailureStage(_ stage: String, _ error: Error) {
+        let nsError = error as NSError
+        AppLog.data.error(
+            "Listening Places \(stage, privacy: .public) failed [\(nsError.domain, privacy: .public) \(nsError.code, privacy: .public)]"
         )
     }
 
