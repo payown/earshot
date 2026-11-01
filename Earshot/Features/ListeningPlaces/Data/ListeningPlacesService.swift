@@ -452,8 +452,10 @@ final class ListeningPlacesService {
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
 
         do {
+            // macOS gives the iOS app a scoped picker URL. A minimal bookmark
+            // cannot preserve that scope and fails before folder preparation.
             let bookmark = try url.bookmarkData(
-                options: .minimalBookmark,
+                options: Self.bookmarkOptions(isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac),
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
@@ -480,6 +482,10 @@ final class ListeningPlacesService {
         } catch {
             if generation == writeGeneration { fail(error) }
         }
+    }
+
+    static func bookmarkOptions(isIOSAppOnMac: Bool) -> URL.BookmarkCreationOptions {
+        isIOSAppOnMac ? [] : .minimalBookmark
     }
 
     func setEnabled(_ value: Bool) async {
