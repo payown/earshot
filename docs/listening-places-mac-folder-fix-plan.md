@@ -1,6 +1,6 @@
 # Listening Places on Apple silicon Mac: investigation and fix plan
 
-**Status:** Mac reproduction and bookmark failure identified; correction awaiting physical Mac validation
+**Status:** Mac reproduction and bookmark failure identified; build 297 preparing for internal physical Mac validation
 **Feedback record:** StartTesting `3ccc95fe-4526-46cb-831f-d693b575674a`  
 **Reported build:** App Store 1.2.4 (274), Mac running macOS 27.2  
 **Review base:** `origin/main` at `914d7789`, Earshot 1.2.5 (296)

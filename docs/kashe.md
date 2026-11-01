@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe tests a new Listening Places folder on her Mac, writes a snapshot,
+  and reopens Earshot before returning to a folder shared with her phone
+  (Chapter 105).
 - Kashe expects one clear VoiceOver action for each Quick Actions row; on a
   transport action, she can remove it once and still use the move actions
   (Chapter 103).
@@ -3719,3 +3722,23 @@ Renata had asked why a button that moved left was called “Move up.” Kashe tr
 “The button?” Renata asked.
 
 “Both of them.”
+
+---
+
+Chapter 105 - Build 297
+
+What to try first:
+
+On an Apple silicon Mac, install this over build 296. In Settings > Listening Places, choose a new local folder that is safe to use for testing. Confirm Selected folder changes, the status becomes Ready, and Write Now creates this Mac's file inside Listening Places/devices. Quit and reopen Earshot to check that the selection remains. Then try a separate new iCloud Drive test folder. If you already share a Listening Places folder with an iPhone, test it only after those checks and confirm the iPhone's file stays untouched.
+
+In Send Feedback, turn on the optional system info and check that the preview says Mac and macOS, with the correct macOS version. On iPhone, check that folder selection and the existing iPhone/iOS feedback details still work. If anything fails, tell me the folder type, the exact status text, and whether the folder stayed selected after relaunch. Please do not send a private folder path or file contents.
+
+Kashe's story:
+
+Kashe had a folder for her listening places on the phone. On the Mac, she chose it, heard the error, and tried again. Same error. She stopped there instead of moving files around to make the message go away.
+
+Renata suggested a fresh folder first. Kashe chose one, wrote a snapshot, then reopened Earshot to see whether it remembered. Only then did she return to the shared folder and check that the phone's file was still its own.
+
+“You tested the boring part first,” Renata said.
+
+“The boring part is where my data lives.”
