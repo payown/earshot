@@ -6,8 +6,8 @@ import Foundation
 /// anonymized system-info block, and the `mailto:` fallback URL can be
 /// unit-tested without presenting a real mail composer.
 ///
-/// Privacy: the system-info block contains ONLY app version, build number, iOS
-/// version, and the device model identifier. No names, no account, no
+/// Privacy: the system-info block contains ONLY app version, build number,
+/// platform OS version, and the device type or model identifier. No names, no account, no
 /// identifiers for advertising, no listening history — Earshot's
 /// minimum-data ethos applies here too.
 enum FeedbackComposer {
@@ -25,19 +25,21 @@ enum FeedbackComposer {
     /// - Parameters:
     ///   - appVersion: `CFBundleShortVersionString` (e.g. "0.1.0").
     ///   - build: `CFBundleVersion` (e.g. "113").
-    ///   - iosVersion: `UIDevice.current.systemVersion` (e.g. "17.4").
-    ///   - deviceModel: hardware model identifier (e.g. "iPhone16,2").
+    ///   - osVersion: platform operating-system version (e.g. "17.4").
+    ///   - deviceModel: device identifier or generic "Mac" label.
+    ///   - osName: operating-system label ("iOS" or "macOS").
     static func systemInfoBlock(
         appVersion: String,
         build: String,
-        iosVersion: String,
-        deviceModel: String
+        osVersion: String,
+        deviceModel: String,
+        osName: String = "iOS"
     ) -> String {
         """
         ---
         System info (anonymized)
         App version: \(appVersion) (\(build))
-        iOS: \(iosVersion)
+        \(osName): \(osVersion)
         Device: \(deviceModel)
         """
     }
