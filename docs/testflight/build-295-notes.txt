@@ -1,8 +1,8 @@
-Chapter 103 - Build 286
+Chapter 103 - Build 295
 
 What to try first:
 
-Install this as an update over build 285; keep Earshot installed so your library and settings stay in place. In Settings > Quick Actions > Player transport, open VoiceOver Actions on an enabled action. Confirm there is exactly one Remove action, alongside the available move actions. On an available action, confirm VoiceOver offers Add once and activating it adds the action once. If you use touch, swipe an enabled action to remove it. If anything differs, tell me which row and what VoiceOver announced.
+Install this as an update over build 294; keep Earshot installed so your library and settings stay in place. In Settings > Quick Actions > Player transport, open VoiceOver Actions for an enabled action. Confirm it shows one Remove action alongside the available move actions. If Remove appears twice or the move actions are missing, tell me the action name and what VoiceOver announces.
 
 Kashe's story:
 
