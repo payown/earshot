@@ -13,7 +13,7 @@
 - `cb79997a` coordinates first README creation in the iCloud File Provider directory. This removes an uncoordinated write from folder preparation; a real Mac iCloud test is still required to establish whether it contributes to the reported failure.
 - The focused iPhone 17 Pro simulator run passed 52 Listening Places and feedback tests with no failures or skips. A Mac-designed-for-iPhone test destination is available, but an unsigned test install was rejected by code-signature verification. Do not replace the installed production/development Earshot app with a test runner just to run this suite.
 - A separate focused Listening Places test run and a generic iOS Release build passed after the README change. The Mac currently has Earshot 1.2.5 (285); TestFlight 1.2.5 (296) is active in both tester groups, both of which enable Apple silicon Mac testing. Build 296 is a comparison baseline and does not include these worktree changes.
-- The installed Mac app could not yet be inspected through the available UI route. Physical Mac reproduction and the underlying provider error remain the next gate.
+- The opened 1.2.5 (285) process is an Xcode temporary app copy rather than `/Applications/Earshot.app`. Its Listening Places screen says “Selected folder, None” and “Choose a folder to begin.” This is a useful state check but does not reproduce the affected selection. Physical Mac iCloud reproduction and the underlying provider error remain the next gate.
 
 ## Outcome and boundaries
 
