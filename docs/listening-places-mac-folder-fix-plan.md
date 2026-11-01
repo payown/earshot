@@ -6,6 +6,13 @@
 **Review base:** `origin/main` at `1f0a5fb0`, Earshot 1.2.5 (284)  
 **User report:** Selecting the same iCloud folder used on iPhone does not appear to set it on an M3 iMac. Listening Places says, “Could not write listening places. The file ‘Earshot’ couldn’t be opened.” Feedback metadata incorrectly says `iPad8,6` and “iOS 27.2.”
 
+## Progress on November 1
+
+- `0494fc84` changes the opt-in feedback block to label the iOS-on-Mac runtime as Mac/macOS, while keeping iPhone formatting. The actual macOS version still needs a live Mac app check.
+- `f2954f8f` prevents a superseded folder-selection failure from overwriting the current status and adds privacy-safe stage/error-code logging for folder preparation, bookmark resolution, directory coordination/creation, README creation, restore, and replacement. It does not change the file-provider access sequence or claim to fix the reported iCloud failure.
+- The focused iPhone 17 Pro simulator run passed 52 Listening Places and feedback tests with no failures or skips. A Mac-designed-for-iPhone test destination is available, but an unsigned test install was rejected by code-signature verification. Do not replace the installed production/development Earshot app with a test runner just to run this suite.
+- The installed Mac app could not yet be inspected through the available UI route. Physical Mac reproduction and the underlying provider error remain the next gate.
+
 ## Outcome and boundaries
 
 Make a user-selected iCloud folder usable for Listening Places in Earshot's iOS app running on Apple silicon Mac. Preserve existing files, local listening state, and the last working folder when a new selection fails. Correct feedback metadata so it identifies the Mac and macOS. Verify on a real Mac with the affected type of folder before TestFlight distribution.
