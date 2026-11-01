@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe expects one clear VoiceOver action for each Quick Actions row; on a
+  transport action, she can remove it once and still use the move actions
+  (Chapter 103).
 - Kashe checks a name from a paused interview outside a client visit and tests
   VoiceOver after unlocking before going inside (Chapter 101).
 
@@ -3678,3 +3681,21 @@ Then Renata asked for the chapter they had just passed. Kashe changed the rewind
 “Your buttons have jobs now?” Renata asked.
 
 “They have choices,” Kashe said. “I just chose their jobs.”
+
+---
+
+Chapter 103 - Build 286
+
+What to try first:
+
+Install this as an update over build 285; keep Earshot installed so your library and settings stay in place. In Settings > Quick Actions > Player transport, open VoiceOver Actions on an enabled action. Confirm there is exactly one Remove action, alongside the available move actions. On an available action, confirm VoiceOver offers Add once and activating it adds the action once. If you use touch, swipe an enabled action to remove it. If anything differs, tell me which row and what VoiceOver announced.
+
+Kashe's story:
+
+Kashe was changing the skip buttons before leaving for work. She opened the actions for one of them and heard “Remove” twice. The second one made her stop and check whether she had already removed it.
+
+She went back to the row and opened the actions again. This time there was one Remove, then the choices to move the button. She picked Move up, heard where it had gone, and kept going.
+
+Renata called from the car. “Are you ready?”
+
+“The button is,” Kashe said. “Give me a second.”

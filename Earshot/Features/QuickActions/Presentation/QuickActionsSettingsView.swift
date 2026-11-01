@@ -144,6 +144,33 @@ struct QuickActionsSettingsView: View {
         move: @escaping (IndexSet, Int) -> Void,
         transfer: @escaping (A) -> Void
     ) -> some View where A.ID == String {
+        let rotorActions = QuickActionSettingsRotorActionBuilder.actions(
+            state: state,
+            index: index,
+            count: count,
+            allowsEmptyEnabled: allowsEmptyEnabled
+        ).map { actionSpec in
+            QuickActionItem(
+                id: actionSpec.id,
+                label: actionSpec.label,
+                isDestructive: actionSpec.isDestructive
+            ) {
+                switch actionSpec {
+                case .transfer:
+                    performTransfer(
+                        action, name: name, focusID: focusID,
+                        state: state, transfer: transfer
+                    )
+                case .move(let target):
+                    move(IndexSet(integer: index), target.destinationOffset)
+                    Announcer.announce(
+                        "Moved \(name) to position \(target.resultingIndex + 1) of \(count)"
+                    )
+                    focusedActionID = focusID
+                }
+            }
+        }
+
         if state == .available {
             Button {
                 performTransfer(
@@ -170,12 +197,8 @@ struct QuickActionsSettingsView: View {
                     transfer: transfer
                 )
             }
+            .quickActionsRotorIfNeeded(rotorActions)
         } else {
-            let movementActions = rowActions(
-                name: name, focusID: focusID,
-                state: state, index: index, count: count,
-                move: move
-            )
             Text(name)
                 .accessibilityLabel(rowLabel(
                     name, state: state, index: index, count: count,
@@ -191,9 +214,10 @@ struct QuickActionsSettingsView: View {
                         transfer: transfer
                     )
                 }
-                // Add/Remove come from the native swipe action. Enabled rows
-                // add only Move choices to avoid duplicate rotor entries.
-                .quickActionsRotorIfNeeded(movementActions)
+                // Keep the swipe control for touch users. VoiceOver gets one
+                // explicit Add/Remove action from `rotorActions`, avoiding the
+                // duplicate entry from the native swipe control.
+                .quickActionsRotorIfNeeded(rotorActions)
         }
     }
 
@@ -211,6 +235,7 @@ struct QuickActionsSettingsView: View {
         }
         .tint(state == .enabled ? .red : .green)
         .disabled(state == .enabled && count == 1 && !allowsEmptyEnabled)
+        .accessibilityHidden(true)
     }
 
     private func performTransfer<A>(
@@ -223,29 +248,6 @@ struct QuickActionsSettingsView: View {
         transfer(action)
         announceTransfer(name, state: state)
         focusedActionID = focusID
-    }
-
-    private func rowActions(
-        name: String,
-        focusID: String,
-        state: ActionState,
-        index: Int,
-        count: Int,
-        move: @escaping (IndexSet, Int) -> Void
-    ) -> [QuickActionItem] {
-        var items: [QuickActionItem] = []
-        if state == .enabled {
-            items += QuickActionMoveLogic.targets(index: index, count: count).map { target in
-                QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
-                    move(IndexSet(integer: index), target.destinationOffset)
-                    Announcer.announce(
-                        "Moved \(name) to position \(target.resultingIndex + 1) of \(count)"
-                    )
-                    focusedActionID = focusID
-                }
-            }
-        }
-        return items
     }
 
     private func rowLabel(
@@ -295,7 +297,7 @@ private extension View {
     }
 }
 
-private enum ActionState: Equatable {
+enum ActionState: Equatable {
     case enabled
     case available
 
@@ -310,5 +312,49 @@ private enum ActionState: Equatable {
         return self == .enabled
             ? "Remove or reorder with the Actions rotor."
             : "Double-tap to add to Enabled. You can also use the Actions rotor."
+    }
+}
+
+enum QuickActionSettingsRotorAction: Equatable, Identifiable {
+    case transfer(ActionState)
+    case move(QuickActionMoveTarget)
+
+    var id: String {
+        switch self {
+        case .transfer(let state): "transfer-\(state.title)"
+        case .move(let target): target.label
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .transfer(let state): state.transferLabel
+        case .move(let target): target.label
+        }
+    }
+
+    var isDestructive: Bool {
+        if case .transfer(.enabled) = self { return true }
+        return false
+    }
+}
+
+enum QuickActionSettingsRotorActionBuilder {
+    static func actions(
+        state: ActionState,
+        index: Int,
+        count: Int,
+        allowsEmptyEnabled: Bool = false
+    ) -> [QuickActionSettingsRotorAction] {
+        var result: [QuickActionSettingsRotorAction] = []
+        if state == .available || count > 1 || allowsEmptyEnabled {
+            result.append(.transfer(state))
+        }
+        if state == .enabled {
+            let moveActions = QuickActionMoveLogic.targets(index: index, count: count)
+                .map(QuickActionSettingsRotorAction.move)
+            result += moveActions
+        }
+        return result
     }
 }
