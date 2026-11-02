@@ -5,8 +5,8 @@ StartTesting: `cb8fea95-4e72-45dd-8a93-8a9ae1acd4dc`. This is a code audit, not 
 ## Verified work
 
 - Merged PRs #1013 and #1014 replaced raw URL, search-term, server content-type, and free-form transport diagnostics in HTTP, artwork, search, preview, and several subscription paths with fixed categories. Their synthetic-secret tests remain in the suite.
-- PR #1036 head `eade3ff3` removes the remaining public `localizedDescription` and episode-title values in `DownloadManager` logs, and routes its error diagnostics through `NetworkDiagnostic.reason`. `HTTPClientRetryTests.testWrappedAndUnknownErrorDiagnosticsNeverExposeFreeFormText` checks that helper with a synthetic signed URL, query token, and custom NSError domain/description. This is a partial fix; its fresh CI is pending.
-- Draft PR #1042 head `ce1f2f0e` removes episode titles and unrestricted error descriptions from `EpisodeExporter` and `BookmarkRepository` public logs, and marks podcast titles private in `FeedRefreshActor` and `SubscriptionRepository` logs. An iOS Simulator build passed at this head; full CI and review remain. Export filenames, bookmark data, and subscription behavior are unchanged.
+- PR #1036 head `eade3ff3` removes the remaining public `localizedDescription` and episode-title values in `DownloadManager` logs, and routes its error diagnostics through `NetworkDiagnostic.reason`. `HTTPClientRetryTests.testWrappedAndUnknownErrorDiagnosticsNeverExposeFreeFormText` checks that helper with a synthetic signed URL, query token, and custom NSError domain/description. This is a partial fix; final-head full CI run 41464234970 passed.
+- Draft PR #1042 head `ce1f2f0e` removes episode titles and unrestricted error descriptions from `EpisodeExporter` and `BookmarkRepository` public logs, and marks podcast titles private in `FeedRefreshActor` and `SubscriptionRepository` logs. An iOS Simulator build and full CI run 41465260446 passed at this head; review remains. Export filenames, bookmark data, and subscription behavior are unchanged.
 
 ## Remaining audit map
 
