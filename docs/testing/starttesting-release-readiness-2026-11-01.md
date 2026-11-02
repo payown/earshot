@@ -12,7 +12,7 @@ This is a working audit of the Earshot StartTesting project, not a claim that al
 
 ## Immediate build and integration state
 
-- Build 1.2.5 (297) is available to the accepted internal TestFlight account. It includes the merged Listening Places foreign-file guard (#1027). Folder selection passed on the physical Mac with build 297, while the source correction remains **draft PR #1035**. Verify the build's exact source revision before treating every subsequent PR change as installed; the later feedback wording commit was tested locally, not in build 297.
+- Build 1.2.5 (297) is available to the accepted internal TestFlight account. It includes the merged Listening Places foreign-file guard (#1027). Folder selection passed on the physical Mac with build 297, while the source correction remains **draft PR #1035**. Final-head CI run 41391023255 passed. Verify the build's exact source revision before treating every subsequent PR change as installed; the later feedback wording commit was tested locally, not in build 297.
 - Draft PR #1036 reports bulk download clear/cancel failures and preserves a path after file removal fails. Nine selected simulator tests passed; full CI and physical VoiceOver checks are pending.
 - PR #1024 (download path reconciliation) remains open despite earlier iPhone checks on development build 293. Rebased-head CI and merge are still required.
 - An unrelated open documentation PR #1033 needs its own review. Its presence does not establish product acceptance.
@@ -21,7 +21,7 @@ This is a working audit of the Earshot StartTesting project, not a claim that al
 
 | StartTesting ID | Status at audit | Evidence and next verification |
 | --- | --- | --- |
-| `3ccc95fe-4526-46cb-831f-d693b575674a` | Testing | Apple silicon Listening Places folder picker. Draft #1035; fresh local/iCloud selection and relaunch passed on Mac. Get clean final-head CI; test an **existing iPhone-shared** folder with VoiceOver, verify a newly written device file and relaunch. |
+| `3ccc95fe-4526-46cb-831f-d693b575674a` | Testing | Apple silicon Listening Places folder picker. Draft #1035; fresh local/iCloud selection and relaunch passed on Mac; final-head CI passed. Test an **existing iPhone-shared** folder with VoiceOver, verify a newly written device file and relaunch. |
 | `6d33508d-7c3c-4221-91f0-1aaea16bfc4f` | Testing | Foreign Listening Places device-file guard merged in #1027 and included in 297. Select the prepared isolated iCloud test folder, verify refusal and byte-for-byte unchanged foreign file, then restore the ordinary folder. Test VoiceOver status. |
 | `157e1399-850b-405c-9dbc-77302f1ed233` | In development | #1035 changes Send Feedback hint/footer to platform-neutral wording with 11 focused tests. On Mac and iPhone, inspect the opt-in speech and draft metadata. Mac runtime reported 27.0 while host reported 27.0.1; find a supported accurate source before claiming patch-version resolution. Cancel drafts; do not send. |
 | `cfde8bcb-d249-4dc6-9c98-f653159df3b3` | In development | Draft #1036; 9 selected simulator tests passed. Review final-head CI. With VoiceOver, clear and cancel ordinary downloads, verify success counts and state after relaunch. Injected failure announcements are automated-only unless safely reproducible on device. |
