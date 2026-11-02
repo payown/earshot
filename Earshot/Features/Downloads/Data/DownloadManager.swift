@@ -220,6 +220,7 @@ final class DownloadManager {
     @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
     @ObservationIgnored private let startTransfer: (URL, String) -> Void
     @ObservationIgnored private let saveContext: (ModelContext) throws -> Void
+    @ObservationIgnored private let removeBulkFile: (String) throws -> Void
     @ObservationIgnored private let loadBulkKeys: @MainActor (DownloadBulkQuery, ModelContainer) async throws -> [EpisodeLocalKey]
 
     init(
@@ -229,6 +230,7 @@ final class DownloadManager {
             task.resume()
         },
         saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() },
+        removeBulkFile: @escaping (String) throws -> Void = { try DownloadPaths.removeFile(named: $0) },
         loadBulkKeys: @escaping @MainActor (DownloadBulkQuery, ModelContainer) async throws -> [EpisodeLocalKey] = {
             query, container in
             try await Task.detached(priority: .utility) {
@@ -250,6 +252,7 @@ final class DownloadManager {
     ) {
         self.startTransfer = startTransfer
         self.saveContext = saveContext
+        self.removeBulkFile = removeBulkFile
         self.loadBulkKeys = loadBulkKeys
     }
 
@@ -1056,11 +1059,13 @@ final class DownloadManager {
             if let name = DownloadPaths.storedFileName(snapshot.0),
                !retainedFiles.contains(name) {
                 do {
-                    try DownloadPaths.removeFile(named: name)
+                    try removeBulkFile(name)
                 } catch {
                     fileRemovalFailed = true
                     let failure = error as NSError
                     AppLog.networking.error("Clear downloads file removal failed: \(failure.domain, privacy: .public) \(failure.code)")
+                    // Keep this episode's path so a later clear can retry it.
+                    continue
                 }
             }
             episode.downloadPath = nil

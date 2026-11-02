@@ -418,6 +418,21 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(result, .failed)
     }
 
+    func test_clearAllDownloads_keepsPathWhenFileRemovalFails() async throws {
+        let context = TestStore.freshContext()
+        let name = "clear-removal-failure.mp3"
+        let completed = Episode(guid: "clear-removal-failure", title: "Completed", audioURL: "https://h/completed.mp3",
+                                downloadStatus: .downloaded, downloadPath: name)
+        try persistLocalDownloadState(for: [completed], in: context)
+        let manager = DownloadManager(removeBulkFile: { _ in throw ForcedSaveFailure.injected })
+        manager.configureForTesting(context: context, isOnWifi: false)
+
+        let result = await manager.clearAllDownloads()
+
+        XCTAssertEqual(result, .failed)
+        XCTAssertEqual(completed.downloadPath, name, "A later clear must be able to retry removal")
+    }
+
     func test_clearAllDownloads_noDownloads_returnsZeroAndDoesNothing() async {
         let context = TestStore.freshContext()
         let idle = Episode(guid: "c4", title: "Idle", audioURL: "https://h/i.mp3",
