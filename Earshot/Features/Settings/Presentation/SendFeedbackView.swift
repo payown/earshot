@@ -5,8 +5,8 @@ import MessageUI
 /// Settings → Send Feedback (PRD 12, issue #392).
 ///
 /// Opens a pre-filled mail composer to `michael@payown.media`. The user can choose
-/// to attach an anonymized system-info block (app version, build, iOS version,
-/// device model — nothing personal). When no Mail account is configured the
+/// to attach an anonymized system-info block (app version, build, operating
+/// system version, device type — nothing personal). When no Mail account is configured the
 /// screen falls back to a `mailto:` URL; if that can't be opened either, it
 /// surfaces a calm in-line message and logs the situation. Never crashes.
 @MainActor
@@ -31,9 +31,9 @@ struct SendFeedbackView: View {
 
             Section {
                 Toggle("Include system info to help debugging", isOn: $includeSystemInfo)
-                    .accessibilityHint("Adds your app version, iOS version, and device model. Anonymized, no personal data.")
+                    .accessibilityHint("Adds your app version, operating system version, and device type. Anonymized, no personal data.")
             } footer: {
-                Text("Adds app version, iOS version, and device model. Anonymized — no names, accounts, or listening history.")
+                Text("Adds app version, operating system version, and device type. Anonymized — no names, accounts, or listening history.")
             }
 
             Section {
