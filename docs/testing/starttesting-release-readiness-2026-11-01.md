@@ -17,6 +17,16 @@ This is a working audit of the Earshot StartTesting project, not a claim that al
 - PR #1024 (download path reconciliation) remains open despite earlier iPhone checks on development build 293. Its prior head `5dfd39f2` passed full CI. The branch was updated onto current main as `89d8ae93`; fresh integrated-head CI and merge are required.
 - An unrelated open documentation PR #1033 needs its own review. Its presence does not establish product acceptance.
 
+## Proposed path to the next release candidate
+
+1. **Finish data-safety integration.** Bring #1024 through fresh integrated-head CI and merge. Review #1036 after full CI, then merge if its failure reporting and partial-cleanup behavior are accepted. Do not treat either as a cure for the separately tracked cleanup-before-save risk.
+2. **Resolve Listening Places reliability.** Review and merge #1035 after its passing CI and the existing shared-folder/VoiceOver check. Complete build-297 foreign-file guard acceptance using the isolated fixture. Decide whether the offline-timestamp issue must be fixed before broadening Listening Places availability; it can overwrite newer cross-app progress, and the historical timestamps cannot be reconstructed.
+3. **Finish the smaller correctness changes.** #1038 (OPML result speech) and #1039 (chapter-sheet identity) are drafts pending CI and device checks. Keep their code and acceptance evidence separate from the Listening Places release decision.
+4. **Review remaining exposure.** The broader synthetic-token logging audit and cleanup-before-save design are unfinished. Treat both as explicit risk decisions, with links to their StartTesting items and a tested mitigation or scoped deferral before an App Store candidate is called ready.
+5. **Build one integrated candidate.** Confirm the final main commit, clean CI, version/build, changelog, installation and TestFlight access. Exercise the prioritized device checks below on that exact candidate. Earlier builds and local development builds do not substitute for final-candidate acceptance.
+
+The feature requests for generated chapters and retroactive episode filtering have prerequisites and separate design decisions. The older features in Testing still need listener acceptance, but their outstanding checks should be scheduled without silently treating their old TestFlight availability as a new release gate or as a pass.
+
 ## Bug inventory and next action
 
 | StartTesting ID | Status at audit | Evidence and next verification |
