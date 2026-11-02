@@ -4,6 +4,11 @@ import XCTest
 
 @MainActor
 final class ListeningPlacesServiceTests: XCTestCase {
+    func testMacFolderBookmarkDoesNotUseIncompatibleMinimalOption() {
+        XCTAssertEqual(ListeningPlacesService.bookmarkOptions(isIOSAppOnMac: true), [])
+        XCTAssertTrue(ListeningPlacesService.bookmarkOptions(isIOSAppOnMac: false).contains(.minimalBookmark))
+    }
+
     func testOlderFileClassificationRequiresMatchingMetadataAndStrictVersion() {
         func isOlder(app: String, device: String = "1234abcd", format: String = "listening-places/1", current: String = "1.2.5") -> Bool {
             let snapshot = ListeningPlacesRestoredSnapshot(records: [], signatures: [:], updatedAtByID: [:], fileFormat: format, fileDevice: device, fileApp: app)
@@ -1468,6 +1473,37 @@ final class ListeningPlacesServiceTests: XCTestCase {
         ))
     }
 
+    func testLateFailureFromPreviousFolderSelectionCannotReplaceCurrentStatus() async throws {
+        let firstDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "listening-places-first-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let secondDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "listening-places-second-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: firstDirectory)
+            try? FileManager.default.removeItem(at: secondDirectory)
+        }
+
+        let preparation = SuspendedListeningPlacesPreparation()
+        let service = ListeningPlacesService(prepareFolder: { bookmark in
+            try await preparation.prepare(bookmark: bookmark)
+        })
+        let container = try makeContainer()
+        service.configure(context: container.mainContext)
+
+        let firstSelection = Task { await service.chooseFolder(firstDirectory) }
+        await preparation.waitUntilSuspended()
+        await service.chooseFolder(secondDirectory)
+        let currentStatus = service.status
+        XCTAssertEqual(service.folderName, secondDirectory.lastPathComponent)
+
+        await preparation.failFirstPreparation()
+        await firstSelection.value
+        XCTAssertEqual(service.folderName, secondDirectory.lastPathComponent)
+        XCTAssertEqual(service.status, currentStatus)
+    }
+
     func testWritingIntoExistingListeningPlacesFolderCreatesDevicesFolder() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "listening-places-existing-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -1615,6 +1651,38 @@ private actor SuspendedListeningPlacesRemover {
             waiters.removeAll()
         }
         try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+    }
+}
+
+private actor SuspendedListeningPlacesPreparation {
+    private let transport = ListeningPlacesFileTransport()
+    private var holdFirst = true
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func failFirstPreparation() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+
+    func prepare(bookmark: Data) async throws {
+        if holdFirst {
+            holdFirst = false
+            suspended = true
+            await withCheckedContinuation { continuation in
+                resumeContinuation = continuation
+                for waiter in waiters { waiter.resume() }
+                waiters.removeAll()
+            }
+            throw ListeningPlacesFileError.couldNotCreateDirectory("Listening Places")
+        }
+        try await transport.prepareFolder(bookmarkData: bookmark)
     }
 }
 

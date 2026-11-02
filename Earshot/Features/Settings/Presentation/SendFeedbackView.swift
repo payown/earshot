@@ -79,11 +79,13 @@ struct SendFeedbackView: View {
     // MARK: Body construction
 
     private var composedBody: String {
+        let isMac = ProcessInfo.processInfo.isiOSAppOnMac
         let info = includeSystemInfo ? FeedbackComposer.systemInfoBlock(
             appVersion: AppInfo.version,
             build: AppInfo.build,
-            iosVersion: UIDevice.current.systemVersion,
-            deviceModel: Self.deviceModelIdentifier
+            osVersion: isMac ? Self.macOSVersion : UIDevice.current.systemVersion,
+            deviceModel: isMac ? "Mac" : Self.deviceModelIdentifier,
+            osName: isMac ? "macOS" : "iOS"
         ) : nil
         return FeedbackComposer.body(systemInfo: info)
     }
@@ -124,6 +126,12 @@ struct SendFeedbackView: View {
     }
 
     // MARK: Anonymized device info
+
+    private static var macOSVersion: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        let base = "\(version.majorVersion).\(version.minorVersion)"
+        return version.patchVersion == 0 ? base : "\(base).\(version.patchVersion)"
+    }
 
     /// The hardware model identifier (e.g. "iPhone16,2"). On the simulator the
     /// real device model is exposed via the `SIMULATOR_MODEL_IDENTIFIER`
