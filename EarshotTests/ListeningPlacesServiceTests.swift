@@ -89,7 +89,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.releasePersistence()
     }
 
-    func testForeignFileWriteFailureIsNotAnnounced() async throws {
+    func testForeignFileIsPreservedBeforeAnyWrite() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -106,6 +106,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         let file = try deviceFile(in: directory)
         initial.releasePersistence()
         try setSelfReportedApp("another-app/0.0.1", in: file)
+        let foreignContents = try Data(contentsOf: file)
         let writer = LegacyFailureWriter()
         let confirmation = LegacyConfirmationProbe()
         var announcements: [String] = []
@@ -119,12 +120,44 @@ final class ListeningPlacesServiceTests: XCTestCase {
         let writeAttemptsBefore = await writer.attempts()
         await service.setIncludeLabels(true)
         let writeAttemptsAfter = await writer.attempts()
-        XCTAssertGreaterThan(writeAttemptsAfter, writeAttemptsBefore, "The injected writer must be called")
-        guard case .failed = service.status else { return XCTFail("The injected write must fail") }
+        XCTAssertEqual(writeAttemptsAfter, writeAttemptsBefore, "Foreign metadata must stop the write before it reaches the provider")
+        guard case .failed = service.status else { return XCTFail("The foreign file must be reported as a failure") }
+        XCTAssertEqual(try Data(contentsOf: file), foreignContents)
         let confirmationAttempts = await confirmation.attempts()
         XCTAssertEqual(confirmationAttempts, 0, "Foreign metadata must not schedule a confirmation")
         XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
         XCTAssertTrue(announcements.isEmpty)
+        service.releasePersistence()
+    }
+
+    func testForeignDeviceIDIsPreservedOnFolderSelectionAndRemove() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/foreign-guard", title: "Guard")
+        let episode = Episode(guid: "foreign-guard", title: "Episode", audioURL: "https://example.com/foreign-guard.mp3", positionSeconds: 30)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let initial = ListeningPlacesService()
+        initial.configure(context: container.mainContext)
+        await initial.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        initial.releasePersistence()
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        json["device"] = "foreign-device"
+        let foreignContents = try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])
+        try foreignContents.write(to: file, options: .atomic)
+
+        let service = ListeningPlacesService()
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        guard case .failed = service.status else { return XCTFail("Foreign device metadata must fail selection") }
+        XCTAssertEqual(try Data(contentsOf: file), foreignContents)
+        await service.stopSharingAndRemoveDeviceFile()
+        XCTAssertEqual(try Data(contentsOf: file), foreignContents, "A failed selection must not remove the foreign file")
         service.releasePersistence()
     }
 

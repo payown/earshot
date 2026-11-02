@@ -358,6 +358,7 @@ enum ListeningPlacesFileError: LocalizedError {
     case couldNotCreateDirectory(String)
     case expectedDirectory(String)
     case deviceFileChanged
+    case unrecognizedDeviceFile
 
     var errorDescription: String? {
         switch self {
@@ -368,6 +369,8 @@ enum ListeningPlacesFileError: LocalizedError {
             "A file named “\(name)” already exists where Earshot needs a folder. Rename or remove that file, then try again."
         case .deviceFileChanged:
             "The Listening Places file changed in its folder. Earshot left it untouched. Choose the folder again to review the current file before sharing."
+        case .unrecognizedDeviceFile:
+            "A different or invalid Listening Places device file is in this folder. Earshot left it untouched. Choose another folder before sharing."
         }
     }
 }
