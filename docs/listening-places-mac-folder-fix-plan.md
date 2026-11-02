@@ -1,6 +1,6 @@
 # Listening Places on Apple silicon Mac: investigation and fix plan
 
-**Status:** Mac reproduction and bookmark failure identified; build 297 in internal TestFlight testing, physical Mac validation pending
+**Status:** Bookmark failure reproduced and corrected; build 297 passed fresh local and iCloud Drive folder checks on a physical Apple silicon Mac. Existing shared-folder, VoiceOver, clean CI, and listener confirmation remain pending.
 **Feedback record:** StartTesting `3ccc95fe-4526-46cb-831f-d693b575674a`  
 **Reported build:** App Store 1.2.4 (274), Mac running macOS 27.2  
 **Review base:** `origin/main` at `914d7789`, Earshot 1.2.5 (296)
@@ -21,6 +21,9 @@
 - Michael accepted the invitation, and App Store Connect changed the account to `ACCEPTED`, but TestFlight reported no builds available. The build is `VALID` and `IN_BETA_TESTING`; App Store Connect showed group access but no direct build relationship for the newly accepted tester. Build 297 was then explicitly assigned to that tester, and the relationship was verified. TestFlight refresh and installation remain to be confirmed on the Mac.
 - Build 297 appeared in TestFlight and installed on this Mac; App Store Connect later listed the tester as `INSTALLED` with Mac build 297. The exact fresh local Downloads folder that failed on build 296 selected successfully: the Selected folder row changed, sharing enabled, status reported a write, and `Listening Places/devices` contained one valid device JSON. An explicit Write Now updated the status and file bytes. Relaunch verification was interrupted when the Mac locked; the fresh iCloud folder, existing shared folder, feedback metadata, and VoiceOver checks remain pending.
 - The latest PR CI run failed on a self-hosted Mac during concurrent UI activity. Its failure list includes two unrelated integration tests and numerous UI tests; the log shows the UI runner could not obtain its main window (`kAXError -25218`). The previous PR CI run and local focused/full suites had passed. Treat this as a failed gate until a clean rerun establishes whether it is environmental or a regression.
+- On physical TestFlight build 297, the fresh local Downloads test folder selected successfully, contained a valid `Listening Places/devices/*.json` file, and an explicit Write Now changed the file. After a full quit and relaunch, the local selection and sharing state remained intact and a later write succeeded.
+- A separate fresh iCloud Drive test folder, `Earshot Listening Places iCloud Test 297`, also selected and wrote successfully on the same Mac. It contained the README and one valid device JSON. Write Now updated its status and file modification time. After a full quit and relaunch, Earshot still showed that exact iCloud folder, sharing enabled, and a later successful write. This is a physical fresh-iCloud result; it does not yet establish behavior in an existing iPhone-shared folder or Marco's particular folder.
+- The opt-in feedback email draft on the Mac displayed `Device: Mac` and `macOS`, correcting the false `iPad8,6`/iOS identification. It displayed `macOS: 27.0` while the host reports `27.0.1`, so the patch version is not yet accurate in this iOS-on-Mac runtime. The Send Feedback toggle's spoken hint and visible footer still say “iOS version and device model.” Those strings are protected accessibility semantics under `AGENTS.md`; seek explicit sign-off before changing them. The draft was canceled without sending.
 
 ## Outcome and boundaries
 
