@@ -12,7 +12,7 @@ final class FeedbackComposerTests: XCTestCase {
         let block = FeedbackComposer.systemInfoBlock(
             appVersion: "0.1.0",
             build: "113",
-            iosVersion: "17.4",
+            osVersion: "17.4",
             deviceModel: "iPhone16,2"
         )
         XCTAssertEqual(
@@ -27,11 +27,25 @@ final class FeedbackComposerTests: XCTestCase {
         )
     }
 
+    func testMacSystemInfoUsesMacOSAndDoesNotClaimAnIPad() {
+        let block = FeedbackComposer.systemInfoBlock(
+            appVersion: "1.2.5",
+            build: "285",
+            osVersion: "27.2",
+            deviceModel: "Mac",
+            osName: "macOS"
+        )
+        XCTAssertTrue(block.contains("macOS: 27.2"))
+        XCTAssertTrue(block.contains("Device: Mac"))
+        XCTAssertFalse(block.contains("iOS:"))
+        XCTAssertFalse(block.contains("iPad8,6"))
+    }
+
     func testSystemInfoBlockContainsNoPersonalData() {
         let block = FeedbackComposer.systemInfoBlock(
             appVersion: "1.0",
             build: "1",
-            iosVersion: "18.0",
+            osVersion: "18.0",
             deviceModel: "iPhone17,1"
         )
         // Only the four anonymized fields plus the header should be present.
@@ -61,7 +75,7 @@ final class FeedbackComposerTests: XCTestCase {
         let info = FeedbackComposer.systemInfoBlock(
             appVersion: "0.1.0",
             build: "113",
-            iosVersion: "17.4",
+            osVersion: "17.4",
             deviceModel: "iPhone16,2"
         )
         let body = FeedbackComposer.body(systemInfo: info)
@@ -131,7 +145,7 @@ final class FeedbackComposerTests: XCTestCase {
             body: FeedbackComposer.body(systemInfo: FeedbackComposer.systemInfoBlock(
                 appVersion: "0.1.0",
                 build: "113",
-                iosVersion: "17.4",
+                osVersion: "17.4",
                 deviceModel: "iPhone16,2"
             ))
         )
