@@ -369,7 +369,7 @@ final class SubscriptionRepository {
                     await downloader.download(episode)
                 }
                 AppLog.subscriptions.info(
-                    "Auto-download: queued \(toDownload.count) episode(s) for \(podcast.title, privacy: .public)"
+                    "Auto-download: queued \(toDownload.count) episode(s) for \(podcast.title, privacy: .private)"
                 )
             }
         }
@@ -561,7 +561,7 @@ struct SubscriptionDeletionRepository {
         } catch {
             context.rollback()
             AppLog.subscriptions.error(
-                "Failed to prepare unsubscribe from \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to prepare unsubscribe from \(title, privacy: .private): \(error.localizedDescription, privacy: .public)"
             )
             return false
         }
@@ -599,7 +599,7 @@ struct SubscriptionDeletionRepository {
         } catch {
             context.rollback()
             AppLog.subscriptions.error(
-                "Failed to stage unsubscribe from \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to stage unsubscribe from \(title, privacy: .private): \(error.localizedDescription, privacy: .public)"
             )
             return false
         }
@@ -622,12 +622,12 @@ struct SubscriptionDeletionRepository {
             // Inbox now uses event-driven snapshots, not a live episode query.
             // Publish only after the cascade save so its reload sees removal.
             NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
-            AppLog.subscriptions.info("Unsubscribed from \(title, privacy: .public)")
+            AppLog.subscriptions.info("Unsubscribed from \(title, privacy: .private)")
             return true
         } catch {
             context.rollback()
             AppLog.subscriptions.error(
-                "Failed to unsubscribe from \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to unsubscribe from \(title, privacy: .private): \(error.localizedDescription, privacy: .public)"
             )
             return false
         }
