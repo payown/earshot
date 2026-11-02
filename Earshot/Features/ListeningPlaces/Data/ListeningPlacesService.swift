@@ -27,11 +27,17 @@ struct ListeningPlacesRestoredSnapshot: Sendable {
     let fileDevice: String
     let fileApp: String
 
+    /// Metadata is self-reported, but a mismatch proves this is not our file.
+    func matchesDeviceFile(deviceID: String) -> Bool {
+        fileFormat == ListeningPlacesFormat.identifier
+            && fileDevice == deviceID
+            && fileApp.hasPrefix("earshot/")
+            && Self.marketingVersion(String(fileApp.dropFirst("earshot/".count))) != nil
+    }
+
     /// This classifies self-reported metadata, not file authorship.
     func isOlderEarshotFile(deviceID: String, currentVersion: String) -> Bool {
-        guard fileFormat == ListeningPlacesFormat.identifier,
-              fileDevice == deviceID,
-              fileApp.hasPrefix("earshot/"),
+        guard matchesDeviceFile(deviceID: deviceID),
               let fileVersion = Self.marketingVersion(String(fileApp.dropFirst("earshot/".count))),
               let current = Self.marketingVersion(currentVersion) else { return false }
         return fileVersion.lexicographicallyPrecedes(current)
@@ -530,7 +536,7 @@ final class ListeningPlacesService {
                   self.bookmarkData == bookmarkData,
                   deviceID == capturedDeviceID,
                   bindingID == capturedBindingID,
-                  context != nil else {
+                  let context else {
                 Task { @MainActor [weak self] in await self?.writeSnapshot() }
                 return
             }
@@ -544,6 +550,21 @@ final class ListeningPlacesService {
                       context != nil else {
                     retryCurrentSnapshotAfterRemoval = enabled
                     return
+                }
+                if let observed {
+                    let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: context.container)
+                    let restored = try? await loader.restore(data: observed)
+                    guard generation == writeGeneration,
+                          self.bookmarkData == bookmarkData,
+                          deviceID == capturedDeviceID,
+                          bindingID == capturedBindingID,
+                          self.context === context else {
+                        retryCurrentSnapshotAfterRemoval = enabled
+                        return
+                    }
+                    guard let restored, restored.matchesDeviceFile(deviceID: capturedDeviceID) else {
+                        throw ListeningPlacesFileError.unrecognizedDeviceFile
+                    }
                 }
                 observedDeviceFile = observed
                 hasObservedDeviceFile = true
@@ -641,14 +662,17 @@ final class ListeningPlacesService {
             let reader = readObservedDeviceFile
             if let data = try await reader(bookmarkData, capturedDeviceID) {
                 guard !Task.isCancelled, stillOwnsRestoration() else { return }
-                observedDeviceFile = data
-                hasObservedDeviceFile = true
-                announcedDeviceFileConflict = false
                 let loader = await ListeningPlacesSnapshotLoader.makeBackground(
                     modelContainer: context.container
                 )
-                let restored = try await loader.restore(data: data)
+                let restored = try? await loader.restore(data: data)
                 guard !Task.isCancelled, stillOwnsRestoration() else { return }
+                guard let restored, restored.matchesDeviceFile(deviceID: capturedDeviceID) else {
+                    throw ListeningPlacesFileError.unrecognizedDeviceFile
+                }
+                observedDeviceFile = data
+                hasObservedDeviceFile = true
+                announcedDeviceFileConflict = false
                 if data.count <= Self.maximumConfirmationBytes,
                    restored.isOlderEarshotFile(deviceID: capturedDeviceID, currentVersion: AppInfo.version) {
                     if olderFileObservation?.bookmark != bookmarkData
