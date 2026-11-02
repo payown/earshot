@@ -6,13 +6,13 @@ StartTesting: `cb8fea95-4e72-45dd-8a93-8a9ae1acd4dc`. This is a code audit, not 
 
 - Merged PRs #1013 and #1014 replaced raw URL, search-term, server content-type, and free-form transport diagnostics in HTTP, artwork, search, preview, and several subscription paths with fixed categories. Their synthetic-secret tests remain in the suite.
 - PR #1036 head `eade3ff3` removes the remaining public `localizedDescription` and episode-title values in `DownloadManager` logs, and routes its error diagnostics through `NetworkDiagnostic.reason`. `HTTPClientRetryTests.testWrappedAndUnknownErrorDiagnosticsNeverExposeFreeFormText` checks that helper with a synthetic signed URL, query token, and custom NSError domain/description. This is a partial fix; its fresh CI is pending.
-- Draft PR #1042 head `288377b1` removes episode titles and unrestricted error descriptions from `EpisodeExporter` and `BookmarkRepository` public logs. An iOS Simulator build passed; full CI and review remain. Export filenames and bookmark data are unchanged.
+- Draft PR #1042 head `ce1f2f0e` removes episode titles and unrestricted error descriptions from `EpisodeExporter` and `BookmarkRepository` public logs, and marks podcast titles private in `FeedRefreshActor` and `SubscriptionRepository` logs. An iOS Simulator build passed at this head; full CI and review remain. Export filenames, bookmark data, and subscription behavior are unchanged.
 
 ## Remaining audit map
 
 The November 2 source search still finds public free-form `localizedDescription`, file names, or podcast/episode titles in these areas. A title or NSError description can be server or provider supplied, and may contain a private URL or token. The search is a risk inventory, not proof that a particular value reached a user's log.
 
-- **Media and subscriptions:** `PlayerService`, `FeedRefreshActor`, `BackgroundFeedRefresher`, `SubscriptionRepository`, `OPMLFileImporter`, and `ExpirationService`. Prioritize network and file errors and public feed or episode titles. `EpisodeExporter` is covered by draft #1042, pending CI and review.
+- **Media and subscriptions:** `PlayerService`, `FeedRefreshActor`, `BackgroundFeedRefresher`, `SubscriptionRepository`, `OPMLFileImporter`, and `ExpirationService`. Prioritize network and file errors and public feed or episode titles. `EpisodeExporter` and the listed feed/subscription title interpolations are covered by draft #1042, pending CI and review; their public error descriptions still need attention.
 - **Persistence and local data:** `ModelContainerFactory`, `MigrationBackupManager`, `AppSettingsStore`, `CloudProjection`, `QueueRepository`, `InboxRepository`, `EpisodeRepository`, `FolderRepository`, and related save/fetch paths. An NSError description can contain a path or model value even when the direct log statement does not include a URL. `BookmarkRepository` is covered by draft #1042, pending CI and review.
 - **UI and settings:** `MailComposeView`, `DataSettingsView`, and other picker/export failure paths. `SettingsReset` and purchase UI are protected by the repository guidance and require separate sign-off before edits.
 
