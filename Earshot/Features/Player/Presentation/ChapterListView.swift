@@ -19,11 +19,15 @@ struct ChapterListView: View {
     @Environment(PlayerService.self) private var player
     @Environment(\.dismiss) private var dismiss
 
-    @State private var chapters: [Chapter] = []
-    @State private var loadingChapters = true
+    // The engine owns the chapter result and discards results from an earlier
+    // episode. The sheet must read that same result instead of fetching again.
+    private var chapters: [Chapter] { player.loadedChapterSnapshot }
+    private var loadingChapters: Bool { player.isLoadingChapters }
     // Local mirror of the engine's in-memory skipped-chapter set, keyed by chapter
     // index, so toggling re-renders rows immediately (the engine map isn't an
-    // observed property). Seeded from the engine when chapters load.
+    // observed property). The identity prevents a prior episode's toggle from
+    // appearing on a new episode with the same chapter index.
+    @State private var skipIdentity: UUID?
     @State private var skipState: [Int: Bool] = [:]
     @AccessibilityFocusState private var introFocused: Bool
 
@@ -45,7 +49,9 @@ struct ChapterListView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .task { await loadChapters() }
+            .task(id: player.chapterLoadIdentity) {
+                await focusAfterChapterLoad(for: player.chapterLoadIdentity)
+            }
         }
     }
 
@@ -75,6 +81,7 @@ struct ChapterListView: View {
     private var chapterList: some View {
         // Resolve the clock once for the list, not once per chapter row.
         let activeIndex = activeChapterIndex
+        let identity = player.chapterLoadIdentity
         return List {
             Section {
                 ForEach(Array(chapters.enumerated()), id: \.element.id) { offset, chapter in
@@ -82,9 +89,10 @@ struct ChapterListView: View {
                         chapter: chapter,
                         number: offset + 1,
                         isCurrent: activeIndex == chapter.index,
-                        isSkipped: skipState[chapter.index] ?? player.isChapterSkipped(chapter),
-                        onJump: { jump(to: chapter) },
-                        onToggleSkip: { toggleSkip(chapter) }
+                        isSkipped: (skipIdentity == identity ? skipState[chapter.index] : nil)
+                            ?? player.isChapterSkipped(chapter),
+                        onJump: { jump(to: chapter, for: identity) },
+                        onToggleSkip: { toggleSkip(chapter, for: identity) }
                     )
                 }
             } header: {
@@ -105,7 +113,8 @@ struct ChapterListView: View {
     /// Reuses the public seek path (the same `player.seek(to:)` the controls
     /// sheet used) and resumes so "jump" actually plays, then announces the
     /// landing chapter for VoiceOver.
-    private func jump(to chapter: Chapter) {
+    private func jump(to chapter: Chapter, for identity: UUID) {
+        guard player.chapterLoadIdentity == identity else { return }
         player.seek(to: chapter.startTime)
         player.resume()
         Announcer.announce("Playing \(chapter.title)")
@@ -115,8 +124,13 @@ struct ChapterListView: View {
     /// the row re-renders immediately (the engine map isn't observed). The engine
     /// announces the result ("Will skip chapter: X" / "Will play chapter: X"), so
     /// we don't announce again here.
-    private func toggleSkip(_ chapter: Chapter) {
+    private func toggleSkip(_ chapter: Chapter, for identity: UUID) {
+        guard player.chapterLoadIdentity == identity else { return }
         let nowSkipped = player.toggleChapterSkipped(chapter)
+        if skipIdentity != identity {
+            skipIdentity = identity
+            skipState = [:]
+        }
         skipState[chapter.index] = nowSkipped
     }
 
@@ -124,40 +138,20 @@ struct ChapterListView: View {
         chapters.activeChapterIndex(at: player.currentPositionSeconds)
     }
 
-    private func loadChapters() async {
-        if player.nowPlayingPersonalAudio != nil {
-            chapters = player.loadedChapterSnapshot
-            skipState = Dictionary(uniqueKeysWithValues: chapters.map { ($0.index, player.isChapterSkipped($0)) })
-            loadingChapters = false
-            return
+    private func focusAfterChapterLoad(for identity: UUID) async {
+        skipIdentity = identity
+        skipState = [:]
+        // The engine may already be loading when the sheet appears. Wait for
+        // its current request, and let SwiftUI cancel this task on a switch.
+        while player.chapterLoadIdentity == identity && player.isLoadingChapters {
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled { return }
         }
-        guard let episode = player.nowPlayingEpisode else {
-            chapters = []
-            loadingChapters = false
-            return
-        }
-        let requestID = player.chapterLoadIdentity
-        loadingChapters = true
-        let found = await ChapterService().chapters(
-            chapterURL: episode.chapterURL,
-            audioURL: episode.audioURL,
-            downloadPath: episode.localAudioURL?.path,
-            descriptionHTML: episode.episodeDescription
-        )
-        chapters = found
-        // Hand the list to the engine so auto-skip can evaluate the active
-        // chapter on each tick, and seed the local skip mirror from any state
-        // already set this session.
-        if player.chapterLoadIdentity == requestID {
-            player.setChapters(found)
-        }
-        skipState = Dictionary(
-            uniqueKeysWithValues: found.map { ($0.index, player.isChapterSkipped($0)) }
-        )
-        loadingChapters = false
+        guard player.chapterLoadIdentity == identity, !Task.isCancelled else { return }
         // Let the present transition settle before requesting VoiceOver focus;
         // a request mid-animation is dropped.
         try? await Task.sleep(for: .milliseconds(500))
+        guard player.chapterLoadIdentity == identity, !Task.isCancelled else { return }
         introFocused = true
     }
 }
