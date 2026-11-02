@@ -27,6 +27,16 @@ This is a working audit of the Earshot StartTesting project, not a claim that al
 
 The feature requests for generated chapters and retroactive episode filtering have prerequisites and separate design decisions. The older features in Testing still need listener acceptance, but their outstanding checks should be scheduled without silently treating their old TestFlight availability as a new release gate or as a pass.
 
+## First session when the Mac is unlocked
+
+1. Open TestFlight and verify Earshot **1.2.5 (297)** is installed. Record the version displayed by Earshot too; do not assume a TestFlight listing proves the running app was updated.
+2. With VoiceOver on, select the isolated iCloud Drive folder **Earshot Listening Places Foreign File Guard Test 297**. A synthetic unrelated device file is already staged there. Record the spoken and visible status. The app must refuse to replace that file; compare its bytes with the pre-test copy or checksum. Do not continue writing into this fixture after a refusal.
+3. Restore the selected folder to **Earshot Listening Places iCloud Test 297** and relaunch Earshot. Verify its prior selection and ordinary write status survived the test.
+4. For the reported Mac problem, select a copy of the **existing iPhone-shared** Listening Places folder. Verify selection takes effect, a Mac device file is written without touching iPhone/foreign files, the status is understandable with VoiceOver, and selection persists after relaunch. Record whether this is build 297 or a later integrated candidate; do not use the listener's only copy as a destructive test.
+5. Open Send Feedback but cancel the draft. On the final build containing #1035, check the opt-in hint/footer speech and the reported device/OS fields. Record the reported macOS version beside the host version so the patch mismatch can be addressed separately.
+
+If the Mac is still locked, steps 1–5 are pending; a filesystem fixture or simulator pass does not count as an app result.
+
 ## Bug inventory and next action
 
 | StartTesting ID | Status at audit | Evidence and next verification |
