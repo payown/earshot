@@ -90,7 +90,7 @@ enum OPMLFileImporter {
             guard await recordPending(counts, reason: .failed, coordinator: coordinator) else {
                 return .storageFailure
             }
-            await announceSettled(summary)
+            await announceSettled(pendingFailureMessage(for: outcome, counts: counts))
             return .pending(counts, .failed)
         }
         if outcome.cancelled {
@@ -112,8 +112,7 @@ enum OPMLFileImporter {
             guard await recordPending(counts, reason: .failed, coordinator: coordinator) else {
                 return .storageFailure
             }
-            let failed = String(localized: "^[\(outcome.failedCount) podcast](inflect: true)")
-            await announceSettled("\(summary) \(failed) could not be imported. You can retry in Settings, Data.")
+            await announceSettled(pendingFailureMessage(for: outcome, counts: counts))
             return .pending(counts, .failed)
         }
         if outcome.folderPersistenceFailed || outcome.unresolvedCount > 0 {
@@ -121,7 +120,7 @@ enum OPMLFileImporter {
                 return .storageFailure
             }
             // Keep the staged document available for another attempt.
-            await announceSettled(summary)
+            await announceSettled(pendingFailureMessage(for: outcome, counts: counts))
             return .pending(counts, .failed)
         }
         do {
@@ -138,6 +137,28 @@ enum OPMLFileImporter {
         let added = String(localized: "Added ^[\(counts.added) podcast](inflect: true).")
         let existing = String(localized: "^[\(counts.alreadyPresent) podcast](inflect: true) already present.")
         return "\(added) \(existing)"
+    }
+
+    /// Explain retryable failures that the count-only summary would otherwise hide.
+    /// The staged bytes remain available after each of these outcomes.
+    static func pendingFailureMessage(for outcome: OPMLImportOutcome, counts: OPMLImportResultCounts) -> String {
+        if outcome.invalidDocument {
+            return "The OPML file isn't valid. Choose a corrected OPML file in Settings, Data. Earshot kept the original file."
+        }
+        let summary = resultSummary(counts)
+        var problems: [String] = []
+        if outcome.failedCount > 0 {
+            let failed = String(localized: "^[\(outcome.failedCount) podcast](inflect: true)")
+            problems.append("\(failed) could not be imported.")
+        }
+        if outcome.unresolvedCount > 0 {
+            problems.append("Some podcast results couldn't be confirmed.")
+        }
+        if outcome.folderPersistenceFailed {
+            problems.append("Podcast folders couldn't be saved.")
+        }
+        guard !problems.isEmpty else { return summary }
+        return "\(summary) \(problems.joined(separator: " ")) Earshot kept the OPML file. Try Continue pending OPML import in Settings, Data."
     }
 
     private static func recordPending(

@@ -14,6 +14,48 @@ import SwiftData
 @MainActor
 final class OPMLFileImporterTests: XCTestCase {
 
+    func testPendingFailureSpeechExplainsInvalidDocumentAndReplacement() {
+        let outcome = OPMLImportOutcome(importedCount: 0, skippedForCapCount: 0, invalidDocument: true)
+        let message = OPMLFileImporter.pendingFailureMessage(for: outcome, counts: .zero)
+
+        XCTAssertTrue(message.contains("isn't valid"))
+        XCTAssertTrue(message.contains("corrected OPML file"))
+        XCTAssertTrue(message.contains("kept the original file"))
+        XCTAssertFalse(message.contains("Added 0 podcasts"))
+    }
+
+    func testPendingFailureSpeechExplainsUnresolvedResultsAndFolderSaveFailure() {
+        let counts = OPMLImportResultCounts(added: 1, alreadyPresent: 0, failed: 0, skippedForCap: 0)
+        for (folderFailed, unresolved) in [
+            (true, 0),
+            (false, 1),
+            (true, 1)
+        ] {
+            let outcome = OPMLImportOutcome(
+                addedCount: 1, alreadyPresentCount: 0, skippedForCapCount: 0, failedCount: 0,
+                cancelled: false, folderPersistenceFailed: folderFailed, unresolvedCount: unresolved
+            )
+            let message = OPMLFileImporter.pendingFailureMessage(for: outcome, counts: counts)
+            if folderFailed { XCTAssertTrue(message.contains("folders couldn't be saved"), message) }
+            if unresolved > 0 { XCTAssertTrue(message.contains("results couldn't be confirmed"), message) }
+            XCTAssertTrue(message.contains("kept the OPML file"), message)
+            XCTAssertTrue(message.contains("Continue pending OPML import"), message)
+        }
+    }
+
+    func testPendingFailureSpeechIncludesFailedCountAlongsideOtherFailures() {
+        let counts = OPMLImportResultCounts(added: 1, alreadyPresent: 0, failed: 2, skippedForCap: 0)
+        let outcome = OPMLImportOutcome(
+            addedCount: 1, alreadyPresentCount: 0, skippedForCapCount: 0, failedCount: 2,
+            cancelled: false, folderPersistenceFailed: true, unresolvedCount: 1
+        )
+
+        let message = OPMLFileImporter.pendingFailureMessage(for: outcome, counts: counts)
+        XCTAssertTrue(message.contains("2 podcasts could not be imported"), message)
+        XCTAssertTrue(message.contains("results couldn't be confirmed"), message)
+        XCTAssertTrue(message.contains("folders couldn't be saved"), message)
+    }
+
     func testFolderSaveFailureKeepsStagedImportForRetry() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
