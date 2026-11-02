@@ -1,6 +1,6 @@
 # Listening Places on Apple silicon Mac: investigation and fix plan
 
-**Status:** Bookmark failure reproduced and corrected; build 297 passed fresh local and iCloud Drive folder checks on a physical Apple silicon Mac. Existing shared-folder, VoiceOver, clean CI, and listener confirmation remain pending.
+**Status:** Bookmark failure reproduced and corrected; build 297 passed fresh local, fresh iCloud Drive, and synthetic existing-layout checks on a physical Apple silicon Mac. Real iPhone-shared folder, VoiceOver, clean CI, and listener confirmation remain pending.
 **Feedback record:** StartTesting `3ccc95fe-4526-46cb-831f-d693b575674a`  
 **Reported build:** App Store 1.2.4 (274), Mac running macOS 27.2  
 **Review base:** `origin/main` at `914d7789`, Earshot 1.2.5 (296)
@@ -24,6 +24,7 @@
 - On physical TestFlight build 297, the fresh local Downloads test folder selected successfully, contained a valid `Listening Places/devices/*.json` file, and an explicit Write Now changed the file. After a full quit and relaunch, the local selection and sharing state remained intact and a later write succeeded.
 - A separate fresh iCloud Drive test folder, `Earshot Listening Places iCloud Test 297`, also selected and wrote successfully on the same Mac. It contained the README and one valid device JSON. Write Now updated its status and file modification time. After a full quit and relaunch, Earshot still showed that exact iCloud folder, sharing enabled, and a later successful write. This is a physical fresh-iCloud result; it does not yet establish behavior in an existing iPhone-shared folder or Marco's particular folder.
 - The opt-in feedback email draft on the Mac displayed `Device: Mac` and `macOS`, correcting the false `iPad8,6`/iOS identification. It displayed `macOS: 27.0` while the host reports `27.0.1`, so the patch version is not yet accurate in this iOS-on-Mac runtime. The Send Feedback toggle's spoken hint and visible footer still say “iOS version and device model.” Those strings are protected accessibility semantics under `AGENTS.md`; seek explicit sign-off before changing them. The draft was canceled without sending.
+- A separate iCloud Drive test folder was preseeded with a valid synthetic other-device JSON and a sentinel README. Build 297 selected it and wrote a separate Mac JSON. Write Now left the synthetic file and README byte-for-byte unchanged. The selected folder was then restored to the earlier fresh iCloud test folder, so the app does not continue writing into the synthetic test layout. This does not replace testing with a real iPhone-shared folder.
 
 ## Outcome and boundaries
 
