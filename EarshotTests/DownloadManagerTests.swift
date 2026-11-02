@@ -12,6 +12,8 @@ import UserNotifications
 @MainActor
 final class DownloadManagerTests: XCTestCase {
 
+    private enum ForcedSaveFailure: Error { case injected }
+
     private func makeManager(_ context: ModelContext) -> DownloadManager {
         let manager = DownloadManager()
         manager.configure(context: context)
@@ -279,12 +281,34 @@ final class DownloadManagerTests: XCTestCase {
 
         let cancelled = await manager.cancelActiveDownloads()
 
-        XCTAssertEqual(cancelled, 2)
+        XCTAssertEqual(cancelled, .completed(2))
         XCTAssertEqual(firstActive.downloadStatus, .none)
         XCTAssertEqual(secondActive.downloadStatus, .none)
         XCTAssertEqual(completed.downloadStatus, .downloaded)
         XCTAssertEqual(completed.downloadPath, completedName)
         XCTAssertTrue(FileManager.default.fileExists(atPath: completedFile.path))
+    }
+
+    func test_cancelActiveDownloads_reportsSaveFailureInsteadOfSuccessCount() async throws {
+        let context = TestStore.freshContext()
+        let active = Episode(guid: "cancel-save-failure", title: "Active", audioURL: "https://h/active.mp3",
+                             downloadStatus: .pending)
+        try persistLocalDownloadState(for: [active], in: context)
+        let manager = DownloadManager(saveContext: { _ in throw ForcedSaveFailure.injected })
+        manager.configureForTesting(context: context, isOnWifi: false)
+
+        let result = await manager.cancelActiveDownloads()
+
+        XCTAssertEqual(result, .failed)
+    }
+
+    func test_cancelActiveDownloads_reportsFetchFailureInsteadOfEmptyCount() async {
+        let context = TestStore.freshContext()
+        let manager = DownloadManager(loadBulkKeys: { _, _ in throw ForcedSaveFailure.injected })
+        manager.configureForTesting(context: context, isOnWifi: false)
+
+        let result = await manager.cancelActiveDownloads()
+        XCTAssertEqual(result, .failed)
     }
 
     func testStorageSnapshotMatchesActiveEpisodesOffMainAndReadsOtherContextSaves() async throws {
@@ -361,7 +385,7 @@ final class DownloadManagerTests: XCTestCase {
 
         let removed = await manager.clearAllDownloads()
 
-        XCTAssertEqual(removed, 2)
+        XCTAssertEqual(removed, .completed(2))
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileA.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileB.path))
         XCTAssertNil(a.downloadPath)
@@ -370,6 +394,28 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(b.downloadStatus, DownloadStatus.none)
         XCTAssertEqual(idle.downloadStatus, DownloadStatus.none,
                        "A never-downloaded episode is untouched")
+    }
+
+    func test_clearAllDownloads_reportsSaveFailureInsteadOfSuccessCount() async throws {
+        let context = TestStore.freshContext()
+        let completed = Episode(guid: "clear-save-failure", title: "Completed", audioURL: "https://h/completed.mp3",
+                                downloadStatus: .downloaded, downloadPath: "missing-test-audio.mp3")
+        try persistLocalDownloadState(for: [completed], in: context)
+        let manager = DownloadManager(saveContext: { _ in throw ForcedSaveFailure.injected })
+        manager.configureForTesting(context: context, isOnWifi: false)
+
+        let result = await manager.clearAllDownloads()
+
+        XCTAssertEqual(result, .failed)
+    }
+
+    func test_clearAllDownloads_reportsFetchFailureInsteadOfEmptyCount() async {
+        let context = TestStore.freshContext()
+        let manager = DownloadManager(loadBulkKeys: { _, _ in throw ForcedSaveFailure.injected })
+        manager.configureForTesting(context: context, isOnWifi: false)
+
+        let result = await manager.clearAllDownloads()
+        XCTAssertEqual(result, .failed)
     }
 
     func test_clearAllDownloads_noDownloads_returnsZeroAndDoesNothing() async {
@@ -381,7 +427,7 @@ final class DownloadManagerTests: XCTestCase {
 
         let removed = await manager.clearAllDownloads()
 
-        XCTAssertEqual(removed, 0)
+        XCTAssertEqual(removed, .completed(0))
         XCTAssertEqual(idle.downloadStatus, DownloadStatus.none)
         XCTAssertFalse(context.hasChanges, "Nothing to clear must write nothing")
     }
@@ -402,7 +448,7 @@ final class DownloadManagerTests: XCTestCase {
 
         let removed = await manager.clearAllDownloads()
 
-        XCTAssertEqual(removed, 1)
+        XCTAssertEqual(removed, .completed(1))
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path),
                        "The real file at the resolved location must be deleted")
         XCTAssertNil(episode.downloadPath)

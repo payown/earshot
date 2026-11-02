@@ -391,9 +391,14 @@ struct DownloadsScreen: View {
     /// VoiceOver (Announcer is a no-op when VoiceOver is off).
     private func clearAllDownloads() {
         Task {
-            let removed = await downloads.clearAllDownloads()
+            let result = await downloads.clearAllDownloads()
             storageSummary = await downloads.storageSummary()
-            Announcer.announce(removed == 1 ? "Cleared 1 download" : "Cleared \(removed) downloads")
+            switch result {
+            case .completed(let removed):
+                Announcer.announce(removed == 1 ? "Cleared 1 download" : "Cleared \(removed) downloads")
+            case .failed:
+                Announcer.announce("Could not finish clearing downloads. Some downloads may have changed. Please check Downloads and try again.")
+            }
         }
     }
 

@@ -123,6 +123,16 @@ struct DownloadStorageCounts: Equatable, Sendable {
     let activeCount: Int
 }
 
+enum DownloadBulkResult: Equatable, Sendable {
+    case completed(Int)
+    case failed
+}
+
+enum DownloadBulkQuery: Sendable {
+    case active(String)
+    case withPath
+}
+
 /// Only scalar data crosses back from the background store scan. Paths also
 /// identify when an already scheduled directory-size scan needs a fresh pass.
 struct DownloadStorageSnapshot: Equatable, Sendable {
@@ -210,6 +220,7 @@ final class DownloadManager {
     @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
     @ObservationIgnored private let startTransfer: (URL, String) -> Void
     @ObservationIgnored private let saveContext: (ModelContext) throws -> Void
+    @ObservationIgnored private let loadBulkKeys: @MainActor (DownloadBulkQuery, ModelContainer) async throws -> [EpisodeLocalKey]
 
     init(
         startTransfer: @escaping (URL, String) -> Void = { url, key in
@@ -217,10 +228,29 @@ final class DownloadManager {
             task.taskDescription = key
             task.resume()
         },
-        saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() }
+        saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() },
+        loadBulkKeys: @escaping @MainActor (DownloadBulkQuery, ModelContainer) async throws -> [EpisodeLocalKey] = {
+            query, container in
+            try await Task.detached(priority: .utility) {
+                let scan = ModelContext(container)
+                let rows: [LocalEpisodeState]
+                switch query {
+                case .active(let raw):
+                    rows = try scan.fetch(FetchDescriptor<LocalEpisodeState>(
+                        predicate: #Predicate { $0.downloadStatusRaw == raw }
+                    ))
+                case .withPath:
+                    rows = try scan.fetch(FetchDescriptor<LocalEpisodeState>(
+                        predicate: #Predicate { $0.downloadPath != nil }
+                    ))
+                }
+                return rows.map { EpisodeLocalKey(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID) }
+            }.value
+        }
     ) {
         self.startTransfer = startTransfer
         self.saveContext = saveContext
+        self.loadBulkKeys = loadBulkKeys
     }
 
     #if DEBUG
@@ -765,6 +795,16 @@ final class DownloadManager {
         return keys.compactMap { matches[$0] }
     }
 
+    /// Bulk user actions must distinguish a failed scan from an empty result.
+    /// Resolve only identifiers on the main context; models never cross actors.
+    private func bulkActiveEpisodes(
+        state: ActiveDownloadState, in context: ModelContext
+    ) async throws -> [Episode] {
+        let keys = try await loadBulkKeys(.active(state.rawValue), context.container)
+        let matches = try LocalStateStore.episodes(matching: keys, in: context)
+        return keys.compactMap { matches[$0] }
+    }
+
     /// Persistent IDs of the ``ActiveDownload`` rows in `state`, fetched off the
     /// main actor on a throwaway context (#701). A plain-`String` predicate on
     /// `stateRaw` is the whole reason this table exists: `Episode.downloadStatus`
@@ -900,15 +940,23 @@ final class DownloadManager {
     /// Cancellation happens before state reset so a late delegate callback sees
     /// a non-downloading episode and cannot overwrite the reset with `.failed`.
     @discardableResult
-    func cancelActiveDownloads() async -> Int {
-        guard let context else { return 0 }
-        let pending = await activeEpisodes(state: .pending, in: context)
-        let downloading = await activeEpisodes(state: .downloading, in: context)
+    func cancelActiveDownloads() async -> DownloadBulkResult {
+        guard let context, save() else { return .failed }
+        let pending: [Episode]
+        let downloading: [Episode]
+        do {
+            pending = try await bulkActiveEpisodes(state: .pending, in: context)
+            downloading = try await bulkActiveEpisodes(state: .downloading, in: context)
+        } catch {
+            let failure = error as NSError
+            AppLog.networking.error("Cancel active downloads fetch failed: \(failure.domain, privacy: .public) \(failure.code)")
+            return .failed
+        }
         var seen = Set<PersistentIdentifier>()
         let affected = (pending + downloading).filter {
             seen.insert($0.persistentModelID).inserted
         }
-        guard !affected.isEmpty else { return 0 }
+        guard !affected.isEmpty else { return .completed(0) }
 
         let owners = Dictionary(uniqueKeysWithValues: affected.map { episode in
             (episode.persistentModelID, AttemptOwner(
@@ -926,9 +974,9 @@ final class DownloadManager {
             ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
             cancelled += 1
         }
-        save()
+        guard save() else { return .failed }
         AppLog.networking.info("Cancelled \(cancelled) active download(s)")
-        return cancelled
+        return .completed(cancelled)
     }
 
     /// Removes every downloaded file and resets all download state in one pass —
@@ -947,21 +995,29 @@ final class DownloadManager {
     /// (`ActiveDownload`, `.pending` / `.downloading`). A stray `.failed` episode
     /// has no file and no row, so there is nothing to remove for it.
     @discardableResult
-    func clearAllDownloads() async -> Int {
-        guard let context else { return 0 }
-
-        var affected: [Episode] = await episodesWithDownloadPath(in: context)
+    func clearAllDownloads() async -> DownloadBulkResult {
+        guard let context, save() else { return .failed }
+        let downloaded: [Episode]
+        let pending: [Episode]
+        let downloading: [Episode]
+        do {
+            downloaded = try await bulkEpisodesWithDownloadPath(in: context)
+            pending = try await bulkActiveEpisodes(state: .pending, in: context)
+            downloading = try await bulkActiveEpisodes(state: .downloading, in: context)
+        } catch {
+            let failure = error as NSError
+            AppLog.networking.error("Clear downloads fetch failed: \(failure.domain, privacy: .public) \(failure.code)")
+            return .failed
+        }
+        var affected = downloaded
         var seen = Set(affected.map(\.persistentModelID))
-        var hasInFlight = false
-        for state in [ActiveDownloadState.pending, .downloading] {
-            for episode in await activeEpisodes(state: state, in: context) {
-                hasInFlight = true
-                if seen.insert(episode.persistentModelID).inserted {
-                    affected.append(episode)
-                }
+        for episode in pending + downloading {
+            if seen.insert(episode.persistentModelID).inserted {
+                affected.append(episode)
             }
         }
-        guard !affected.isEmpty else { return 0 }
+        let hasInFlight = !pending.isEmpty || !downloading.isEmpty
+        guard !affected.isEmpty else { return .completed(0) }
 
         let snapshots = Dictionary(uniqueKeysWithValues: affected.map { episode in
             (episode.persistentModelID, (episode.downloadPath, AttemptOwner(
@@ -984,22 +1040,37 @@ final class DownloadManager {
             return episode.downloadAttemptID == snapshot.1.attemptID
         }
         let removedOwners = Set(eligible.compactMap { LocalStateStore.key(for: $0) })
-        let retainedFiles = try? DownloadPaths.referencedFileNames(excluding: removedOwners, in: context)
+        let retainedFiles: Set<String>
+        do {
+            retainedFiles = try DownloadPaths.referencedFileNames(excluding: removedOwners, in: context)
+        } catch {
+            let failure = error as NSError
+            AppLog.networking.error("Clear downloads ownership fetch failed: \(failure.domain, privacy: .public) \(failure.code)")
+            return .failed
+        }
+        var fileRemovalFailed = false
         for episode in eligible {
             guard let snapshot = snapshots[episode.persistentModelID] else { continue }
             let owner = snapshot.1
             Self.resolveWaiters(for: owner.identityKey, attemptID: owner.attemptID, success: false)
-            if let retainedFiles, let name = DownloadPaths.storedFileName(snapshot.0),
+            if let name = DownloadPaths.storedFileName(snapshot.0),
                !retainedFiles.contains(name) {
-                try? DownloadPaths.removeFile(named: name)
+                do {
+                    try DownloadPaths.removeFile(named: name)
+                } catch {
+                    fileRemovalFailed = true
+                    let failure = error as NSError
+                    AppLog.networking.error("Clear downloads file removal failed: \(failure.domain, privacy: .public) \(failure.code)")
+                }
             }
             episode.downloadPath = nil
             episode.downloadAttemptID = nil
             ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
         }
-        save()
+        let persisted = save()
+        guard persisted, !fileRemovalFailed else { return .failed }
         AppLog.networking.info("Cleared \(eligible.count) download(s)")
-        return eligible.count
+        return .completed(eligible.count)
     }
 
     /// Cancels every task on the shared background session. Used by
@@ -1154,6 +1225,12 @@ final class DownloadManager {
             }
         }.value
         let matches = (try? LocalStateStore.episodes(matching: keys, in: context)) ?? [:]
+        return keys.compactMap { matches[$0] }
+    }
+
+    private func bulkEpisodesWithDownloadPath(in context: ModelContext) async throws -> [Episode] {
+        let keys = try await loadBulkKeys(.withPath, context.container)
+        let matches = try LocalStateStore.episodes(matching: keys, in: context)
         return keys.compactMap { matches[$0] }
     }
 

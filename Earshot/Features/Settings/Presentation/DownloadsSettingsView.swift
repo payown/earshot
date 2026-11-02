@@ -372,27 +372,37 @@ struct DownloadsSettingsView: View {
     private func cancelActiveDownloads() {
         isCancelling = true
         Task {
-            let cancelled = await downloads.cancelActiveDownloads()
+            let result = await downloads.cancelActiveDownloads()
             invalidateStorageSnapshot()
             await refreshStorageCounts(revision: storageRefreshID)
             isCancelling = false
-            Announcer.announce(
-                cancelled == 1
-                    ? "Cancelled 1 active download. Completed downloads were kept."
-                    : "Cancelled \(cancelled) active downloads. Completed downloads were kept."
-            )
+            switch result {
+            case .completed(let cancelled):
+                Announcer.announce(
+                    cancelled == 1
+                        ? "Cancelled 1 active download. Completed downloads were kept."
+                        : "Cancelled \(cancelled) active downloads. Completed downloads were kept."
+                )
+            case .failed:
+                Announcer.announce("Could not finish cancelling active downloads. Some downloads may have changed. Please check Downloads and try again.")
+            }
         }
     }
 
     private func clearAllDownloads() {
         isClearing = true
         Task {
-            let removed = await downloads.clearAllDownloads()
+            let result = await downloads.clearAllDownloads()
             invalidateStorageSnapshot()
             forcedSizeRefreshID += 1
             await refreshStorageCounts(revision: storageRefreshID)
             isClearing = false
-            Announcer.announce(removed == 1 ? "Cleared 1 download" : "Cleared \(removed) downloads")
+            switch result {
+            case .completed(let removed):
+                Announcer.announce(removed == 1 ? "Cleared 1 download" : "Cleared \(removed) downloads")
+            case .failed:
+                Announcer.announce("Could not finish clearing downloads. Some downloads may have changed. Please check Downloads and try again.")
+            }
         }
     }
 
