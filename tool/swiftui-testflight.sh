@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy Earshot SwiftUI to TestFlight.
-# Usage: swiftui-testflight.sh [--notes "What to test"] [--public] [--both] [--test]
+# Usage: swiftui-testflight.sh [--notes "What to test"] [--public] [--both] [--test] [--no-bump]
 #
 #   (no flag)   Upload to Internal Testing Group only
 #   --public    Upload to Public Testers only
@@ -10,6 +10,10 @@
 #               merging it to main. Bumps + commits the build number on THAT
 #               branch, so use a throwaway/integration branch, and when you
 #               later merge it to main the build-number bump comes along.
+#   --no-bump   Use the build number already committed to project.yml. This is
+#               for releases where the number was prepared through a PR because
+#               main is protected and the release script cannot push its bump.
+#               Only allowed from main.
 #
 # Release builds run from `main`. Pre-merge test builds run from any branch
 # with --test.
@@ -37,6 +41,7 @@ GROUP="Internal Testing Group"
 SUBMIT_FOR_REVIEW=false
 NOTES=""
 TEST_BUILD=false
+NO_BUMP=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --public)   GROUP="Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
     --both)     GROUP="Internal Testing Group,Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
     --test)     TEST_BUILD=true; shift ;;
+    --no-bump)  NO_BUMP=true; shift ;;
     --resume)   RESUME=true; shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
@@ -83,6 +89,11 @@ else
   exit 1
 fi
 
+if [[ "$NO_BUMP" == true && "$BRANCH" != "main" ]]; then
+  echo "❌ --no-bump is only allowed on main."
+  exit 1
+fi
+
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "❌ Uncommitted changes. Commit or stash before deploying."
   exit 1
@@ -101,14 +112,19 @@ fi
 # ── Bump build number ─────────────────────────────────────────────────────────
 CURRENT_BUILD=$(grep 'CURRENT_PROJECT_VERSION' "$PROJECT_YML" \
   | head -1 | sed 's/.*CURRENT_PROJECT_VERSION: "//' | tr -d '"')
-NEXT_BUILD=$((CURRENT_BUILD + 1))
+if [[ "$NO_BUMP" == true ]]; then
+  NEXT_BUILD="$CURRENT_BUILD"
+  echo "▶ Using prepared build number: $NEXT_BUILD"
+else
+  NEXT_BUILD=$((CURRENT_BUILD + 1))
 
-sed -i '' "s/CURRENT_PROJECT_VERSION: \"$CURRENT_BUILD\"/CURRENT_PROJECT_VERSION: \"$NEXT_BUILD\"/" \
-  "$PROJECT_YML"
+  sed -i '' "s/CURRENT_PROJECT_VERSION: \"$CURRENT_BUILD\"/CURRENT_PROJECT_VERSION: \"$NEXT_BUILD\"/" \
+    "$PROJECT_YML"
 
-git add "$PROJECT_YML"
-git commit -m "chore: bump build number to $NEXT_BUILD for TestFlight"
-git push origin "$BRANCH"
+  git add "$PROJECT_YML"
+  git commit -m "chore: bump build number to $NEXT_BUILD for TestFlight"
+  git push origin "$BRANCH"
+fi
 
 echo "▶ Build number: $NEXT_BUILD"
 

@@ -87,9 +87,9 @@ final class StoreMigrationFloorTests: XCTestCase {
 
         let load = ModelContainerFactory.load(at: storeURL)
         guard case .ready(let migrated) = load else {
-            return XCTFail("the production V5 floor must migrate to V13")
+            return XCTFail("the production V5 floor must migrate to V14")
         }
-        XCTAssertEqual(try storedMajorVersion(), 13)
+        XCTAssertEqual(try storedMajorVersion(), 14)
         var episode = FetchDescriptor<Episode>(
             predicate: #Predicate { $0.guid == "v5-production-episode" }
         )
@@ -146,7 +146,7 @@ final class StoreMigrationFloorTests: XCTestCase {
 
         StoreMigration.injectedFailurePoint = nil
         let resumed = try StoreMigration.openOrMigrate(at: storeURL)
-        XCTAssertEqual(try storedMajorVersion(), 13)
+        XCTAssertEqual(try storedMajorVersion(), 14)
         var descriptor = FetchDescriptor<Episode>(
             predicate: #Predicate { $0.guid == "resume-v5" }
         )
@@ -190,9 +190,14 @@ final class StoreMigrationFloorTests: XCTestCase {
             return XCTFail("a pre-V5 store must return recovery without a container")
         }
         XCTAssertTrue(recovery.isUnsupportedSchema)
-        XCTAssertNotNil(
+        let backup = try XCTUnwrap(
             recovery.recoveryBackup,
             "unsupported recovery must carry its verified snapshot into the first screen"
+        )
+        XCTAssertFalse(MigrationBackupManager.isRestorableByCurrentBuild(backup))
+        XCTAssertNoThrow(
+            try MigrationBackupManager.validateForDestructiveRecovery(backup, at: storeURL),
+            "a verified old-schema snapshot can protect an explicit erase"
         )
         XCTAssertEqual(try storedMajorVersion(), majorVersion)
         XCTAssertEqual(

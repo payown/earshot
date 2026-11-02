@@ -38,13 +38,15 @@ final class Episode {
     /// rewrites them. Never do I/O with this value directly; resolve it via
     /// `Episode.localAudioURL` (Downloads data layer).
     @Transient private var transientDownloadPath: String?
+    @Transient private var transientDownloadAttemptID: String?
 
     var downloadStatus: DownloadStatus {
         get { LocalRuntimeState.shared.episode(persistentModelID)?.0 ?? transientDownloadStatus }
         set {
             transientDownloadStatus = newValue
             LocalRuntimeState.shared.setEpisode(
-                persistentModelID, status: newValue, path: downloadPath
+                persistentModelID, status: newValue, path: downloadPath,
+                downloadAttemptID: downloadAttemptID
             )
         }
     }
@@ -54,7 +56,21 @@ final class Episode {
         set {
             transientDownloadPath = newValue
             LocalRuntimeState.shared.setEpisode(
-                persistentModelID, status: downloadStatus, path: newValue
+                persistentModelID, status: downloadStatus, path: newValue,
+                downloadAttemptID: downloadAttemptID
+            )
+        }
+    }
+
+    var downloadAttemptID: String? {
+        get {
+            LocalRuntimeState.shared.episode(persistentModelID)?.2 ?? transientDownloadAttemptID
+        }
+        set {
+            transientDownloadAttemptID = newValue
+            LocalRuntimeState.shared.setEpisode(
+                persistentModelID, status: downloadStatus, path: downloadPath,
+                downloadAttemptID: newValue
             )
         }
     }

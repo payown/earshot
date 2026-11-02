@@ -3,13 +3,13 @@ import SwiftData
 import CryptoKit
 @testable import Earshot
 
-/// Guards the V13 live graph against an unversioned model edit (#425) and audits
+/// Guards the V14 live graph against an unversioned model edit (#425) and audits
 /// the exact compatibility rules required before the mirrored configuration may
 /// be switched from `.none` to CloudKit in a later phase.
 @MainActor
 final class SchemaDriftTests: XCTestCase {
 
-    /// The live model graph, kept in lockstep with the current V13 model lists.
+    /// The live model graph, kept in lockstep with the current V14 model lists.
     private static let liveModels: [any PersistentModel.Type] = [
         Podcast.self,
         Episode.self,
@@ -88,12 +88,24 @@ final class SchemaDriftTests: XCTestCase {
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 
-    func testLiveAttributesMatchV13AndShippedV12AndV11RemainFrozen() {
+    func testLiveAttributesMatchV14AndShippedV13V12AndV11RemainFrozen() {
         let shippedV12 = attributeMap(Schema(versionedSchema: EarshotSchemaV12.self))
+        let shippedV13 = attributeMap(Schema(versionedSchema: EarshotSchemaV13.self))
+        let currentV14 = attributeMap(Schema(versionedSchema: EarshotSchemaV14.self))
         let currentV13 = attributeMap(Schema(versionedSchema: EarshotSchemaV13.self))
         let frozenV11 = attributeMap(Schema(versionedSchema: EarshotSchemaV11.self))
         let live = attributeMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, currentV13)
+        XCTAssertEqual(
+            shippedV12.filter { $0.key.hasPrefix("Local") },
+            frozenV11.filter { $0.key.hasPrefix("Local") },
+            "V12 must preserve the V11 local store shape"
+        )
+        XCTAssertEqual(live, currentV14)
+        XCTAssertNil(shippedV13["LocalEpisodeState.downloadAttemptID"])
+        XCTAssertEqual(currentV14["LocalEpisodeState.downloadAttemptID"], "true|Optional<String>")
+        var v14WithoutAttemptID = currentV14
+        v14WithoutAttemptID.removeValue(forKey: "LocalEpisodeState.downloadAttemptID")
+        XCTAssertEqual(v14WithoutAttemptID, shippedV13)
         XCTAssertNil(shippedV12["PersonalAudioItem.id"])
         XCTAssertEqual(currentV13["PersonalAudioItem.id"], "false|String")
         XCTAssertNil(frozenV11["Podcast.subscriptionStateRaw"])
@@ -146,23 +158,27 @@ final class SchemaDriftTests: XCTestCase {
         )
     }
 
-    /// V13 adds only a local entity; mirrored relationships remain unchanged.
-    func testLiveRelationshipsMatchV13AndV12() {
+    /// V13 adds Personal Audio; V14 changes only a local optional attribute.
+    func testLiveRelationshipsMatchV14AndV13() {
         let frozenV11 = relationshipMap(Schema(versionedSchema: EarshotSchemaV11.self))
         let shippedV12 = relationshipMap(Schema(versionedSchema: EarshotSchemaV12.self))
         let currentV13 = relationshipMap(Schema(versionedSchema: EarshotSchemaV13.self))
+        let currentV14 = relationshipMap(Schema(versionedSchema: EarshotSchemaV14.self))
         let live = relationshipMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, currentV13)
+        XCTAssertEqual(live, currentV14)
+        XCTAssertEqual(currentV14, currentV13)
         XCTAssertEqual(shippedV12, frozenV11)
         var v13WithoutPersonalAudio = currentV13
         v13WithoutPersonalAudio.removeValue(forKey: "PersonalAudioItem")
         XCTAssertEqual(v13WithoutPersonalAudio, shippedV12)
     }
 
-    /// Guards the lockstep assumption between the live list and V13.
-    func testLiveListMatchesV13ModelsList() {
+    /// Guards the lockstep assumption between the live list and V14.
+    func testLiveListMatchesV14ModelsList() {
+        let v14Names = Set(Schema(versionedSchema: EarshotSchemaV14.self).entities.map(\.name))
         let v13Names = Set(Schema(versionedSchema: EarshotSchemaV13.self).entities.map(\.name))
         let liveNames = Set(Schema(Self.liveModels).entities.map(\.name))
+        XCTAssertEqual(v14Names, liveNames)
         XCTAssertEqual(v13Names, liveNames)
     }
 

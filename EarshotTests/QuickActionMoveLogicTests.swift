@@ -14,6 +14,27 @@ final class QuickActionMoveLogicTests: XCTestCase {
                        ["Move to top", "Move up", "Move down", "Move to bottom"])
     }
 
+    func testHorizontalRowUsesVisibleLeftAndRightDirections() {
+        let targets = QuickActionMoveLogic.targets(index: 2, count: 5, direction: .horizontal)
+        XCTAssertEqual(targets.map(\.label), [
+            "Move to far left", "Move left", "Move right", "Move to far right"
+        ])
+        XCTAssertEqual(targets.map(\.announcementDirection), [
+            "to the far left", "left", "right", "to the far right"
+        ])
+    }
+
+    func testHorizontalBoundaryActionsDescribeAvailableDirection() {
+        XCTAssertEqual(
+            QuickActionMoveLogic.targets(index: 0, count: 3, direction: .horizontal).map(\.label),
+            ["Move right", "Move to far right"]
+        )
+        XCTAssertEqual(
+            QuickActionMoveLogic.targets(index: 2, count: 3, direction: .horizontal).map(\.label),
+            ["Move to far left", "Move left"]
+        )
+    }
+
     func testFirstRowSuppressesUpwardMoves() {
         let targets = QuickActionMoveLogic.targets(index: 0, count: 5)
         XCTAssertEqual(targets.map(\.label), ["Move down", "Move to bottom"])

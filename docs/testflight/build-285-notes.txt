@@ -1,0 +1,23 @@
+Chapter 102 - Build 285
+
+What to try first:
+
+Please install this as an update over build 284; do not delete Earshot first. Confirm your podcasts, Queue, playback position, settings, downloads, Personal Audio, and Listening Places are still there.
+
+In Settings > Quick Actions, open Player transport. Add an available skip action by activating it, then try removing and reordering enabled actions. Confirm activating an available action adds it once, and VoiceOver exposes one Add action for available rows and one Remove action for enabled rows. Try configured rewind and fast-forward increments, including 30 seconds, 2 minutes, and 5 minutes. An optional increment matching your primary setting should be absent. Try removing the chapter actions or assigning previous/next chapter to either player button.
+
+Open the player. Check that optional transport buttons appear in order across the row above the playback position slider, use the same control color, and fill the available width. Activate each skip button and confirm the playhead moves by the stated amount. With VoiceOver, check button labels, swipe order, and the slider's position in navigation. If the row overflows, swipe it horizontally to reach the remaining buttons. Increase text size to an accessibility size and confirm the buttons remain fully visible and scrollable.
+
+If convenient, test a download by canceling it and immediately retrying. Confirm the new attempt continues and the canceled attempt does not remove or overwrite it. For Listening Places, use a duplicate or copy of a device file for any recovery/update check; keep your only copy of any personal recording safe. The interrupted-reset recovery path is covered by automated tests; please do not intentionally interrupt a reset on your device.
+
+If something fails, tell me the screen, exact action, VoiceOver or text-size setting, and whether playback, download, or data changed. Automated tests cover migration and recovery behavior, but they cannot replace checking your personal library on your phone.
+
+Kashe's story:
+
+Kashe wanted to jump back two minutes without opening a menu. She added the action to her player, moved it beside the other skip buttons, and tried it during a long interview. VoiceOver found it in the same row, right before the playback position.
+
+Then Renata asked for the chapter they had just passed. Kashe changed the rewind button's VoiceOver actions to include Next chapter, and kept the forward button for the jumps she used most.
+
+“Your buttons have jobs now?” Renata asked.
+
+“They have choices,” Kashe said. “I just chose their jobs.”

@@ -89,7 +89,7 @@ struct SettingsScreen: View {
                 } label: {
                     Label("Quick Actions", systemImage: "bolt")
                 }
-                .accessibilityHint("Choose and reorder the episode and queue actions")
+                .accessibilityHint("Choose and reorder episode, podcast, Queue, player skip increments, and rewind or fast-forward actions")
             }
             Section("Library and sync") {
                 NavigationLink {

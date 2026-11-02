@@ -171,7 +171,9 @@ final class CatalogEpisodeQueueRepository {
                 }
             }
             try cleanupSaveOperation(context)
-            LocalRuntimeState.shared.setEpisode(cleanup.episodeID, status: .none, path: nil)
+            LocalRuntimeState.shared.setEpisode(
+                cleanup.episodeID, status: .none, path: nil, downloadAttemptID: nil
+            )
             try? DownloadPaths.removeIfUnshared(
                 storedValue: cleanup.fileURL?.lastPathComponent,
                 excluding: [cleanup.key], in: context

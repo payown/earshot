@@ -76,6 +76,11 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe expects one clear VoiceOver action for each Quick Actions row; on a
+  transport action, she can remove it once and still use the move actions
+  (Chapter 103).
+- Kashe reorders the player's horizontal transport buttons by the direction
+  she hears them move (Chapter 104).
 - Kashe checks a name from a paused interview outside a client visit and tests
   VoiceOver after unlocking before going inside (Chapter 101).
 
@@ -3655,3 +3660,62 @@ Renata called while she was still standing there.
 “Apparently not today.”
 
 She found the name, put the phone away, and went inside. For once, the pause had taken exactly as long as she needed.
+Chapter 102 - Build 285
+
+What to try first:
+
+Please install this as an update over build 284; do not delete Earshot first. Confirm your podcasts, Queue, playback position, settings, downloads, Personal Audio, and Listening Places are still there.
+
+In Settings > Quick Actions, open Player transport. Add an available skip action by activating it, then try removing and reordering enabled actions. Confirm activating an available action adds it once, and VoiceOver exposes one Add action for available rows and one Remove action for enabled rows. Try configured rewind and fast-forward increments, including 30 seconds, 2 minutes, and 5 minutes. An optional increment matching your primary setting should be absent. Try removing the chapter actions or assigning previous/next chapter to either player button.
+
+Open the player. Check that optional transport buttons appear in order across the row above the playback position slider, use the same control color, and fill the available width. Activate each skip button and confirm the playhead moves by the stated amount. With VoiceOver, check button labels, swipe order, and the slider's position in navigation. If the row overflows, swipe it horizontally to reach the remaining buttons. Increase text size to an accessibility size and confirm the buttons remain fully visible and scrollable.
+
+If convenient, test a download by canceling it and immediately retrying. Confirm the new attempt continues and the canceled attempt does not remove or overwrite it. For Listening Places, use a duplicate or copy of a device file for any recovery/update check; keep your only copy of any personal recording safe. The interrupted-reset recovery path is covered by automated tests; please do not intentionally interrupt a reset on your device.
+
+If something fails, tell me the screen, exact action, VoiceOver or text-size setting, and whether playback, download, or data changed. Automated tests cover migration and recovery behavior, but they cannot replace checking your personal library on your phone.
+
+Kashe's story:
+
+Kashe wanted to jump back two minutes without opening a menu. She added the action to her player, moved it beside the other skip buttons, and tried it during a long interview. VoiceOver found it in the same row, right before the playback position.
+
+Then Renata asked for the chapter they had just passed. Kashe changed the rewind button's VoiceOver actions to include Next chapter, and kept the forward button for the jumps she used most.
+
+“Your buttons have jobs now?” Renata asked.
+
+“They have choices,” Kashe said. “I just chose their jobs.”
+
+---
+
+Chapter 103 - Build 295
+
+What to try first:
+
+Install this as an update over build 294; keep Earshot installed so your library and settings stay in place. In Settings > Quick Actions > Player transport, open VoiceOver Actions for an enabled action. Confirm it shows one Remove action alongside the available move actions. If Remove appears twice or the move actions are missing, tell me the action name and what VoiceOver announces.
+
+Kashe's story:
+
+Kashe was changing the skip buttons before leaving for work. She opened the actions for one of them and heard “Remove” twice. The second one made her stop and check whether she had already removed it.
+
+She went back to the row and opened the actions again. This time there was one Remove, then the choices to move the button. She picked Move up, heard where it had gone, and kept going.
+
+Renata called from the car. “Are you ready?”
+
+“The button is,” Kashe said. “Give me a second.”
+
+Chapter 104 - Build 296
+
+What to try first:
+
+Please install this as an update over build 295. In Settings > Quick Actions > Player transport, open VoiceOver Actions for an enabled button between two others. Move it left, then right. Confirm VoiceOver says the direction and its new position, and that the button moves to the matching place across the player's transport row. Try moving a button at either end and confirm only the available directions are offered. Other Quick Actions lists should still say Move up and Move down.
+
+These horizontal transport controls grew from feedback by Robin and other Earshot users. If a direction, position announcement, or resulting button order does not match, tell me which action you moved and what VoiceOver said.
+
+Kashe was setting up the player before a long drive. She wanted the two-minute skip beside Play, where her hand expected to find it. The actions offered “Move left” and “Move right.” She moved it once, heard its new position, and found it beside Play on the screen.
+
+Renata had asked why a button that moved left was called “Move up.” Kashe tried the new wording at both ends of the row, then opened the Queue actions. Those still moved up and down.
+
+“That one makes sense,” she said.
+
+“The button?” Renata asked.
+
+“Both of them.”

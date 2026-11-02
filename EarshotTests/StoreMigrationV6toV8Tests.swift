@@ -1370,8 +1370,8 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
 
         let migrated = try StoreMigration.openOrMigrate(at: storeURL)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         let rows = try migrated.mainContext.fetch(FetchDescriptor<LocalEpisodeState>())
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows.first?.podcastFeedURL, "https://v10.example/feed")
@@ -1441,8 +1441,8 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
 
         let migrated = try StoreMigration.openOrMigrate(at: storeURL)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         let podcast = try XCTUnwrap(
             try migrated.mainContext.fetch(FetchDescriptor<Podcast>()).first
         )
@@ -1493,20 +1493,23 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             container.mainContext.insert(podcast)
             container.mainContext.insert(episode)
             container.mainContext.insert(queueItem)
-            let localEpisode = LocalEpisodeState(
-                podcastFeedURL: podcast.feedURL, episodeGUID: episode.guid,
-                volumeBoost: .medium
-            )
+            let localEpisode = EarshotSchemaV12.LocalEpisodeState()
+            localEpisode.podcastFeedURL = podcast.feedURL
+            localEpisode.episodeGUID = episode.guid
+            localEpisode.volumeBoostRaw = VolumeBoostLevel.medium.rawValue
             container.mainContext.insert(localEpisode)
             for key in [StoreMigration.splitCompletionKey, StoreMigration.identityRepairCompletionKey] {
-                container.mainContext.insert(LocalAppSetting(key: key, value: "1"))
+                let marker = EarshotSchemaV12.LocalAppSetting()
+                marker.key = key
+                marker.value = "1"
+                container.mainContext.insert(marker)
             }
             try container.mainContext.save()
         }
 
         let migrated = try StoreMigration.openOrMigrate(at: storeURL)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         XCTAssertFalse(Schema(EarshotSchemaV13.mirroredModels).entities.contains {
             $0.name == "PersonalAudioItem"
         })
@@ -1517,6 +1520,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             try migrated.mainContext.fetch(FetchDescriptor<LocalEpisodeState>()).first
         )
         XCTAssertEqual(localState.volumeBoostRaw, "medium")
+        XCTAssertNil(localState.downloadAttemptID)
         XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<PersonalAudioItem>()), 0)
 
         let item = PersonalAudioItem(
@@ -1625,7 +1629,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertNotEqual(replacement.directoryURL, stale.directoryURL)
         XCTAssertEqual(replacement.sourceStoreIdentifier, stale.sourceStoreIdentifier)
         XCTAssertEqual(replacement.sourceSchemaMajor, 11)
-        XCTAssertEqual(replacement.targetSchemaMajor, 13)
+        XCTAssertEqual(replacement.targetSchemaMajor, 14)
         XCTAssertEqual(replacement.localSourceSchemaMajor, 11)
         XCTAssertNotNil(replacement.localSourceStoreIdentifier)
         XCTAssertEqual(replacement.successfulTargetOpenCount, 0)
@@ -1773,7 +1777,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             )
         }
         StoreMigration.injectedFailurePoint = nil
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(try storeMajorVersion(at: localURL), 11)
         let sourceBackup = try XCTUnwrap(
             MigrationBackupManager.latestRecordedBackup(at: storeURL)
@@ -1782,7 +1786,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(sourceBackup.localSourceSchemaMajor, 10)
 
         let resumed = try StoreMigration.openOrMigrate(at: storeURL)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         XCTAssertEqual(
             MigrationBackupManager.latestRecordedBackup(at: storeURL)?.id,
             sourceBackup.id
@@ -1813,7 +1817,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertNil(sourceBackup.localSourceSchemaMajor)
 
         let resumed = try StoreMigration.openOrMigrate(at: storeURL)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(
             MigrationBackupManager.latestRecordedBackup(at: storeURL)?.id,
             sourceBackup.id
@@ -1863,13 +1867,13 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
                     url: localURL, cloudKitDatabase: .none
                 )
             )
-            container.mainContext.insert(LocalEpisodeState(
-                podcastFeedURL: "https://v12.example/feed",
-                episodeGUID: "v12-local",
-                downloadStatus: .downloaded,
-                downloadPath: "v12-local.mp3",
-                volumeBoost: .medium
-            ))
+            let row = EarshotSchemaV12.LocalEpisodeState()
+            row.podcastFeedURL = "https://v12.example/feed"
+            row.episodeGUID = "v12-local"
+            row.downloadStatusRaw = DownloadStatus.downloaded.rawValue
+            row.downloadPath = "v12-local.mp3"
+            row.volumeBoostRaw = VolumeBoostLevel.medium.rawValue
+            container.mainContext.insert(row)
             try container.mainContext.save()
         }
         let before = try Data(contentsOf: localURL)
@@ -1897,9 +1901,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
         StoreMigration.injectedFailurePoint = nil
 
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(
-            try storeMajorVersion(at: StoreMigration.localStoreURL(for: storeURL)), 13
+            try storeMajorVersion(at: StoreMigration.localStoreURL(for: storeURL)), 14
         )
         var progress: [StoreMigrationProgress] = []
         let resumed = try StoreMigration.openOrMigrate(at: storeURL) {
@@ -2052,8 +2056,8 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
 
         XCTAssertTrue(progress.isEmpty)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         XCTAssertEqual(LocalAppSettingIdentity.value(
             for: StoreMigration.splitCompletionKey, in: resumed.mainContext
         ), "1")
@@ -2109,8 +2113,8 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
 
         XCTAssertTrue(progress.isEmpty)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         XCTAssertEqual(LocalAppSettingIdentity.value(
             for: StoreMigration.splitCompletionKey, in: resumed.mainContext
         ), "1")
@@ -2138,7 +2142,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
 
         XCTAssertTrue(progress.isEmpty)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(LocalAppSettingIdentity.value(
             for: StoreMigration.splitCompletionKey, in: resumed.mainContext
         ), "1")
@@ -2165,11 +2169,174 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
 
         XCTAssertTrue(progress.isEmpty)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         XCTAssertEqual(LocalAppSettingIdentity.value(
             for: StoreMigration.splitCompletionKey, in: resumed.mainContext
         ), "1")
         try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testInterruptedFreshV13WithOnlyMirroredFileResumesAndSaves() throws {
+        let schema = Schema(versionedSchema: EarshotMirroredSchemaV13.self)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(
+                    "FutureMirrored", schema: schema, url: storeURL,
+                    cloudKitDatabase: .none
+                )
+            )
+        }
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: localURL.path))
+
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL)
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testInterruptedFreshV13WithOnlyLocalFileResumesAndSaves() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: full,
+                configurations: ModelConfiguration(
+                    "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                    url: localURL, cloudKitDatabase: .none
+                )
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storeURL.path))
+
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL)
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testUnmarkedEmptyV13SplitStoresResumeToV14() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored",
+                        schema: Schema(versionedSchema: EarshotMirroredSchemaV13.self),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+        }
+
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL)
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testInterruptedUnmarkedV13FinalizationResumesMixedV14V13Pair() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored",
+                        schema: Schema(versionedSchema: EarshotMirroredSchemaV13.self),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+        }
+        StoreMigration.injectedFailurePoint = .afterFreshV9MirroredFinalization
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL)) { error in
+            XCTAssertEqual(
+                error as? StoreMigration.InjectedMigrationFailure,
+                .init(point: .afterFreshV9MirroredFinalization)
+            )
+        }
+        StoreMigration.injectedFailurePoint = nil
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL)
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testPopulatedUnmarkedV13SplitStoresFailClosedAndPreserveData() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV13.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            let container = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored",
+                        schema: Schema(versionedSchema: EarshotMirroredSchemaV13.self),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+            container.mainContext.insert(Podcast(
+                feedURL: "https://preserve-v13.example/feed", title: "Preserve V13"
+            ))
+            try container.mainContext.save()
+        }
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL)) { error in
+            guard case StoreOpenError.unreadable = error else {
+                return XCTFail("expected fail-closed recovery, got \(error)")
+            }
+        }
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        let preserved = try ModelContainer(
+            for: full,
+            configurations:
+                ModelConfiguration(
+                    "FutureMirrored",
+                    schema: Schema(versionedSchema: EarshotMirroredSchemaV13.self),
+                    url: storeURL, cloudKitDatabase: .none
+                ),
+                ModelConfiguration(
+                    "DeviceLocal", schema: Schema(EarshotSchemaV13.localModels),
+                    url: localURL, cloudKitDatabase: .none
+                )
+        )
+        let podcasts = try preserved.mainContext.fetch(FetchDescriptor<Podcast>())
+        XCTAssertEqual(podcasts.map(\.title), ["Preserve V13"])
     }
 
     func testOrphanedStoreSidecarNeverEntersMigrationPreparation() throws {
@@ -2220,8 +2387,8 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
 
         XCTAssertTrue(progress.isEmpty, "an interrupted fresh V9 store is not a migration")
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         XCTAssertEqual(LocalAppSettingIdentity.value(
             for: StoreMigration.splitCompletionKey, in: resumed.mainContext
         ), "1")
@@ -2231,7 +2398,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try assertSettingSaveSurvivesReopen(resumed)
     }
 
-    func testInterruptedFreshV9FinalizationResumesMixedV10V9PairAndSaves() throws {
+    func testInterruptedFreshV9FinalizationResumesMixedV14V9PairAndSaves() throws {
         let schema = Schema(versionedSchema: EarshotSchemaV9.self)
         let localURL = StoreMigration.localStoreURL(for: storeURL)
         try autoreleasepool {
@@ -2256,7 +2423,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             )
         }
         StoreMigration.injectedFailurePoint = nil
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(try storeMajorVersion(at: localURL), 9)
 
         var progress: [StoreMigrationProgress] = []
@@ -2265,8 +2432,8 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
 
         XCTAssertTrue(progress.isEmpty)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         XCTAssertEqual(LocalAppSettingIdentity.value(
             for: StoreMigration.splitCompletionKey, in: resumed.mainContext
         ), "1")
@@ -2279,7 +2446,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
 
         let migrated = try StoreMigration.openOrMigrate(at: storeURL)
         let context = migrated.mainContext
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 1)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 1)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalPodcastState>()), 1)
@@ -2333,7 +2500,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         )
 
         let migrated = try StoreMigration.openOrMigrate(at: storeURL)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(
             try sqliteScalar(
                 at: storeURL,
@@ -2426,7 +2593,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
                 .filter { $0.downloadPath != nil }.count,
             30
         )
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
         XCTAssertEqual(
             try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"]
@@ -2587,7 +2754,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             + context.fetch(FetchDescriptor<LocalAppSetting>())
                 .filter { !internalKeys.contains($0.key) }.count
         XCTAssertEqual(settingCount, 16)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
         XCTAssertEqual(try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"])
         assertRealStatePreserved(try realV10StateSnapshot(), sourceState)
@@ -2700,7 +2867,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             let row = try XCTUnwrap(rows.first { $0.episodeGUID == identity.guid })
             XCTAssertEqual(row.downloadStatus, identity.status)
         }
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(
             try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"]
         )
@@ -2732,7 +2899,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         StoreMigration.injectedFailurePoint = nil
         let backup = try XCTUnwrap(MigrationBackupManager.latestRestorableBackup(at: storeURL))
         XCTAssertEqual(backup.sourceSchemaMajor, 6)
-        XCTAssertEqual(backup.targetSchemaMajor, 13)
+        XCTAssertEqual(backup.targetSchemaMajor, 14)
 
         try MigrationBackupManager.restore(backup, at: storeURL)
         XCTAssertEqual(try storeMajorVersion(at: storeURL), 6)
@@ -2889,7 +3056,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             }.sorted()
         )
         XCTAssertEqual(destination, source)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertNil(LocalAppSettingIdentity.value(
             for: StoreMigration.bridgeCompletionKey, in: context
         ))
@@ -2943,8 +3110,8 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         let migrated = try XCTUnwrap(migrationResult).get()
         let afterBytes = try storeSetSize()
 
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
-        XCTAssertEqual(try storeMajorVersion(at: localURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 14)
         XCTAssertEqual(
             try migrated.mainContext.fetchCount(FetchDescriptor<Episode>()), 242_169
         )
@@ -3078,7 +3245,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             ),
             "1"
         )
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 13)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 14)
         XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
         XCTAssertEqual(
             try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"]

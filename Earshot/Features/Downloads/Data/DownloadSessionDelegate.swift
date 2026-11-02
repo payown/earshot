@@ -68,6 +68,10 @@ final class DownloadEventJournal: @unchecked Sendable {
     private let url: URL
     private let lock = NSLock()
     private var events: [PendingDownloadTerminalEvent]
+    /// Events held only in this process because the last journal write failed.
+    /// They must not be replayed or treated as a complete journal until a later
+    /// write succeeds; otherwise a process exit can lose the terminal callback.
+    private var unpersistedEventIDs: Set<UUID>
     private var needsLoad: Bool
     private let read: @Sendable (URL) throws -> Data
     private let write: @Sendable (URL, Data?) throws -> Void
@@ -79,6 +83,7 @@ final class DownloadEventJournal: @unchecked Sendable {
         self.read = read
         self.write = write
         events = []
+        unpersistedEventIDs = []
         needsLoad = true
         do {
             try loadIfNeededLocked()
@@ -99,6 +104,7 @@ final class DownloadEventJournal: @unchecked Sendable {
         // Always retain the callback in memory, even if reading or writing the
         // journal fails. Do not replace an unreadable or newer-format journal.
         events.append(event)
+        unpersistedEventIDs.insert(event.id)
         persistLocked()
         return event
     }
@@ -119,6 +125,10 @@ final class DownloadEventJournal: @unchecked Sendable {
         defer { lock.unlock() }
         do {
             try loadIfNeededLocked()
+            if !unpersistedEventIDs.isEmpty {
+                try persistLockedThrowing()
+                unpersistedEventIDs.removeAll()
+            }
             return events
         } catch {
             return nil
@@ -131,13 +141,20 @@ final class DownloadEventJournal: @unchecked Sendable {
         defer { lock.unlock() }
         do {
             try loadIfNeededLocked()
+            // A store update must never make an event disappear from the only
+            // copy that exists in memory. Wait until a retry has durably written
+            // it, then replay and acknowledge it through the normal path.
+            guard !unpersistedEventIDs.contains(id) else { return false }
             let retained = events
+            let retainedUnpersistedIDs = unpersistedEventIDs
             events.removeAll { $0.id == id }
             do {
                 try persistLockedThrowing()
+                unpersistedEventIDs.removeAll()
                 return true
             } catch {
                 events = retained
+                unpersistedEventIDs = retainedUnpersistedIDs
                 throw error
             }
         } catch {
@@ -160,12 +177,22 @@ final class DownloadEventJournal: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         try loadIfNeededLocked()
+        // Make any in-memory-only delivery durable before recovery is allowed
+        // to clear the journal. If storage still refuses writes, throw with the
+        // original events untouched.
+        if !unpersistedEventIDs.isEmpty {
+            try persistLockedThrowing()
+            unpersistedEventIDs.removeAll()
+        }
         let retained = events
+        let retainedUnpersistedIDs = unpersistedEventIDs
         events.removeAll()
         do {
             try persistLockedThrowing()
+            unpersistedEventIDs.removeAll()
         } catch {
             events = retained
+            unpersistedEventIDs = retainedUnpersistedIDs
             throw error
         }
     }
@@ -173,11 +200,36 @@ final class DownloadEventJournal: @unchecked Sendable {
     private func persistLocked() {
         do {
             try persistLockedThrowing()
+            unpersistedEventIDs.removeAll()
         } catch {
             AppLog.networking.error(
                 "Could not persist pending download event: \(NetworkDiagnostic.reason(error), privacy: .public)"
             )
         }
+    }
+
+    /// Retries persistence before replay. A `nil` result means the journal is
+    /// still unreadable or storage still refuses writes; callers must leave the
+    /// event and its downloaded file untouched and try again later.
+    func eventsForReplayIfDurable() -> [PendingDownloadTerminalEvent]? {
+        lock.lock()
+        defer { lock.unlock() }
+        do {
+            try loadIfNeededLocked()
+            if !unpersistedEventIDs.isEmpty {
+                try persistLockedThrowing()
+                unpersistedEventIDs.removeAll()
+            }
+            return events
+        } catch {
+            return nil
+        }
+    }
+
+    func isPersisted(_ id: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return events.contains { $0.id == id } && !unpersistedEventIDs.contains(id)
     }
 
     private func persistLockedThrowing() throws {
@@ -307,17 +359,7 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         let task = Task.detached { [weak self] in
             guard let self else { return }
             defer { self.finishReplay(generation: generation, id: id) }
-            if let events = self.journal.pendingEventsIfReadable() {
-                await self.deliverReplay(events, generation: generation)
-                self.notifyReadable(generation: generation)
-                return
-            }
-            // Deliver newly arrived in-memory events even if older bytes are
-            // unreadable; never modify the unreadable journal during this scan.
-            await self.deliverReplay(self.journal.pendingEvents(), generation: generation)
-            // The preceding read may have succeeded after the initial try-lock
-            // failed, or while replaying a newly arrived event.
-            if let events = self.journal.pendingEventsIfReadable() {
+            if let events = self.journal.eventsForReplayIfDurable() {
                 await self.deliverReplay(events, generation: generation)
                 self.notifyReadable(generation: generation)
                 return
@@ -325,7 +367,7 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
             for delay in self.retryDelays {
                 do { try await self.retrySleep(delay) } catch { return }
                 guard !Task.isCancelled, self.isCurrentNormalHandler(generation) else { return }
-                if let events = self.journal.pendingEventsIfReadable() {
+                if let events = self.journal.eventsForReplayIfDurable() {
                     await self.deliverReplay(events, generation: generation)
                     self.notifyReadable(generation: generation)
                     return
@@ -439,8 +481,11 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     }
 
     /// Installs the process-level background-session completion callback. It is
-    /// independent of store readiness. Journal writes can fail, in which case
-    /// events remain only in memory and may be lost if the process exits.
+    /// independent of store readiness. If journal storage refuses writes, the
+    /// delegate retains the event and downloaded file in-process, retries, and
+    /// does not hand the event to the store handler until it is durable. No app
+    /// can guarantee survival of process death while the storage layer refuses
+    /// all writes; the download file is preserved for filesystem reconciliation.
     func installEventsFinishedHandler(
         _ handler: @escaping @Sendable () -> Void
     ) {
@@ -462,6 +507,13 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         taskKey: String, outcome: PendingDownloadTerminalEvent.Outcome
     ) {
         let event = journal.record(taskKey: taskKey, outcome: outcome)
+        guard journal.isPersisted(event.id) else {
+            AppLog.networking.error(
+                "Pending download event is waiting for durable journal storage; downloaded audio was retained"
+            )
+            retryPendingEvents()
+            return
+        }
         handlerLock.lock()
         let generation = handlerGeneration
         handlerLock.unlock()

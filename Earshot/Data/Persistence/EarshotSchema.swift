@@ -2101,6 +2101,32 @@ enum EarshotSchemaV12: VersionedSchema {
     static let localModels: [any PersistentModel.Type] = [
         LocalPodcastState.self, LocalEpisodeState.self, LocalAppSetting.self,
     ]
+
+    // Frozen local-store shapes. V12 was the last schema before Personal Audio;
+    // its local models must not follow the live runtime model as it evolves.
+    @Model
+    final class LocalPodcastState {
+        var feedURL: String = ""
+        var refreshedAt: Date?
+        init() {}
+    }
+
+    @Model
+    final class LocalEpisodeState {
+        var podcastFeedURL: String = ""
+        var episodeGUID: String = ""
+        var downloadStatusRaw: String = DownloadStatus.none.rawValue
+        var downloadPath: String?
+        var volumeBoostRaw: String?
+        init() {}
+    }
+
+    @Model
+    final class LocalAppSetting {
+        var key: String = ""
+        var value: String = ""
+        init() {}
+    }
 }
 
 enum EarshotMirroredSchemaV12: VersionedSchema {
@@ -2108,20 +2134,82 @@ enum EarshotMirroredSchemaV12: VersionedSchema {
     static var models: [any PersistentModel.Type] { EarshotSchemaV12.mirroredModels }
 }
 
-/// V13 adds device-local Personal Audio records. The mirrored model graph is
-/// unchanged; imported identities and media must never enter Earshot CloudKit.
+/// Frozen V13 schema. The local models are nested snapshots so V13 remains an
+/// exact source schema after the live LocalEpisodeState grows in V14.
 enum EarshotSchemaV13: VersionedSchema {
     static let versionIdentifier = Schema.Version(13, 0, 0)
     static var models: [any PersistentModel.Type] { mirroredModels + localModels }
 
     static let mirroredModels = EarshotSchemaV12.mirroredModels
-    static let localModels: [any PersistentModel.Type] =
-        EarshotSchemaV12.localModels + [PersonalAudioItem.self]
+    static let localModels: [any PersistentModel.Type] = [
+        LocalPodcastState.self, LocalEpisodeState.self, LocalAppSetting.self,
+        PersonalAudioItem.self,
+    ]
+
+    @Model final class LocalPodcastState {
+        var feedURL: String = ""
+        var refreshedAt: Date?
+        init() {}
+    }
+
+    @Model final class LocalEpisodeState {
+        var podcastFeedURL: String = ""
+        var episodeGUID: String = ""
+        var downloadStatusRaw: String = DownloadStatus.none.rawValue
+        var downloadPath: String?
+        var volumeBoostRaw: String?
+        init() {}
+    }
+
+    @Model final class LocalAppSetting {
+        var key: String = ""
+        var value: String = ""
+        init() {}
+    }
+
+    @Model final class PersonalAudioItem {
+        var id: String = UUID().uuidString
+        var title: String = ""
+        var artist: String?
+        var album: String?
+        var originalFilename: String = ""
+        var mediaFilename: String = ""
+        var artworkFilename: String?
+        var typeIdentifier: String = ""
+        var durationSeconds: Double?
+        var byteSize: Int64 = 0
+        var importedAt: Date = Date.distantPast
+        var positionSeconds: Double = 0
+        var isPlayed: Bool = false
+        var playedAt: Date?
+        var contentHash: String = ""
+        var hasEmbeddedChapters: Bool = false
+        init() {}
+    }
 }
 
 enum EarshotMirroredSchemaV13: VersionedSchema {
     static let versionIdentifier = Schema.Version(13, 0, 0)
     static var models: [any PersistentModel.Type] { EarshotSchemaV13.mirroredModels }
+}
+
+/// V14 adds a durable download-attempt owner to the device-local episode row.
+/// The mirrored CloudKit graph is unchanged; both stores advance their version
+/// so the split-store preflight can treat V14 as one settled generation.
+enum EarshotSchemaV14: VersionedSchema {
+    static let versionIdentifier = Schema.Version(14, 0, 0)
+    static var models: [any PersistentModel.Type] { mirroredModels + localModels }
+
+    static let mirroredModels = EarshotSchemaV13.mirroredModels
+    static let localModels: [any PersistentModel.Type] = [
+        LocalPodcastState.self, LocalEpisodeState.self, LocalAppSetting.self,
+        PersonalAudioItem.self,
+    ]
+}
+
+enum EarshotMirroredSchemaV14: VersionedSchema {
+    static let versionIdentifier = Schema.Version(14, 0, 0)
+    static var models: [any PersistentModel.Type] { EarshotSchemaV14.mirroredModels }
 }
 
 enum EarshotV12ToV13MigrationPlan: SchemaMigrationPlan {
@@ -2131,6 +2219,16 @@ enum EarshotV12ToV13MigrationPlan: SchemaMigrationPlan {
 
     static var stages: [MigrationStage] {
         [.lightweight(fromVersion: EarshotSchemaV12.self, toVersion: EarshotSchemaV13.self)]
+    }
+}
+
+enum EarshotV13ToV14MigrationPlan: SchemaMigrationPlan {
+    static var schemas: [any VersionedSchema.Type] {
+        [EarshotSchemaV13.self, EarshotSchemaV14.self]
+    }
+
+    static var stages: [MigrationStage] {
+        [.lightweight(fromVersion: EarshotSchemaV13.self, toVersion: EarshotSchemaV14.self)]
     }
 }
 

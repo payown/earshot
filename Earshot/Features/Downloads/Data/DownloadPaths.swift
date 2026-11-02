@@ -77,31 +77,47 @@ enum DownloadTransferKey {
     private struct Payload: Codable {
         let identityKey: String
         let sourceURL: String
+        let attemptID: String?
     }
 
     struct Parsed: Equatable, Sendable {
         let identityKey: String
         let sourceURL: String
+        let attemptID: String?
     }
 
-    private static let prefix = "earshot-download-v2:"
+    private static let v2Prefix = "earshot-download-v2:"
+    private static let v3Prefix = "earshot-download-v3:"
 
-    static func key(identityKey: String, sourceURL: URL) -> String {
+    static func key(identityKey: String, sourceURL: URL, attemptID: String? = nil) -> String {
         let payload = Payload(
             identityKey: identityKey,
-            sourceURL: sourceURL.absoluteString
+            sourceURL: sourceURL.absoluteString,
+            attemptID: attemptID
         )
         guard let data = try? JSONEncoder().encode(payload) else { return identityKey }
-        return prefix + data.base64EncodedString()
+        return (attemptID == nil ? v2Prefix : v3Prefix) + data.base64EncodedString()
     }
 
     static func parse(_ value: String) -> Parsed? {
-        guard value.hasPrefix(prefix),
-              let data = Data(base64Encoded: String(value.dropFirst(prefix.count))),
+        let prefix: String
+        if value.hasPrefix(v3Prefix) {
+            prefix = v3Prefix
+        } else if value.hasPrefix(v2Prefix) {
+            prefix = v2Prefix
+        } else {
+            return nil
+        }
+        guard let data = Data(base64Encoded: String(value.dropFirst(prefix.count))),
               let payload = try? JSONDecoder().decode(Payload.self, from: data),
               !payload.identityKey.isEmpty,
-              !payload.sourceURL.isEmpty else { return nil }
-        return Parsed(identityKey: payload.identityKey, sourceURL: payload.sourceURL)
+              !payload.sourceURL.isEmpty,
+              prefix != v3Prefix || !(payload.attemptID ?? "").isEmpty else { return nil }
+        return Parsed(
+            identityKey: payload.identityKey,
+            sourceURL: payload.sourceURL,
+            attemptID: payload.attemptID
+        )
     }
 
     static func identityKey(from value: String) -> String {
