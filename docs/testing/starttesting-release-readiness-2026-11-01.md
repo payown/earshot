@@ -29,13 +29,13 @@ The feature requests for generated chapters and retroactive episode filtering ha
 
 ## First session when the Mac is unlocked
 
-1. TestFlight showed Earshot **1.2.5 (297)** installed and opened it on the Mac. The in-app version field still needs separate confirmation.
+1. TestFlight showed Earshot **1.2.5 (297)** installed and opened it on the Mac. The in-app About screen also reported version **1.2.5**, build **297**.
 2. The isolated iCloud Drive folder **Earshot Listening Places Foreign File Guard Test 297** contained a synthetic foreign device file. Selecting it on build 297 reported a successful write and changed the file's SHA-256 from `d7c712c201147eb5062b89f5ee212cfbac4ba97c93e5c43263c86263cafeac96` to `2e92fa133ad0a1068d5895b4cdcff82176ed4892ef7f9fd327883e8c83f83ee0`. This is a **failed physical acceptance check**, not a pass. Recreate the disposable fixture and repeat on a later build with the identity fix; observe VoiceOver speech then.
-3. The selected folder was restored to **Earshot Listening Places iCloud Test 297** and the app showed it as selected with sharing on. Relaunch persistence after this specific restore remains to be checked.
+3. The selected folder was restored to **Earshot Listening Places iCloud Test 297** and the app showed it as selected with sharing on. After relaunch, the same selection and sharing state persisted, and status showed a later successful write. The disposable foreign-file fixture was recreated with synthetic contents for a later build; its current SHA-256 is `d13b42898e275a863a2300a5545c76f57b61e40099be5a7b6cb284fd5623b95d`.
 4. For the reported Mac problem, select a copy of the **existing iPhone-shared** Listening Places folder. Verify selection takes effect, a Mac device file is written without touching iPhone/foreign files, the status is understandable with VoiceOver, and selection persists after relaunch. Record whether this is build 297 or a later integrated candidate; do not use the listener's only copy as a destructive test.
 5. Open Send Feedback but cancel the draft. On the final build containing #1035, check the opt-in hint/footer speech and the reported device/OS fields. Record the reported macOS version beside the host version so the patch mismatch can be addressed separately.
 
-Steps 4–5 and the remaining checks in steps 1–3 are pending. A filesystem fixture or simulator pass does not count as an app result.
+Steps 4–5 and VoiceOver verification on a fixed build remain pending. A filesystem fixture or simulator pass does not count as an app result.
 
 ## Bug inventory and next action
 
