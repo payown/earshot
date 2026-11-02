@@ -54,6 +54,7 @@ final class OPMLFileImporterTests: XCTestCase {
         XCTAssertTrue(message.contains("2 podcasts could not be imported"), message)
         XCTAssertTrue(message.contains("results couldn't be confirmed"), message)
         XCTAssertTrue(message.contains("folders couldn't be saved"), message)
+        XCTAssertFalse(message.contains("^["), message)
     }
 
     func testFolderSaveFailureKeepsStagedImportForRetry() async throws {

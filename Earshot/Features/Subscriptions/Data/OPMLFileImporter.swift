@@ -104,7 +104,7 @@ enum OPMLFileImporter {
             guard await recordPending(counts, reason: .freeTierLimit, coordinator: coordinator) else {
                 return .storageFailure
             }
-            let skipped = String(localized: "^[\(outcome.skippedForCapCount) podcast](inflect: true)")
+            let skipped = podcastCountPhrase(outcome.skippedForCapCount)
             await announceSettled("\(summary) \(skipped) remain. Upgrade to Earshot Plus to continue without choosing the file again.")
             return .pending(counts, .freeTierLimit)
         }
@@ -134,9 +134,14 @@ enum OPMLFileImporter {
     }
 
     private static func resultSummary(_ counts: OPMLImportResultCounts) -> String {
-        let added = String(localized: "Added ^[\(counts.added) podcast](inflect: true).")
-        let existing = String(localized: "^[\(counts.alreadyPresent) podcast](inflect: true) already present.")
+        let added = "Added \(podcastCountPhrase(counts.added))."
+        let existing = "\(podcastCountPhrase(counts.alreadyPresent)) already present."
         return "\(added) \(existing)"
+    }
+
+    /// Announcer receives a plain String. Inflection markup is not expanded there.
+    private static func podcastCountPhrase(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "podcast" : "podcasts")"
     }
 
     /// Explain retryable failures that the count-only summary would otherwise hide.
@@ -148,7 +153,7 @@ enum OPMLFileImporter {
         let summary = resultSummary(counts)
         var problems: [String] = []
         if outcome.failedCount > 0 {
-            let failed = String(localized: "^[\(outcome.failedCount) podcast](inflect: true)")
+            let failed = podcastCountPhrase(outcome.failedCount)
             problems.append("\(failed) could not be imported.")
         }
         if outcome.unresolvedCount > 0 {
@@ -253,28 +258,19 @@ enum OPMLFileImporter {
                 progress?.advance(completed: completed, total: total, title: title)
             }
         )
-        // Resolve the inflection markup THROUGH String(localized:) before it
-        // reaches the Announcer. Everywhere else in the app this markup sits inside
-        // a SwiftUI `Text(...)`, whose argument is a LocalizedStringKey that runs
-        // Foundation's automatic-grammar-agreement engine at render time ("1
-        // podcast" / "2 podcasts"). Announcer takes a plain `String` and wraps it
-        // in `NSAttributedString(string:)`, which does NOT process the markup — so
-        // a raw interpolated literal here would make VoiceOver speak the literal
-        // "caret bracket 1 podcast ... inflect true". `String(localized:)` resolves
-        // it to the correct singular/plural spoken form first.
-        let imported = String(localized: "Imported ^[\(outcome.importedCount) podcast](inflect: true)")
+        let imported = "Imported \(podcastCountPhrase(outcome.importedCount))"
         let message: String
         if outcome.cancelled {
             message = "Import cancelled. \(imported)."
         } else if outcome.failedCount > 0 {
-            let failed = String(localized: "^[\(outcome.failedCount) podcast](inflect: true)")
+            let failed = podcastCountPhrase(outcome.failedCount)
             message = "\(imported). \(failed) could not be imported."
         } else if outcome.skippedForCapCount > 0 {
             // Free-tier cap (#635): tell the user how many were skipped and why,
             // with an upgrade mention. This announcement is the only accessible
             // surface for OPML import outcome in the app (no persistent status UI),
             // so it must carry the full message, not just the imported count.
-            let skipped = String(localized: "^[\(outcome.skippedForCapCount) podcast](inflect: true)")
+            let skipped = podcastCountPhrase(outcome.skippedForCapCount)
             message = "\(imported). \(skipped) skipped — you've reached the \(PodcastCapPolicy.freeTierLimit)-podcast limit on the free plan. Upgrade to Earshot Plus to import them all."
             onCapSkipped?()
         } else {
