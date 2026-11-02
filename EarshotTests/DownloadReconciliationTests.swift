@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import Earshot
 
@@ -7,6 +8,13 @@ import XCTest
 /// post-#576 builds write as `taskDescription`) and its bare guid (what earlier
 /// builds wrote), and counts as live when EITHER matches a live task.
 final class DownloadReconciliationTests: XCTestCase {
+
+    func testOnlyConfirmedMissingErrorAllowsCleanup() {
+        XCTAssertEqual(DownloadPathReconciliation.classifyFailedLookup(errno: ENOENT), .missing)
+        for error in [EACCES, EPERM, EIO, ENOTDIR, ELOOP] {
+            XCTAssertEqual(DownloadPathReconciliation.classifyFailedLookup(errno: error), .unknown)
+        }
+    }
 
     private func identity(_ feedURL: String, _ guid: String) -> (composite: String, bare: String) {
         (composite: "\(feedURL)|\(guid)", bare: guid)

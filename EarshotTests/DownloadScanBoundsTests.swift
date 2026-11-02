@@ -187,6 +187,7 @@ final class DownloadScanBoundsTests: XCTestCase {
     /// and skip those that do not — the bounded replacement for the whole-table
     /// fetch.
     func test_reconcileDownloadPaths_selectsEveryNonNilPathRow() async throws {
+        _ = try DownloadPaths.downloadsDirectory()
         let context = TestStore.freshContext()
 
         // Two rows WITH paths, both pointing at files that do not exist, so the
@@ -230,6 +231,7 @@ final class DownloadScanBoundsTests: XCTestCase {
     /// finished writing its path but was still tracked) loses the row when the
     /// reset drives it terminal.
     func test_reconcileDownloadPaths_resetDropsAnyActiveDownloadRow() async throws {
+        _ = try DownloadPaths.downloadsDirectory()
         let context = TestStore.freshContext()
         let episode = makeUnstartableEpisode(context, guid: "rp-tracked")
         episode.downloadPath = "earshot-test-absent-\(UUID().uuidString).mp3"
