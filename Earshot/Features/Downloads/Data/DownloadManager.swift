@@ -382,7 +382,7 @@ final class DownloadManager {
             activate(container: container)
         } catch {
             AppLog.networking.error(
-                "Downloaded-audio recovery reconciliation will retry next launch: \(error.localizedDescription, privacy: .public)"
+                "Downloaded-audio recovery reconciliation will retry next launch: \(NetworkDiagnostic.reason(error), privacy: .public)"
             )
         }
     }
@@ -929,7 +929,7 @@ final class DownloadManager {
         do {
             return try await DownloadStorageSnapshot.load(container: context.container)
         } catch {
-            AppLog.networking.error("Download storage snapshot failed: \(error.localizedDescription, privacy: .public)")
+            AppLog.networking.error("Download storage snapshot failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
             return nil
         }
     }
@@ -951,8 +951,7 @@ final class DownloadManager {
             pending = try await bulkActiveEpisodes(state: .pending, in: context)
             downloading = try await bulkActiveEpisodes(state: .downloading, in: context)
         } catch {
-            let failure = error as NSError
-            AppLog.networking.error("Cancel active downloads fetch failed: \(failure.domain, privacy: .public) \(failure.code)")
+            AppLog.networking.error("Cancel active downloads fetch failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
             return .failed
         }
         var seen = Set<PersistentIdentifier>()
@@ -1008,8 +1007,7 @@ final class DownloadManager {
             pending = try await bulkActiveEpisodes(state: .pending, in: context)
             downloading = try await bulkActiveEpisodes(state: .downloading, in: context)
         } catch {
-            let failure = error as NSError
-            AppLog.networking.error("Clear downloads fetch failed: \(failure.domain, privacy: .public) \(failure.code)")
+            AppLog.networking.error("Clear downloads fetch failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
             return .failed
         }
         var affected = downloaded
@@ -1047,8 +1045,7 @@ final class DownloadManager {
         do {
             retainedFiles = try DownloadPaths.referencedFileNames(excluding: removedOwners, in: context)
         } catch {
-            let failure = error as NSError
-            AppLog.networking.error("Clear downloads ownership fetch failed: \(failure.domain, privacy: .public) \(failure.code)")
+            AppLog.networking.error("Clear downloads ownership fetch failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
             return .failed
         }
         var fileRemovalFailed = false
@@ -1062,8 +1059,7 @@ final class DownloadManager {
                     try removeBulkFile(name)
                 } catch {
                     fileRemovalFailed = true
-                    let failure = error as NSError
-                    AppLog.networking.error("Clear downloads file removal failed: \(failure.domain, privacy: .public) \(failure.code)")
+                    AppLog.networking.error("Clear downloads file removal failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
                     // Keep this episode's path so a later clear can retry it.
                     continue
                 }
@@ -1215,7 +1211,7 @@ final class DownloadManager {
         } catch is CancellationError {
             // A later activation can retry without changing unverified rows.
         } catch {
-            AppLog.networking.error("Download path reconciliation failed: \(error.localizedDescription)")
+            AppLog.networking.error("Download path reconciliation failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
         }
     }
 
@@ -1289,7 +1285,7 @@ final class DownloadManager {
             }
             return acknowledgeAppliedEvent()
         } catch {
-            AppLog.networking.error("Download event will be retried: \(error.localizedDescription, privacy: .public)")
+            AppLog.networking.error("Download event will be retried: \(NetworkDiagnostic.reason(error), privacy: .public)")
             return false
         }
     }
@@ -1369,7 +1365,7 @@ final class DownloadManager {
                 )
             }
         }
-        AppLog.networking.info("Download finished: \(episode.title, privacy: .public)")
+        AppLog.networking.info("Download finished")
     }
 
     private static func removeFinishedFile(_ fileName: String, context: ModelContext) throws {
@@ -1418,7 +1414,7 @@ final class DownloadManager {
                                                      in: context, fetchRows: fetchLocalRows)
         try persist(context)
         resolveWaiters(for: identityKey, attemptID: attemptID, success: false)
-        AppLog.networking.error("Download failed: \(episode.title, privacy: .public)")
+        AppLog.networking.error("Download failed")
     }
 
     /// The task keys (composite `"feedURL|guid"`, or bare guids from tasks
@@ -1509,7 +1505,7 @@ final class DownloadManager {
             try operation(context)
             return true
         } catch {
-            AppLog.networking.error("Download \(action, privacy: .public) save failed: \(error.localizedDescription, privacy: .public)")
+            AppLog.networking.error("Download \(action, privacy: .public) save failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
             return false
         }
     }
