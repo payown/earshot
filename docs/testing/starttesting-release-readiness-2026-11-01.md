@@ -12,16 +12,16 @@ This is a working audit of the Earshot StartTesting project, not a claim that al
 
 ## Immediate build and integration state
 
-- Build 1.2.5 (297) is available to the accepted internal TestFlight account. It includes the merged Listening Places foreign-file guard (#1027). Folder selection passed on the physical Mac with build 297, while the source correction remains **draft PR #1035**. Final-head CI run 41391023255 passed. Verify the build's exact source revision before treating every subsequent PR change as installed; the later feedback wording commit was tested locally, not in build 297.
-- Draft PR #1036 reports bulk download clear/cancel failures and preserves a path after file removal fails. Nine selected simulator tests passed; full CI and physical VoiceOver checks are pending.
-- PR #1024 (download path reconciliation) remains open despite earlier iPhone checks on development build 293. Its prior head `5dfd39f2` passed full CI. The branch was updated onto current main as `89d8ae93`; fresh integrated-head CI and merge are required.
+- Build 1.2.5 (297) is available to the accepted internal TestFlight account. It includes the merged Listening Places byte-comparison guard (#1027), but the November 2 Mac test showed that it still overwrites a valid synthetic foreign file already at this Mac's device-file path. The isolated fixture changed hash after folder selection and the app reported a successful write. The ordinary iCloud test folder was restored. A follow-up identity check is being tested in a separate branch. The Mac folder-selection correction remains **draft PR #1035**; its final-head CI run 41391023255 passed. Verify the build's exact source revision before treating any later PR as installed.
+- Draft PR #1036 reports bulk download clear/cancel failures and preserves a path after file removal fails. Nine selected simulator tests and full CI run 41392272203 passed; physical VoiceOver checks remain.
+- PR #1024 (download path reconciliation) remains open despite earlier iPhone checks on development build 293. Its current head `89d8ae93` passed full CI run 41393016055; review and merge remain.
 - An unrelated open documentation PR #1033 needs its own review. Its presence does not establish product acceptance.
 
 ## Proposed path to the next release candidate
 
 1. **Finish data-safety integration.** Bring #1024 through fresh integrated-head CI and merge. Review #1036 after full CI, then merge if its failure reporting and partial-cleanup behavior are accepted. Do not treat either as a cure for the separately tracked cleanup-before-save risk.
-2. **Resolve Listening Places reliability.** Review and merge #1035 after its passing CI and the existing shared-folder/VoiceOver check. Complete build-297 foreign-file guard acceptance using the isolated fixture. Decide whether the offline-timestamp issue must be fixed before broadening Listening Places availability; it can overwrite newer cross-app progress, and the historical timestamps cannot be reconstructed.
-3. **Finish the smaller correctness changes.** #1038 (OPML result speech) and #1039 (chapter-sheet identity) are drafts pending CI and device checks. Keep their code and acceptance evidence separate from the Listening Places release decision.
+2. **Resolve Listening Places reliability.** The build-297 foreign-file acceptance check failed on the physical Mac. Complete the identity guard, full CI, and a repeat check on a new integrated TestFlight build before accepting #1027. Review #1035 after its passing CI and the existing shared-folder/VoiceOver check. Decide whether the offline-timestamp issue must be fixed before broadening Listening Places availability; it can overwrite newer cross-app progress, and the historical timestamps cannot be reconstructed.
+3. **Finish the smaller correctness changes.** #1038 (OPML result speech) and #1039 (chapter-sheet identity) are drafts with passing CI runs 41457594010 and 41393268579. Physical device checks remain. Keep their code and acceptance evidence separate from the Listening Places release decision.
 4. **Review remaining exposure.** The broader synthetic-token logging audit and cleanup-before-save design are unfinished. Treat both as explicit risk decisions, with links to their StartTesting items and a tested mitigation or scoped deferral before an App Store candidate is called ready.
 5. **Build one integrated candidate.** Confirm the final main commit, clean CI, version/build, changelog, installation and TestFlight access. Exercise the prioritized device checks below on that exact candidate. Earlier builds and local development builds do not substitute for final-candidate acceptance.
 
@@ -29,20 +29,20 @@ The feature requests for generated chapters and retroactive episode filtering ha
 
 ## First session when the Mac is unlocked
 
-1. Open TestFlight and verify Earshot **1.2.5 (297)** is installed. Record the version displayed by Earshot too; do not assume a TestFlight listing proves the running app was updated.
-2. With VoiceOver on, select the isolated iCloud Drive folder **Earshot Listening Places Foreign File Guard Test 297**. A synthetic unrelated device file is already staged there. Record the spoken and visible status. The app must refuse to replace that file; compare its bytes with the pre-test copy or checksum. Do not continue writing into this fixture after a refusal.
-3. Restore the selected folder to **Earshot Listening Places iCloud Test 297** and relaunch Earshot. Verify its prior selection and ordinary write status survived the test.
+1. TestFlight showed Earshot **1.2.5 (297)** installed and opened it on the Mac. The in-app version field still needs separate confirmation.
+2. The isolated iCloud Drive folder **Earshot Listening Places Foreign File Guard Test 297** contained a synthetic foreign device file. Selecting it on build 297 reported a successful write and changed the file's SHA-256 from `d7c712c201147eb5062b89f5ee212cfbac4ba97c93e5c43263c86263cafeac96` to `2e92fa133ad0a1068d5895b4cdcff82176ed4892ef7f9fd327883e8c83f83ee0`. This is a **failed physical acceptance check**, not a pass. Recreate the disposable fixture and repeat on a later build with the identity fix; observe VoiceOver speech then.
+3. The selected folder was restored to **Earshot Listening Places iCloud Test 297** and the app showed it as selected with sharing on. Relaunch persistence after this specific restore remains to be checked.
 4. For the reported Mac problem, select a copy of the **existing iPhone-shared** Listening Places folder. Verify selection takes effect, a Mac device file is written without touching iPhone/foreign files, the status is understandable with VoiceOver, and selection persists after relaunch. Record whether this is build 297 or a later integrated candidate; do not use the listener's only copy as a destructive test.
 5. Open Send Feedback but cancel the draft. On the final build containing #1035, check the opt-in hint/footer speech and the reported device/OS fields. Record the reported macOS version beside the host version so the patch mismatch can be addressed separately.
 
-If the Mac is still locked, steps 1–5 are pending; a filesystem fixture or simulator pass does not count as an app result.
+Steps 4–5 and the remaining checks in steps 1–3 are pending. A filesystem fixture or simulator pass does not count as an app result.
 
 ## Bug inventory and next action
 
 - **Listening Places folder selection fails on Apple silicon Mac** (`3ccc95fe-4526-46cb-831f-d693b575674a`; Testing)
   - Apple silicon Listening Places folder picker. Draft #1035; fresh local/iCloud selection and relaunch passed on Mac; final-head CI passed. Test an **existing iPhone-shared** folder with VoiceOver, verify a newly written device file and relaunch.
-- **Listening Places can replace a changed or unrelated device file** (`6d33508d-7c3c-4221-91f0-1aaea16bfc4f`; Testing)
-  - Foreign Listening Places device-file guard merged in #1027 and included in 297. Select the prepared isolated iCloud test folder, verify refusal and byte-for-byte unchanged foreign file, then restore the ordinary folder. Test VoiceOver status.
+- **Listening Places can replace a changed or unrelated device file** (`6d33508d-7c3c-4221-91f0-1aaea16bfc4f`; In development)
+  - Physical build-297 test failed: the app replaced a valid synthetic foreign file at its own device-file path on folder selection. Earlier #1027 compares observed bytes but did not validate the file's format, app marker, and device ID before accepting those bytes. Follow-up identity guard and simulator regression are in progress. Repeat with a fresh synthetic fixture on an integrated build, then check VoiceOver status and file bytes.
 - **Mac feedback metadata omits macOS patch version and uses iOS-specific opt-in wording** (`157e1399-850b-405c-9dbc-77302f1ed233`; In development)
   - #1035 changes Send Feedback hint/footer to platform-neutral wording with 11 focused tests. On Mac and iPhone, inspect the opt-in speech and draft metadata. Mac runtime reported 27.0 while host reported 27.0.1; find a supported accurate source before claiming patch-version resolution. Cancel drafts; do not send.
 - **Download clear or cancel can report success after a persistence failure** (`cfde8bcb-d249-4dc6-9c98-f653159df3b3`; In development)
