@@ -1,8 +1,8 @@
 # Listening Places on Apple silicon Mac: investigation and fix plan
 
-**Status:** Bookmark failure reproduced and corrected; build 297 passed fresh local, fresh iCloud Drive, and synthetic existing-layout checks on a physical Apple silicon Mac. Real iPhone-shared folder, VoiceOver, clean CI, and listener confirmation remain pending.
-**Feedback record:** StartTesting `3ccc95fe-4526-46cb-831f-d693b575674a`  
-**Reported build:** App Store 1.2.4 (274), Mac running macOS 27.2  
+**Status:** Bookmark failure reproduced and corrected; build 297 passed fresh local, fresh iCloud Drive, and synthetic existing-layout checks on a physical Apple silicon Mac. Full CI passed on PR #1035. Real iPhone-shared folder, VoiceOver, and listener confirmation remain pending.
+**Feedback record:** StartTesting `3ccc95fe-4526-46cb-831f-d693b575674a`
+**Reported build:** App Store 1.2.4 (274), Mac running macOS 27.2
 **Review base:** `origin/main` at `914d7789`, Earshot 1.2.5 (296)
 **User report:** Selecting the same iCloud folder used on iPhone does not appear to set it on an M3 iMac. Listening Places says, “Could not write listening places. The file ‘Earshot’ couldn’t be opened.” Feedback metadata incorrectly says `iPad8,6` and “iOS 27.2.”
 
