@@ -561,7 +561,7 @@ final class ListeningPlacesService {
                       self.bookmarkData == bookmarkData,
                       deviceID == capturedDeviceID,
                       bindingID == capturedBindingID,
-                      context != nil else {
+                      self.context === context else {
                     retryCurrentSnapshotAfterRemoval = enabled
                     return
                 }
