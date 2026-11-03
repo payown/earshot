@@ -32,7 +32,7 @@ final class BookmarkRepository {
         )
         context.insert(bookmark)
         save()
-        AppLog.player.info("Bookmark added at \(bookmark.positionSeconds)s on \(episode.title, privacy: .public)")
+        AppLog.player.info("Bookmark added at \(bookmark.positionSeconds)s")
         return bookmark
     }
 
@@ -47,7 +47,7 @@ final class BookmarkRepository {
             try context.save()
             NotificationCenter.default.post(name: .earshotBookmarksDidChange, object: nil)
         } catch {
-            AppLog.data.error("Bookmark save failed: \(error.localizedDescription, privacy: .public)")
+            AppLog.data.error("Bookmark save failed")
         }
     }
 }

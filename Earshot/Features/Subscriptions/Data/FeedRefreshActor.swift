@@ -1380,7 +1380,7 @@ actor FeedRefreshActor {
         try PendingCloudRemoteActivationIntent.clear(feedURL: canonical, in: modelContext)
         try PendingCloudFollowIntent.set(feedURL: canonical, in: modelContext)
         AppLog.subscriptions.info(
-            "Subscribed to \(podcast.title, privacy: .public) with \(parsedEpisodes.count) feed episodes"
+            "Subscribed to \(podcast.title, privacy: .private) with \(parsedEpisodes.count) feed episodes"
         )
         return SubscribeOutcome(
             podcast: podcast, episodes: inserted, alreadySubscribed: false
@@ -1664,7 +1664,7 @@ actor FeedRefreshActor {
             }
             podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? now
             LocalStateStore.setRefreshedAt(now, on: podcast, in: modelContext)
-            AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .public): \(parsedEpisodes.count) episode(s)")
+            AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .private): \(parsedEpisodes.count) episode(s)")
             // Backfilled/pre-existing catalog episodes must NOT trigger
             // auto-download, matching the existing `wasBackfill` notification gate.
             return ApplyOutcome(
@@ -1818,7 +1818,7 @@ actor FeedRefreshActor {
         if selection.keptCountBeforeLimit > Self.ordinaryRefreshNewEpisodeLimit
             || selection.filteredCountBeforeLimit > Self.ordinaryRefreshFilteredEpisodeLimit {
             AppLog.subscriptions.info(
-                "Refresh insertion budget for \(podcast.title, privacy: .public): kept=\(selection.keptCountBeforeLimit) filtered=\(selection.filteredCountBeforeLimit)"
+                "Refresh insertion budget for \(podcast.title, privacy: .private): kept=\(selection.keptCountBeforeLimit) filtered=\(selection.filteredCountBeforeLimit)"
             )
         }
         if selection.rejectedAllNewCandidates {
@@ -1829,7 +1829,7 @@ actor FeedRefreshActor {
                 in: modelContext
             )
             AppLog.subscriptions.error(
-                "Episode filters excluded all \(selection.totalNewCount) new candidate(s) for \(podcast.title, privacy: .public)"
+                "Episode filters excluded all \(selection.totalNewCount) new candidate(s) for \(podcast.title, privacy: .private)"
             )
         }
 
@@ -1845,14 +1845,14 @@ actor FeedRefreshActor {
         if autoQueueOn && !autoQueued.isEmpty {
             enqueueAtEnd(autoQueued)
             AppLog.subscriptions.info(
-                "Auto-queue: enrolled \(autoQueued.count) episode(s) for \(podcast.title, privacy: .public)"
+                "Auto-queue: enrolled \(autoQueued.count) episode(s) for \(podcast.title, privacy: .private)"
             )
             // Trim auto-queue pile-up to the per-podcast count cap (#494).
             enforceQueueCap(for: podcast)
         }
 
         if added > 0 {
-            AppLog.subscriptions.info("Refreshed \(podcast.title, privacy: .public): \(added) new episode(s)")
+            AppLog.subscriptions.info("Refreshed \(podcast.title, privacy: .private): \(added) new episode(s)")
         }
 
         return ApplyOutcome(
@@ -2082,11 +2082,11 @@ actor FeedRefreshActor {
                 in: modelContext
             )
             AppLog.subscriptions.error(
-                "Episode filters excluded all \(selection.totalNewCount) new candidate(s) while seeding \(podcast.title, privacy: .public)"
+                "Episode filters excluded all \(selection.totalNewCount) new candidate(s) while seeding \(podcast.title, privacy: .private)"
             )
         }
         AppLog.subscriptions.info(
-            "Seeded synced subscription \(podcast.title, privacy: .public) with \(seed.count) recent episode(s); \(genuinelyNew.count) genuinely new"
+            "Seeded synced subscription \(podcast.title, privacy: .private) with \(seed.count) recent episode(s); \(genuinelyNew.count) genuinely new"
         )
         return ApplyOutcome(
             refreshOutcome: RefreshOutcome(
@@ -2249,7 +2249,7 @@ actor FeedRefreshActor {
         }
         recompactQueue()
         AppLog.subscriptions.info(
-            "Queue cap: evicted \(evictIDs.count) over-cap item(s) for \(podcast.title, privacy: .public)"
+            "Queue cap: evicted \(evictIDs.count) over-cap item(s) for \(podcast.title, privacy: .private)"
         )
     }
 

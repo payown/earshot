@@ -24,14 +24,14 @@ enum EpisodeExporter {
         if !alreadyLocal {
             let downloaded = await downloads.downloadAndWait(episode)
             guard downloaded else {
-                AppLog.player.error("Export failed: download did not complete for \(episode.title, privacy: .public)")
+                AppLog.player.error("Export failed: download did not complete")
                 return nil
             }
         }
 
         guard let localURL = episode.localAudioURL,
               FileManager.default.fileExists(atPath: localURL.path) else {
-            AppLog.player.error("Export failed: no local file for \(episode.title, privacy: .public)")
+            AppLog.player.error("Export failed: no local file")
             return nil
         }
 
@@ -49,7 +49,7 @@ enum EpisodeExporter {
             try FileManager.default.copyItem(at: localURL, to: destination)
             return destination
         } catch {
-            AppLog.player.error("Export copy failed for \(episode.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            AppLog.player.error("Export copy failed")
             return nil
         }
     }
