@@ -39,6 +39,14 @@ The feature requests for generated chapters and retroactive episode filtering ha
 
 The real iPhone-to-Mac handoff, step 5's fixed-build checks, and VoiceOver verification remain pending. The synthetic-folder result is an app result on build 297, but is not a real cross-device pass.
 
+## Build 298 acceptance sequence
+
+1. Confirm TestFlight, the in-app About screen, and App Store Connect all say **1.2.5 (298)**. Record the final candidate commit and CI run. Do not use build 297's result as acceptance of #1041.
+2. Before opening the disposable **Foreign File Guard Test 297** folder, confirm its device-file SHA-256 is `d13b42898e275a863a2300a5545c76f57b61e40099be5a7b6cb284fd5623b95d`. Select it on the Mac. Expect a failure status explaining that a different or invalid device file was left untouched; verify the same checksum afterward and after relaunch. Restore the ordinary iCloud test folder when done.
+3. Select the disposable **Synthetic iPhone Test 297** iCloud folder. Confirm its `synthetic-iphone-test.json` SHA-256 remains `0cc3585d1522bbf006a69c4f5c964375b05aca9ffb7df70b8d8d3c7830e35313`, the Mac has its own separate device file, Write Now works, and the selected folder persists after relaunch. This still does not prove a real phone-to-Mac handoff.
+4. On the Mac, check the Listening Places status and Send Feedback hint with VoiceOver. Open an unsent feedback draft with system info, check Mac/macOS labels and version, then cancel it. Record the host version separately so a patch-version mismatch stays visible.
+5. On iPhone with VoiceOver, clear and cancel disposable downloads, verify announcements and state after relaunch; import disposable malformed OPML and listen to the failure explanation; switch episodes while the chapter sheet remains open. Record unexercised failure-injection paths as automated-only.
+
 ## Bug inventory and next action
 
 - **Listening Places folder selection fails on Apple silicon Mac** (`3ccc95fe-4526-46cb-831f-d693b575674a`; Testing)
