@@ -48,7 +48,13 @@ The real iPhone-to-Mac handoff and VoiceOver verification remain pending. The sy
 4. Restored **Earshot Listening Places iCloud Test 297**. Earshot showed it selected, sharing on, and a successful write at 8:12 p.m. The two fixture checksums remained unchanged.
 5. Send Feedback's system-info switch now describes “operating system version” and “device type,” rather than iOS-specific terms. An unsent compose sheet showed `App version: 1.2.5 (298)`, `macOS: 27.0`, and `Device: Mac`. The host reports **macOS 27.0.1**, so the patch-version omission remains open. The sheet was canceled without sending.
 
-These are UI/accessibility-tree and file checks on the physical Mac. Actual VoiceOver speech and focus have not been observed; Michael's VoiceOver check remains required. The iPhone checks in the sequence below remain pending.
+These are UI/accessibility-tree and file checks on the physical Mac. Actual Mac VoiceOver speech and focus have not been observed; Michael's VoiceOver check remains required. The iPhone report is recorded below.
+
+## Michael's iPhone report — 4 November 2026
+
+Michael replied **“All tests are green”** to the build-298 iPhone checklist below. Scope this to the requested cancel/clear disposable-download checks, malformed OPML import, chapter-sheet switch, ordinary downloaded-episode relaunch, and iPhone side of the Listening Places handoff. He did not provide a per-step result, exact spoken strings or focus detail, iOS version, or an in-app About-screen build readout; do not invent those details or treat injected storage failures as physically tested.
+
+The handoff folder now contains a real iPhone-origin Listening Places device file, SHA-256 `486ddf736beec6ce37d4beeec536517cd8f0e7efbc466406fc59e0ac8fdc7044`, 279626 bytes. The Mac is locked, so selecting that folder in Mac build 298, verifying two separate device files and preservation of the phone file, and restoring the ordinary selections remain pending. The file and its contents must not be copied into a public issue or commit.
 
 ## Build 298 acceptance sequence
 
@@ -56,7 +62,7 @@ These are UI/accessibility-tree and file checks on the physical Mac. Actual Voic
 2. **Passed on physical Mac, except VoiceOver:** The foreign-file fixture retained SHA-256 `d13b42898e275a863a2300a5545c76f57b61e40099be5a7b6cb284fd5623b95d` after rejection and relaunch. The ordinary folder was restored.
 3. **Passed on physical Mac, except real phone handoff and VoiceOver:** The synthetic iPhone-style file retained SHA-256 `0cc3585d1522bbf006a69c4f5c964375b05aca9ffb7df70b8d8d3c7830e35313`; the Mac wrote its own file, Write Now worked, and selection persisted after relaunch.
 4. **Partially passed on physical Mac:** The system-info hint is platform neutral, and an unsent draft identifies `Mac` and `macOS` correctly. The OS patch number is omitted (`27.0` versus host `27.0.1`). Check Listening Places status and Send Feedback hint with VoiceOver; the unsent draft was canceled.
-5. On iPhone with VoiceOver, clear and cancel disposable downloads, verify announcements and state after relaunch; import disposable malformed OPML and listen to the failure explanation; switch episodes while the chapter sheet remains open. Record unexercised failure-injection paths as automated-only.
+5. **Tester reports green on iPhone:** Michael's brief confirmation covers the checklist below, subject to the missing per-step and exact-speech detail. Record unexercised failure-injection paths as automated-only.
 
 ### Michael's iPhone pass for build 298
 
@@ -74,23 +80,23 @@ Optional Mac VoiceOver check: in build 298, read Settings → Listening Places s
 ## Bug inventory and next action
 
 - **Listening Places folder selection fails on Apple silicon Mac** (`3ccc95fe-4526-46cb-831f-d693b575674a`; Testing)
-  - Apple silicon Listening Places folder picker. Draft #1035; fresh local/iCloud selection and relaunch passed on Mac; final-head CI passed. Physical build 298 selected a synthetic iPhone-style iCloud folder, wrote its own separate device file, left the synthetic file unchanged, and remembered the selection after relaunch. Michael has no existing iPhone-shared folder on this Mac; real handoff and VoiceOver verification remain pending.
+  - Apple silicon Listening Places folder picker. Draft #1035; fresh local/iCloud selection and relaunch passed on Mac; final-head CI passed. Physical build 298 selected a synthetic iPhone-style iCloud folder, wrote its own separate device file, left the synthetic file unchanged, and remembered the selection after relaunch. The real iPhone handoff file has now reached the Mac; Mac folder selection and preservation check await unlock. Mac VoiceOver verification remains pending.
 - **Listening Places can replace a changed or unrelated device file** (`6d33508d-7c3c-4221-91f0-1aaea16bfc4f`; Testing)
   - Physical build-297 test failed: the app replaced a valid synthetic foreign file at its own device-file path on folder selection. Earlier #1027 compares observed bytes but did not validate the file's format, app marker, and device ID before accepting those bytes. Draft #1041 adds the identity check and a post-read context check; 41 Listening Places service tests passed on a clean simulator, and final-head full CI run 41577419477 passed. On physical Mac build 298, the recreated collision fixture was rejected and retained its checksum, including after relaunch. VoiceOver status speech and PR merge remain pending.
 - **Mac feedback metadata omits macOS patch version and uses iOS-specific opt-in wording** (`157e1399-850b-405c-9dbc-77302f1ed233`; In development)
   - #1035 changes Send Feedback hint/footer to platform-neutral wording with 11 focused tests. Physical build 298 shows the revised wording and an unsent draft correctly says `Device: Mac` and `macOS: 27.0`; the host reports 27.0.1. The patch-version gap remains. Find a supported accurate source before claiming resolution. Actual VoiceOver speech remains unverified. The draft was canceled without sending.
-- **Download clear or cancel can report success after a persistence failure** (`cfde8bcb-d249-4dc6-9c98-f653159df3b3`; In development)
-  - Draft #1036; 9 selected simulator tests and full CI run 41392272203 passed on the earlier head. Head `eade3ff3` adds safe download diagnostics; 104 selected integrated simulator tests and final-head full CI run 41464234970 passed. With VoiceOver, clear and cancel ordinary downloads, verify success counts and state after relaunch. Injected failure announcements are automated-only unless safely reproducible on device.
+- **Download clear or cancel can report success after a persistence failure** (`cfde8bcb-d249-4dc6-9c98-f653159df3b3`; Testing)
+  - Draft #1036; 9 selected simulator tests and full CI run 41392272203 passed on the earlier head. Head `eade3ff3` adds safe download diagnostics; 104 selected integrated simulator tests and final-head full CI run 41464234970 passed. Michael reported the requested build-298 iPhone checks green; exact speech was not supplied. Injected persistence-failure announcements remain automated-only.
 - **Download cleanup can remove audio before related changes are saved** (`bd1fa12c-ced4-42d9-a718-46d21750f044`; In development)
   - Cleanup-before-save risk spans Queue, Inbox, played-state and download ownership. The existing local draft is not integrated. Require a recoverable cross-store design, crash-boundary, shared-file, retry, and failure tests before merge. Then check ordinary download retention on device.
 - **Listening Places can assign newer timestamps to older offline listening** (`8401d54f-a78e-41c5-a768-9ae6a6752f5e`; In development)
   - Listening Places offline changes can receive later export timestamps. Design durable event provenance and migration; test competing updates, reset, sharing off/on, and relaunch. Historical times cannot be reconstructed. Cross-app test with QUILL only after deterministic merge tests.
 - **Network and artwork error logs may expose private URL tokens** (`cb8fea95-4e72-45dd-8a93-8a9ae1acd4dc`; In development)
   - #1013/#1014 sanitized several network, artwork and search logs. #1036 head `eade3ff3` also sanitizes remaining `DownloadManager` public error and title logs; full CI passed. Draft #1042 head `ce1f2f0e` removes public title/error text from export and bookmark logs and marks feed/subscription podcast titles private; an iOS Simulator build and full CI run 41465260446 passed. The [diagnostic privacy audit](diagnostic-privacy-audit-2026-11-02.md) maps the remaining paths. Continue with **synthetic** URL tokens and error text; never put real tokens in logs or the issue.
-- **Chapter sheet can show a stale list after switching episodes** (`9698f261-ece7-4cbe-85d8-e43e3ab836bc`; In development)
-  - Draft #1039 makes the sheet use the player's current chapter result and guards old row actions. Generic simulator build and full CI run 41393268579 passed; physical VoiceOver check remains. Switch playback **while the sheet stays open**, then revisit; inspect focus and chapter selection. Prior check closed the sheet first.
-- **OPML import failures need a clear spoken explanation** (`0e41be7b-39b4-4f2e-afd4-ec79b0c4676f`; In development)
-  - Draft #1038 adds distinct spoken explanations for invalid XML, unresolved results and folder-save failure, with retained-file retry guidance. Its final head also removes literal inflection markup from plain speech; full CI run 41457594010 passed. On device use a disposable malformed OPML file and verify speech and retained import state.
+- **Chapter sheet can show a stale list after switching episodes** (`9698f261-ece7-4cbe-85d8-e43e3ab836bc`; Testing)
+  - Draft #1039 makes the sheet use the player's current chapter result and guards old row actions. Generic simulator build and full CI run 41393268579 passed. Michael reported the requested build-298 iPhone checks green, including the chapter-sheet switch; exact focus detail was not supplied. Prior check closed the sheet first.
+- **OPML import failures need a clear spoken explanation** (`0e41be7b-39b4-4f2e-afd4-ec79b0c4676f`; Testing)
+  - Draft #1038 adds distinct spoken explanations for invalid XML, unresolved results and folder-save failure, with retained-file retry guidance. Its final head also removes literal inflection markup from plain speech; full CI run 41457594010 passed. Michael reported the requested build-298 iPhone checks green, including malformed OPML import; exact speech was not supplied.
 - **Episode filters: durable history, undo, and mark-as-played outcome** (`b5e53934-a559-4ea7-93df-9fa43050bbb8`; Open)
   - Deferred episode-filter history/undo/mark-played design. Depends on version 1 real-feed usage and persistence measurements. Do not fold into release stabilization without the prerequisite evidence.
 - **Episode filters: explicit apply-to-existing-episodes workflow** (`48c3d039-c17c-4f29-ab40-f181db9f3a66`; Open)
