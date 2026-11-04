@@ -58,6 +58,18 @@ These are UI/accessibility-tree and file checks on the physical Mac. Actual Voic
 4. **Partially passed on physical Mac:** The system-info hint is platform neutral, and an unsent draft identifies `Mac` and `macOS` correctly. The OS patch number is omitted (`27.0` versus host `27.0.1`). Check Listening Places status and Send Feedback hint with VoiceOver; the unsent draft was canceled.
 5. On iPhone with VoiceOver, clear and cancel disposable downloads, verify announcements and state after relaunch; import disposable malformed OPML and listen to the failure explanation; switch episodes while the chapter sheet remains open. Record unexercised failure-injection paths as automated-only.
 
+### Michael's iPhone pass for build 298
+
+Use **TestFlight 1.2.5 (298)**, with VoiceOver on. Check Settings → Help & About → About for build 298 before starting; earlier builds cannot validate these changes. Please report each step as pass, fail, or skipped, including the exact spoken message and whether focus was sensible. Do not reset the library or remove personal downloads for a test.
+
+1. **Cancel an active download.** Start downloading a disposable episode. While it is still active, go to Settings → Downloads → Cancel active downloads and confirm. Expect a count of canceled active downloads, no completed downloads removed, and no phantom active download after reopening Earshot. If it finishes too quickly, mark this check skipped.
+2. **Clear completed downloads only if all current downloads are disposable.** In Downloads, use Clear all downloads and confirm. Expect a matching VoiceOver count and no downloaded files listed after reopening; the podcast subscriptions and episode list should remain. If any download matters to you, skip this bulk action and tell me; the failure path is covered by injected-failure tests.
+3. **Import deliberately malformed OPML.** In Files → iCloud Drive, look for `Earshot Release 298 Test Files/earshot-build-298-invalid.opml` (105 bytes). In Earshot, use Settings → Data → Import podcasts (OPML) and choose that file. Expect an explanation that the OPML is invalid, guidance to choose a corrected file in Settings → Data, and no new subscription. The test file contains no real feed or account data. If the folder has not synced to the phone, skip and tell me.
+4. **Chapter sheet identity.** If you have two episodes with chapters, play the first and open its Chapters sheet. While the sheet remains open, switch to the second episode with a system playback control such as Control Center's Next Track. Return to the still-open sheet. It should show the second episode's chapters, never selectable rows from the first. Tell me whether VoiceOver focus stays useful. If no chaptered pair is available, skip.
+5. **Ordinary playback and recovery.** Play a previously downloaded disposable episode, pause, quit and reopen Earshot, then check that its saved position and download remain usable. This is a smoke check for the related download-path changes; it does not simulate protected-data failure.
+
+Optional Mac VoiceOver check: in build 298, read Settings → Listening Places status and Settings → Help & About → Send Feedback's system-info switch/hint. Report the actual speech and focus. The Mac file and accessibility-tree checks above cannot establish what VoiceOver spoke.
+
 ## Bug inventory and next action
 
 - **Listening Places folder selection fails on Apple silicon Mac** (`3ccc95fe-4526-46cb-831f-d693b575674a`; Testing)
