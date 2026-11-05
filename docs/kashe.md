@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe asked Renata to leave the five tabs as tabs and put each list beside its
+  own details on the open Duo. She checked that selecting an episode stayed
+  silent until she pressed Play (Chapter 110).
 - Kashe used the full player title when the narrow Duo cover left room for
   transport controls but little room for the mini-player title (Chapter 109).
 - Kashe noticed the empty mini-player frame on an unfolded Duo and checked
@@ -3818,3 +3821,17 @@ The interview title was longer than the space beside the controls. Kashe heard t
 She folded the Duo. The controls stayed in reach. The name remained available when she asked for it.
 
 “Keep the buttons,” she told Renata. “I can always open the title.”
+
+Chapter 110 - Build 303
+
+What to try first:
+
+On an open iPhone Duo, check that Inbox, Queue, Library, Downloads, and Settings remain tabs. In Library, choose a show: its episodes should appear on the left and its description on the right. Choose an episode: its information and show notes should replace the right-hand detail without starting audio. Press Play in that detail or beside a list row: playback should start immediately. Use “Back to Library shows” to return to the show list. Check Inbox, Queue, and Downloads episode lists the same way. Fold the Duo, try a narrow Split View window, and try large accessibility text; details should remain reachable when the list takes the full width. With VoiceOver, check the list row, separate Play button, detail headings, and return control. Report any missing action or unexpected playback, including the pose and iOS version.
+
+Kashe's story:
+
+Renata opened the Library on the Duo. Kashe found the same five tabs she knew on her own phone, then chose a show from the list. Its episodes appeared beside the description. She opened one and read the notes without hearing it begin.
+
+“Now Play,” she said. Renata pressed the button, and the player opened at once.
+
+Kashe returned to the show list and tried another. The route back was where she expected it.

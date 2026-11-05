@@ -20,12 +20,18 @@ regions from its *available window width*. The same controls and observed
 the expanded player uses `ArrangementView` to place its two regions around an
 active fold; earlier systems use a standard adaptive stack.
 
-Build 300 adds Apple's iOS 27 native tab-sidebar placement to the existing
-`TabView`. `.tabViewStyle(.sidebarAdaptable)` and
-`.defaultTabBarPlacement(.sidebar)` let the system show a sidebar when the
-current iPhone window has room, including Duo's inner display, and use compact
-tabs when it does not. There is no second root navigation tree or device-model
-check. On iOS 18–26, Earshot keeps its previous `TabView` behavior.
+Build 303 keeps the five destinations as native tabs at every size. The earlier
+build 300 experiment placed those tabs in a sidebar; listener feedback clarified
+that the sidebar should instead contain each tab's content. Inbox, Queue,
+Downloads, Library, and show episode lists now reserve a leading list and a
+trailing detail area when the window has space. In Library, choosing a show
+pushes its episode list into the leading area and places the show description
+on the right. Choosing an episode places its information and show notes on the
+right. The standard Library back button returns to the show list. At compact
+widths and accessibility text sizes, the list uses the whole available width
+and episode details open in a dismissible sheet. A content-width policy, not a
+device or orientation check, chooses the arrangement. The root `TabView`, its
+five `NavigationStack`s, and the app-owned player remain stable.
 
 The iPhone orientation setting now permits both landscape directions as well
 as portrait. Apple documents that Duo's inner display ignores the
@@ -39,9 +45,9 @@ of the validation matrix. Orientation is never used as a layout signal.
 | Location | Existing behavior and Duo risk | Correction and conventional iPhone impact |
 | --- | --- | --- |
 | `Earshot/Features/Player/Presentation/NowPlayingScreen.swift` | Fixed 140-point artwork and vertically stacked scroll regions wasted the expanded inner display. | Use two flexible regions when the current window has room; retain the compact transport dock and all actions. Conventional narrow iPhones keep the established layout. |
-| `Earshot/App/RootView.swift` | Five native tabs each own a stable `NavigationStack`; iOS 26+ places the mini-player in the native tab accessory. The original Duo build did not offer a sidebar. | Retain the hierarchy and opt the existing `TabView` into system sidebar placement on iOS 27+. The system uses compact tabs when space is limited; older iPhones keep the previous style. |
+| `Earshot/App/RootView.swift` | Five native tabs each own a stable `NavigationStack`; iOS 26+ places the mini-player in the native tab accessory. Build 300's tab-sidebar experiment made the destinations look like the content sidebar. | Retain ordinary tabs and place adaptive content panes inside each tab. The tab selection and player ownership stay unchanged on conventional iPhones. |
 | `Earshot/App/EarshotApp.swift` | `WindowGroup` creates one app-owned `AppRuntime` holding the player, downloads, and persistence. | Retain the existing service lifetime; no view-owned player is created on resizing. No conventional-iPhone change. |
-| Inbox, Queue, Subscriptions, Downloads, Personal Audio, and Settings screens | Native lists, sheets, and navigation with no global display-size or orientation checks. | Retain their existing scrolling and VoiceOver actions. A wholesale split-view conversion would replace stable navigation identity and is deferred pending direct Duo usability evidence. |
+| Inbox, Queue, Subscriptions, Downloads, and show episode lists | The single list filled the inner display and offered no adjacent episode or show context. | Use a leading list and trailing detail at readable widths. The rows retain configured Quick Actions; selection opens detail and a separate Play button starts audio. Compact windows use a detail sheet. Personal Audio and Settings retain their established navigation. |
 | `Earshot/App/Info.plist` | iPhone portrait orientation only restricted the outer Duo display in landscape/tent use. | Add both landscape directions. Conventional iPhones also gain landscape; verify compact-height behavior. |
 
 The source audit searched for `UIScreen.main`, `UIDevice.current.orientation`,
@@ -230,6 +236,56 @@ keeps the complete title in a scrollable episode region; its initial viewport
 can show only part of a long title above the fixed transport dock. Direct
 VoiceOver focus and touch exploration, a playing stream through a fold, Split
 View, the 90-degree pose, and physical Duo acceptance remain unverified.
+
+## In-tab list and detail follow-up, build 303
+
+Listener direction corrected the build 300 tab-sidebar experiment: the five
+destinations remain system tabs. The content within Inbox, Queue, Downloads,
+Library, and show episode lists now uses two panes when both are readable. The
+Library show list leads to a show episode list on the left and description on
+the right; “Back to Library shows” returns to the show list. A row selection
+shows episode information and the existing attributed, link-safe show notes in
+the detail pane. A separate Play button calls the shared `PlayerService`
+immediately. At compact widths, details open in a dismissible sheet. The
+configured row Quick Actions remain on their existing rotor/context menu.
+Selected inline rows carry the selected accessibility trait.
+
+The iOS 26.5 iPhone 17 Pro simulator passed focused UI tests for Library episode
+selection versus Play, Queue episode selection versus Play, and the existing
+per-show sort/navigation behavior. Existing Downloads activity, Library tab
+reentry, and Queue clear-confirmation UI tests passed. The layout-policy unit
+test passed. In the open iOS 27.1 Duo simulator, a seeded Library run showed
+tabs in the system vertical bar and the show list on the left. Selecting a
+show placed its episode list on the left and description on the right; episode
+notes appeared on the right after
+selection. The explicit return button restored the show list. This manual run
+did not press Play; the focused UI tests asserted that Play opened Now Playing
+with Pause available. At the largest accessibility text size, the open Duo
+displayed the Library list full width instead of forcing unreadably narrow
+columns. These are visual and accessibility-tree checks, not a spoken
+VoiceOver-focus test. Both selection-versus-Play UI tests also passed on the
+closed iPhone Duo simulator running iOS 27.1. Neither test measures an actual
+playing stream through a fold.
+
+The earlier combined UI run hit a simulator launch preflight `Busy` error
+before executing either test. Booting the iPhone 17 Pro simulator explicitly
+and rerunning the cases serially passed; this was a test-runner failure, not an
+observed app failure.
+
+The Xcode 27.2 signed Release archive and IPA export passed for 1.2.6 (303).
+The archive declares iOS 18.0 minimum and device family 1 (iPhone). App Store
+Connect processed build `a49fb417-6227-4f54-a51d-ec8aaa337103` as `VALID`.
+Chapter 110 notes are attached and automatic notifications are enabled;
+individual notification delivery was not verified. Both Internal Testing Group
+and Public Testers have access. Their states are both `IN_BETA_TESTING`, and
+the build 303 Beta App Review submission is `APPROVED`. No App Store version
+was submitted for release.
+
+Physical Duo playback and VoiceOver focus continuity, a real playing stream
+through a fold, Split View with another app, the 90-degree pose, and an iOS 18
+runtime remain outside this validation. The latest conventional iPhone runtime
+tested here was iOS 26.5; source deployment compatibility and the signed
+archive remain iOS 18.0.
 
 ## Apple references
 
