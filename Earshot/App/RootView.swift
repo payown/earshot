@@ -383,7 +383,6 @@ struct RootView: View {
             .tabItem { Label("Settings", systemImage: "gearshape") }
             .tag(RootTab.settings)
         }
-        .modifier(AdaptiveTabSidebar())
         // On iOS 26, make the player a native persistent tab accessory. Unlike
         // a per-tab safe-area inset, the system owns its geometry relative to
         // the floating tab bar, so VoiceOver Explore by Touch finds the player
@@ -789,23 +788,6 @@ struct RootView: View {
     /// Finds an episode by guid within a podcast's loaded episodes.
     private func episode(guid: String, in podcast: Podcast) -> Episode? {
         podcast.episodes?.first { $0.guid == guid }
-    }
-}
-
-/// iOS 27 can present the same tabs as a sidebar when the window has room,
-/// including on Duo's inner display. The system retains tab placement and
-/// collapse behavior as the window resizes, so the existing five NavigationStacks
-/// and their selected destinations keep their identity through a fold.
-private struct AdaptiveTabSidebar: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 27.0, *) {
-            content
-                .tabViewStyle(.sidebarAdaptable)
-                .defaultTabBarPlacement(.sidebar)
-        } else {
-            content
-        }
     }
 }
 

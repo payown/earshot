@@ -24,6 +24,7 @@ struct DownloadsScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     // A TabView creates this screen even when Downloads is not selected, so an
     // unfiltered @Query here is launch-path work. On the 242k-episode library it
@@ -40,6 +41,8 @@ struct DownloadsScreen: View {
     private var folders: [PodcastFolder]
 
     @State private var showNotesEpisode: Episode?
+    @State private var selectedDetailEpisode: Episode?
+    @State private var compactDetailEpisode: Episode?
     @State private var sharingEpisode: Episode?
     // The episode a pending "Export audio" Quick Action targets (#689). Setting
     // it drives the shared `.episodeAudioExport` flow (download-then-share).
@@ -142,11 +145,16 @@ struct DownloadsScreen: View {
             searchText: searchText
         )
         let visibleCount = result.visibleDownloaded.count + result.visibleExpired.count
-        return VStack(spacing: 0) {
-            if !folders.isEmpty {
-                folderFilter(rawDownloaded: rawDownloaded, rawExpired: rawExpired)
-            }
-            Group {
+        return GeometryReader { geometry in
+            let wide = ListDetailLayoutPolicy.usesTwoPanes(
+                width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
+            )
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    if !folders.isEmpty {
+                        folderFilter(rawDownloaded: rawDownloaded, rawExpired: rawExpired)
+                    }
+                    Group {
                 if rawDownloaded.isEmpty && rawExpired.isEmpty {
                     ContentUnavailableView(
                         "No downloads",
@@ -190,6 +198,11 @@ struct DownloadsScreen: View {
                                         episode: episode,
                                         deferredActions: availableActions(for: episode),
                                         includesPodcastName: true,
+                                        onSelect: {
+                                            if wide { selectedDetailEpisode = episode }
+                                            else { compactDetailEpisode = episode }
+                                        },
+                                        isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
                                         performAction: { action in
                                             perform(action, for: episode, in: result.visibleDownloaded)
                                         }
@@ -220,6 +233,32 @@ struct DownloadsScreen: View {
                             }
                         }
                     }
+                }
+                    }
+                }
+                .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                .frame(maxWidth: wide ? nil : .infinity)
+                if wide {
+                    Divider()
+                    Group {
+                        if let episode = selectedDetailEpisode, !episode.isDeleted {
+                            EpisodeDetailPane(episode: episode)
+                        } else {
+                            ContentUnavailableView(
+                                "Select an episode",
+                                systemImage: "arrow.down.circle",
+                                description: Text("Choose a download to read its information and show notes.")
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .onChange(of: wide) { oldValue, newValue in
+                if oldValue && !newValue, compactDetailEpisode == nil {
+                    compactDetailEpisode = selectedDetailEpisode
+                } else if !oldValue && newValue {
+                    compactDetailEpisode = nil
                 }
             }
         }
@@ -291,6 +330,7 @@ struct DownloadsScreen: View {
             }
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .sheet(item: $compactDetailEpisode) { EpisodeDetailSheet(episode: $0) }
         .task(id: downloadCandidates.count) {
             storageSummary = await downloads.storageSummary()
         }

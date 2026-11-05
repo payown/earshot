@@ -6,6 +6,54 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testEpisodeSelectionAndPlayAreSeparate() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let episode = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        XCTAssertTrue(episode.waitForExistence(timeout: 15), app.debugDescription)
+        episode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Show notes"].exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Mini player, "
+        )).firstMatch.exists, "Selecting an episode must not load playback")
+
+        let play = app.buttons["episode.detail.play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5),
+                      "Play should present the active player immediately")
+        XCTAssertEqual(app.buttons["player.playPause"].label, "Pause")
+        app.buttons["Close player"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Mini player, "
+        )).firstMatch.waitForExistence(timeout: 5), "Play must load the selected episode")
+    }
+
+    func testQueueEpisodeSelectionAndPlayAreSeparate() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+
+        let episode = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(episode.waitForExistence(timeout: 15), app.debugDescription)
+        episode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Mini player, "
+        )).firstMatch.exists)
+
+        app.buttons["episode.detail.play"].tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["player.playPause"].label, "Pause")
+    }
+
     func testFolderMembershipPickerKeepsSelectionCurrent() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]

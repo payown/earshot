@@ -10,11 +10,20 @@ struct EpisodeRowSupplementalAction: Identifiable, Equatable {
     let isDestructive: Bool
 }
 
-/// One episode row. The whole row is a single accessibility element: its
-/// primary (double-tap) action is the first configured action, and every
-/// configured action is exposed as a VoiceOver custom action (the Actions
-/// rotor) in the user's order. Reordering in Settings changes this live — no
-/// relaunch, because the rotor order is just the order we hand SwiftUI here.
+struct DetailSelectionTrait: ViewModifier {
+    let selected: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if selected { content.accessibilityAddTraits(.isSelected) }
+        else { content }
+    }
+}
+
+/// One episode row. A list/detail host makes the row's double tap select the
+/// episode and adds a separate Play button. Other hosts retain the configured
+/// primary action. The configured actions remain on the VoiceOver Actions
+/// rotor in the user's order.
 ///
 /// Selection mode is NOT handled here anymore: episode multi-select (#758)
 /// swaps this row out for the shared ``SelectableRow`` scaffold (via
@@ -43,6 +52,8 @@ struct EpisodeRow: View {
     private let supplementalActions: [EpisodeRowSupplementalAction]
     private let performAction: (EpisodeAction) -> Void
     private let performSupplementalAction: (EpisodeRowSupplementalAction) -> Void
+    private let onSelect: (() -> Void)?
+    private let isDetailSelected: Bool
     /// Whether the row names its podcast, visually and in the VoiceOver label.
     /// True in mixed-show lists (Inbox, Downloads) where the user can't otherwise
     /// tell which show an episode belongs to (#535); false (default) in
@@ -58,6 +69,8 @@ struct EpisodeRow: View {
         deferredActions: [EpisodeAction],
         supplementalActions: [EpisodeRowSupplementalAction] = [],
         includesPodcastName: Bool = false,
+        onSelect: (() -> Void)? = nil,
+        isDetailSelected: Bool = false,
         performAction: @escaping (EpisodeAction) -> Void,
         performSupplementalAction: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
     ) {
@@ -67,6 +80,8 @@ struct EpisodeRow: View {
         self.performAction = performAction
         self.performSupplementalAction = performSupplementalAction
         self.includesPodcastName = includesPodcastName
+        self.onSelect = onSelect
+        self.isDetailSelected = isDetailSelected
     }
 
     @ViewBuilder
@@ -83,6 +98,11 @@ struct EpisodeRow: View {
             let presentations = EpisodeAction.presentations(actions, for: episode)
             let primary = presentations.first
             let base = rowButton(primaryLabel: primary?.label) {
+                if let onSelect {
+                    guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                    onSelect()
+                    return
+                }
                 guard let primary,
                       PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
                 performAction(primary.action)
@@ -99,7 +119,36 @@ struct EpisodeRow: View {
                     performSupplementalAction(action)
                 }
             )
-            if voiceOverEnabled {
+            if onSelect != nil {
+                HStack(spacing: Spacing.sm) {
+                    if voiceOverEnabled {
+                        base
+                    } else {
+                        base.episodeActionsContextMenu(
+                            presentations,
+                            supplementalActions: supplementalActions,
+                            perform: { action in
+                                guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                                performAction(action)
+                            },
+                            performSupplemental: { action in
+                                guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                                performSupplementalAction(action)
+                            }
+                        )
+                    }
+                    Button {
+                        guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                        player.playFromEpisodeList(episode)
+                    } label: {
+                        Image(systemName: "play.fill")
+                            .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+                    }
+                    .accessibilityLabel("Play \(episode.title)")
+                    .accessibilityHint("Starts playback immediately")
+                    .accessibilityIdentifier("episode.row.play")
+                }
+            } else if voiceOverEnabled {
                 base
             } else {
                 base.episodeActionsContextMenu(
@@ -149,7 +198,10 @@ struct EpisodeRow: View {
         // description yields an empty value, and `.accessibilityValue("")` makes
         // VoiceOver speak a stray pause (dead air), so we omit it in that case.
         .accessibilityValueIfPresent(accessibilityValue)
-        .accessibilityHint(primaryLabel.map { "Double tap to \($0.lowercased())" } ?? "")
+        .accessibilityHint(onSelect == nil
+            ? (primaryLabel.map { "Double tap to \($0.lowercased())" } ?? "")
+            : "Double tap to view episode details")
+        .modifier(DetailSelectionTrait(selected: isDetailSelected))
     }
 
     private var isNowPlaying: Bool {
