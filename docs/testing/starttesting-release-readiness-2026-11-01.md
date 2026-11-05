@@ -54,13 +54,21 @@ These are UI/accessibility-tree and file checks on the physical Mac. Actual Mac 
 
 Michael replied **“All tests are green”** to the build-298 iPhone checklist below. Scope this to the requested cancel/clear disposable-download checks, malformed OPML import, chapter-sheet switch, ordinary downloaded-episode relaunch, and iPhone side of the Listening Places handoff. He did not provide a per-step result, exact spoken strings or focus detail, iOS version, or an in-app About-screen build readout; do not invent those details or treat injected storage failures as physically tested.
 
-The handoff folder now contains a real iPhone-origin Listening Places device file, SHA-256 `486ddf736beec6ce37d4beeec536517cd8f0e7efbc466406fc59e0ac8fdc7044`, 279626 bytes. The Mac is locked, so selecting that folder in Mac build 298, verifying two separate device files and preservation of the phone file, and restoring the ordinary selections remain pending. The file and its contents must not be copied into a public issue or commit.
+The handoff folder now contains a real iPhone-origin Listening Places device file. Its contents must not be copied into a public issue or commit. The physical Mac result follows.
+
+## Real iPhone-to-Mac handoff — 5 November 2026
+
+1. Before Mac folder selection, a real iPhone-origin device file was present in the disposable iCloud Drive handoff folder. Its checksum was recorded locally immediately before the test. The iPhone had written again since November 4, so the older checksum was not used as the comparison point. File contents and device identifiers remain private.
+2. Physical Mac TestFlight build 298 selected **Earshot Release 298 Handoff** with sharing on and a successful status. It created a separate Mac device file. The iPhone file's checksum remained unchanged after selection, Write Now, app quit/reopen, and restoration. The Mac's file remained present.
+3. After relaunch, Earshot still selected the handoff folder, sharing was on, and status reported a successful write at 10:27 a.m. The Mac was then restored to its prior **Earshot Listening Places iCloud Test 297** folder, sharing on, with a successful write at 10:28 a.m. Michael can now restore the iPhone's prior selected folder.
+
+This **passes the real two-device folder selection and file-preservation check**. It does not establish that Earshot imports Listening Places changes from the other device; the feature is an export. Actual Mac VoiceOver speech/focus remains unobserved.
 
 ## Build 298 acceptance sequence
 
 1. Confirm TestFlight, the in-app About screen, and App Store Connect all say **1.2.5 (298)**. Record the final candidate commit and CI run. Do not use build 297's result as acceptance of #1041.
 2. **Passed on physical Mac, except VoiceOver:** The foreign-file fixture retained SHA-256 `d13b42898e275a863a2300a5545c76f57b61e40099be5a7b6cb284fd5623b95d` after rejection and relaunch. The ordinary folder was restored.
-3. **Passed on physical Mac, except real phone handoff and VoiceOver:** The synthetic iPhone-style file retained SHA-256 `0cc3585d1522bbf006a69c4f5c964375b05aca9ffb7df70b8d8d3c7830e35313`; the Mac wrote its own file, Write Now worked, and selection persisted after relaunch.
+3. **Passed on physical Mac, except VoiceOver:** The synthetic iPhone-style file retained SHA-256 `0cc3585d1522bbf006a69c4f5c964375b05aca9ffb7df70b8d8d3c7830e35313`; the Mac wrote its own file, Write Now worked, and selection persisted after relaunch. A real iPhone-to-Mac handoff also passed on November 5 as recorded above.
 4. **Partially passed on physical Mac:** The system-info hint is platform neutral, and an unsent draft identifies `Mac` and `macOS` correctly. The OS patch number is omitted (`27.0` versus host `27.0.1`). Check Listening Places status and Send Feedback hint with VoiceOver; the unsent draft was canceled.
 5. **Tester reports green on iPhone:** Michael's brief confirmation covers the checklist below, subject to the missing per-step and exact-speech detail. Record unexercised failure-injection paths as automated-only.
 
@@ -80,7 +88,7 @@ Optional Mac VoiceOver check: in build 298, read Settings → Listening Places s
 ## Bug inventory and next action
 
 - **Listening Places folder selection fails on Apple silicon Mac** (`3ccc95fe-4526-46cb-831f-d693b575674a`; Testing)
-  - Apple silicon Listening Places folder picker. Draft #1035; fresh local/iCloud selection and relaunch passed on Mac; final-head CI passed. Physical build 298 selected a synthetic iPhone-style iCloud folder, wrote its own separate device file, left the synthetic file unchanged, and remembered the selection after relaunch. The real iPhone handoff file has now reached the Mac; Mac folder selection and preservation check await unlock. Mac VoiceOver verification remains pending.
+  - Apple silicon Listening Places folder picker. Draft #1035; fresh local/iCloud selection and relaunch passed on Mac; final-head CI passed. Physical build 298 selected both a synthetic shared layout and a real iPhone-origin iCloud Drive folder, wrote its own separate device file, preserved the other file, and remembered the selection after relaunch. The Mac's prior folder was restored. Mac VoiceOver speech/focus verification remains pending.
 - **Listening Places can replace a changed or unrelated device file** (`6d33508d-7c3c-4221-91f0-1aaea16bfc4f`; Testing)
   - Physical build-297 test failed: the app replaced a valid synthetic foreign file at its own device-file path on folder selection. Earlier #1027 compares observed bytes but did not validate the file's format, app marker, and device ID before accepting those bytes. Draft #1041 adds the identity check and a post-read context check; 41 Listening Places service tests passed on a clean simulator, and final-head full CI run 41577419477 passed. On physical Mac build 298, the recreated collision fixture was rejected and retained its checksum, including after relaunch. VoiceOver status speech and PR merge remain pending.
 - **Mac feedback metadata omits macOS patch version and uses iOS-specific opt-in wording** (`157e1399-850b-405c-9dbc-77302f1ed233`; In development)
