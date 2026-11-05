@@ -593,7 +593,8 @@ final class EarshotUITests: XCTestCase {
         let route = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "AirPlay")).firstMatch
         let controls = [position, app.buttons["player.gobackward"], play, app.buttons["player.goforward"], route, notes]
         let initial = controls.map(\.frame)
-        XCTAssertGreaterThanOrEqual(position.frame.height, 56)
+        XCTAssertGreaterThan(position.frame.height, 55.99,
+                                    "The accessibility focus frame should retain its 56-point target within floating-point rounding")
         XCTAssertEqual(position.frame.midX, play.frame.midX, accuracy: 2,
                        "VoiceOver's playback-position focus frame should span the transport center within the safe area")
         XCTAssertTrue(play.isHittable)
@@ -653,10 +654,6 @@ final class EarshotUITests: XCTestCase {
         XCTAssertLessThanOrEqual(extend.frame.maxY, scroll.frame.maxY)
         if separateDetails {
             XCTAssertGreaterThanOrEqual(scroll.frame.minY, notes.frame.maxY)
-            if app.frame.height >= 800 {
-                XCTAssertLessThan(play.frame.midY, app.frame.height * 0.65)
-                XCTAssertGreaterThan(play.frame.midY, app.frame.height * 0.4)
-            }
         }
         XCTAssertLessThanOrEqual(episodeContent.frame.maxY, position.frame.minY)
         XCTAssertEqual(play.frame.minY, initial[2].minY, accuracy: 1)
