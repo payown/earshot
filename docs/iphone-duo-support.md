@@ -131,6 +131,14 @@ version was submitted for release. Build ID:
   cannot finish first launch until Apple's newer CoreTypes and MobileDevice
   system packages are installed with administrator authentication. No physical
   Duo check has been reported for build 300.
+- A signed Release archive and IPA for 1.2.6 (300) exported successfully.
+  App Store Connect processed build `770abc89-e99f-4217-90b7-a419e46f8120`
+  as valid. It is in beta testing for the Internal Testing Group with automatic
+  notifications and the Chapter 107 tester notes. It was added to Public
+  Testers, but Apple rejected its beta-review submission because build 299 of
+  the same version is still `WAITING_FOR_REVIEW`. Apple permits one build per
+  version in beta review at a time. Submit build 300 after build 299's review
+  finishes, or withdraw build 299's beta review in App Store Connect first.
 
 These entries must be updated if the simulator gate is resolved before release.
 
