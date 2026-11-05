@@ -76,6 +76,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe borrowed Renata's iPhone Duo to check Earshot's sidebar and playback
+  continuity while folding it (Chapter 107).
 - Kashe checks that a shared Listening Places folder keeps each device's file
   separate before trusting it with everyday listening (Chapter 106).
 - Kashe tests a new Listening Places folder on her Mac, writes a snapshot,
@@ -3762,3 +3764,21 @@ Kashe made a spare listening folder before her first visit of the day. Her phone
 Renata called as Kashe was closing the laptop. “Did you get it working?”
 
 “I checked what it kept,” Kashe said. “That's how I know.”
+
+---
+
+Chapter 107 - Build 300
+
+What to try first:
+
+On iPhone Duo with iOS 27.1 or later, open Earshot on the outer display, then unfold it. When the inner window has room, look for a sidebar with Inbox, Queue, Library, Downloads, and Settings. Choose a section, fold the phone, and check that the compact navigation keeps the same section. Start an episode before changing poses; check its playback position and Queue afterward. Try a narrow Split View window, VoiceOver, and large text. On a conventional iPhone, check that the familiar tabs still work. Tell us the pose, iOS version, screen, and exact spoken control if something moves or becomes hard to reach.
+
+Kashe's story:
+
+Renata handed Kashe an open Duo during lunch. Kashe moved through Earshot's sections with VoiceOver, chose Queue, and started an interview. She folded the phone while the host was mid-sentence.
+
+The controls moved. The sentence kept going.
+
+“Still in Queue?” Renata asked.
+
+Kashe checked before answering. “Still here. Now let me hear the rest.”

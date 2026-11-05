@@ -20,6 +20,13 @@ regions from its *available window width*. The same controls and observed
 the expanded player uses `ArrangementView` to place its two regions around an
 active fold; earlier systems use a standard adaptive stack.
 
+Build 300 adds Apple's iOS 27 native tab-sidebar placement to the existing
+`TabView`. `.tabViewStyle(.sidebarAdaptable)` and
+`.defaultTabBarPlacement(.sidebar)` let the system show a sidebar when the
+current iPhone window has room, including Duo's inner display, and use compact
+tabs when it does not. There is no second root navigation tree or device-model
+check. On iOS 18–26, Earshot keeps its previous `TabView` behavior.
+
 The iPhone orientation setting now permits both landscape directions as well
 as portrait. Apple documents that Duo's inner display ignores the
 supported-orientation list, but its outer display honors it. Landscape allows
@@ -32,7 +39,7 @@ of the validation matrix. Orientation is never used as a layout signal.
 | Location | Existing behavior and Duo risk | Correction and conventional iPhone impact |
 | --- | --- | --- |
 | `Earshot/Features/Player/Presentation/NowPlayingScreen.swift` | Fixed 140-point artwork and vertically stacked scroll regions wasted the expanded inner display. | Use two flexible regions when the current window has room; retain the compact transport dock and all actions. Conventional narrow iPhones keep the established layout. |
-| `Earshot/App/RootView.swift` | Five native tabs each own a stable `NavigationStack`; iOS 26+ places the mini-player in the native tab accessory. | Retain this hierarchy so tab and pushed navigation state survives resizing and the system positions the player around vertical bars. No conventional-iPhone change. |
+| `Earshot/App/RootView.swift` | Five native tabs each own a stable `NavigationStack`; iOS 26+ places the mini-player in the native tab accessory. The original Duo build did not offer a sidebar. | Retain the hierarchy and opt the existing `TabView` into system sidebar placement on iOS 27+. The system uses compact tabs when space is limited; older iPhones keep the previous style. |
 | `Earshot/App/EarshotApp.swift` | `WindowGroup` creates one app-owned `AppRuntime` holding the player, downloads, and persistence. | Retain the existing service lifetime; no view-owned player is created on resizing. No conventional-iPhone change. |
 | Inbox, Queue, Subscriptions, Downloads, Personal Audio, and Settings screens | Native lists, sheets, and navigation with no global display-size or orientation checks. | Retain their existing scrolling and VoiceOver actions. A wholesale split-view conversion would replace stable navigation identity and is deferred pending direct Duo usability evidence. |
 | `Earshot/App/Info.plist` | iPhone portrait orientation only restricted the outer Duo display in landscape/tent use. | Add both landscape directions. Conventional iPhones also gain landscape; verify compact-height behavior. |
@@ -78,10 +85,13 @@ still needs a VoiceOver hardware pass.
   and iPhone only. Xcode 27.2 and the iOS 27.1 simulator runtime were installed
   on this Mac for Duo testing.
 - On the **closed iPhone Duo simulator, iOS 27.1**, seven distinct tests passed:
-  two layout policy tests; landscape transport reachability; normal and largest
+  two layout policy tests; transport reachability; normal and largest
   accessibility text player stability; largest-text player options/touch targets;
   and Queue tab switching and clear confirmation. Screenshots also showed the
   transport and scrubber visible on the outer display at largest text.
+- The transport test requested landscape through `XCUIDevice.orientation`, but
+  that automation does not rotate a Duo simulator. It verifies controls in the
+  closed pose only; conventional iPhone landscape was tested separately.
 - The existing player tests initially assumed a symmetric display center and
   tab buttons nested under an accessibility `TabBar`. On Duo, the usable area
   has asymmetric insets and the system exposes vertical navigation differently.
@@ -108,6 +118,19 @@ for Beta App Review on November 5, 2026; external status is
 report pose, iOS version, and inaccessible or clipped controls. No App Store
 version was submitted for release. Build ID:
 `804aae21-2cf4-4456-9425-a2f77970f80a`.
+
+## Sidebar follow-up, build 300
+
+- Xcode 27.2 Debug build passed with the iOS 27 sidebar API. On the closed Duo
+  simulator running iOS 27.1, five launch-tab mapping tests and two navigation
+  UI tests passed. The same navigation smoke test passed on an iPhone 17 Pro
+  simulator running iOS 26.5, exercising the older-system fallback.
+- The inner sidebar, its VoiceOver order and badges, the mini-player in sidebar
+  placement, and fold/unfold selection continuity still need direct open-pose
+  testing. The Mac's GUI session is locked and the current Xcode Device Hub
+  cannot finish first launch until Apple's newer CoreTypes and MobileDevice
+  system packages are installed with administrator authentication. No physical
+  Duo check has been reported for build 300.
 
 These entries must be updated if the simulator gate is resolved before release.
 
