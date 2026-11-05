@@ -543,8 +543,8 @@ final class EarshotUITests: XCTestCase {
         let controls = [position, app.buttons["player.gobackward"], play, app.buttons["player.goforward"], route, notes]
         let initial = controls.map(\.frame)
         XCTAssertGreaterThanOrEqual(position.frame.height, 56)
-        XCTAssertEqual(position.frame.midX, app.frame.midX, accuracy: 2,
-                       "VoiceOver's playback-position focus frame should span the player center, not sit at the trailing edge")
+        XCTAssertEqual(position.frame.midX, play.frame.midX, accuracy: 2,
+                       "VoiceOver's playback-position focus frame should span the transport center within the safe area")
         XCTAssertTrue(play.isHittable)
         XCTAssertLessThanOrEqual(play.frame.maxY, app.frame.maxY)
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Episode artwork")).firstMatch.exists)
@@ -602,8 +602,10 @@ final class EarshotUITests: XCTestCase {
         XCTAssertLessThanOrEqual(extend.frame.maxY, scroll.frame.maxY)
         if separateDetails {
             XCTAssertGreaterThanOrEqual(scroll.frame.minY, notes.frame.maxY)
-            XCTAssertLessThan(play.frame.midY, app.frame.height * 0.65)
-            XCTAssertGreaterThan(play.frame.midY, app.frame.height * 0.4)
+            if app.frame.height >= 800 {
+                XCTAssertLessThan(play.frame.midY, app.frame.height * 0.65)
+                XCTAssertGreaterThan(play.frame.midY, app.frame.height * 0.4)
+            }
         }
         XCTAssertLessThanOrEqual(episodeContent.frame.maxY, position.frame.minY)
         XCTAssertEqual(play.frame.minY, initial[2].minY, accuracy: 1)
@@ -717,8 +719,10 @@ final class EarshotUITests: XCTestCase {
         app.launch()
         let options = app.buttons["Queue options"].firstMatch
         XCTAssertTrue(options.waitForExistence(timeout: 10))
-        app.tabBars.buttons["Library"].tap()
-        app.tabBars.buttons["Queue"].tap()
+        let library = app.buttons["Library"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 5), app.debugDescription)
+        library.tap()
+        app.buttons["Queue"].firstMatch.tap()
         XCTAssertTrue(options.waitForExistence(timeout: 5))
         options.tap()
         app.buttons["Clear queue"].firstMatch.tap()

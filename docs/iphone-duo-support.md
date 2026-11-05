@@ -73,18 +73,41 @@ still needs a VoiceOver hardware pass.
 - Xcode 27.0 Debug simulator build passed before the 27.1-only arrangement was
   added. `PlayerLayoutPolicyTests` and the conventional iPhone landscape
   transport UI test passed on an iPhone 18 Pro simulator running iOS 27.0.
-- Xcode 27.2 Release device build and signed archive passed with the
-  `ArrangementView` path compiled. The target remains iOS 18.0 and iPhone only.
-- Two existing player UI regression tests were started but interrupted during
-  the Xcode upgrade; they are **not** counted as passed.
-- Duo closed, open, partial fold, Split View, vertical bars, and VoiceOver
-  transitions remain unverified pending installation of Xcode's required
-  CoreSimulator system package and an iOS 27.1+ Duo runtime. The Mac presents
-  a protected administrator authorization prompt for that package.
+- Xcode 27.2 Release device build, signed archive, and App Store Connect export
+  passed with the `ArrangementView` path compiled. The target remains iOS 18.0
+  and iPhone only. Xcode 27.2 and the iOS 27.1 simulator runtime were installed
+  on this Mac for Duo testing.
+- On the **closed iPhone Duo simulator, iOS 27.1**, seven distinct tests passed:
+  two layout policy tests; landscape transport reachability; normal and largest
+  accessibility text player stability; largest-text player options/touch targets;
+  and Queue tab switching and clear confirmation. Screenshots also showed the
+  transport and scrubber visible on the outer display at largest text.
+- The existing player tests initially assumed a symmetric display center and
+  tab buttons nested under an accessibility `TabBar`. On Duo, the usable area
+  has asymmetric insets and the system exposes vertical navigation differently.
+  Their assertions now target the transport center and accessible buttons.
+  A tall-screen-only placement assertion is limited to tall windows; all
+  reachability and control-stability assertions still run on Duo.
+- The open inner display, partial folds, live fold/unfold during playback,
+  Split View, and VoiceOver focus transitions remain **unverified**. The older
+  Device Hub available to UI automation lacks Duo pose controls; Xcode 27.2's
+  Device Hub remains blocked by a first-launch system-components dialog despite
+  successful CLI builds and tests. No iOS 18 runtime is installed here.
 - Physical iPhone Duo playback and focus continuity have not been tested.
 - `xcrun agent skills export` was attempted with Xcode 27.0 and 27.2 but did
-  not complete while the system component setup was blocked. The manual audit
-  follows the same categories described in Apple's preparation guide.
+  not complete. The manual audit follows the categories in Apple's preparation
+  guide; the Apple resizability skill did not provide automated findings.
+
+## TestFlight distribution
+
+Build 1.2.6 (299), built with Xcode 27.2, processed as `VALID` in App Store
+Connect. It is `IN_BETA_TESTING` for the **Internal Testing Group**, which
+receives all builds. It was explicitly added to **Public Testers** and submitted
+for Beta App Review on November 5, 2026; external status is
+`WAITING_FOR_BETA_REVIEW` / `WAITING_FOR_REVIEW`. TestFlight notes ask testers to
+report pose, iOS version, and inaccessible or clipped controls. No App Store
+version was submitted for release. Build ID:
+`804aae21-2cf4-4456-9425-a2f77970f80a`.
 
 These entries must be updated if the simulator gate is resolved before release.
 
