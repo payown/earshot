@@ -483,7 +483,7 @@ final class QueueRepository {
 
         guard let episode = (try? context.fetch(descriptor))?.first,
               let pubDate = episode.pubDate,
-              pubDate <= now
+              pubDate.timeIntervalSinceReferenceDate <= now.timeIntervalSinceReferenceDate
         else { return false }
 
         let ageLimitDays = max(
@@ -491,7 +491,7 @@ final class QueueRepository {
             podcast.queueAgeLimitDays ?? Self.autoQueueOptInDefaultAgeLimitDays
         )
         let cutoff = now.addingTimeInterval(-Double(ageLimitDays) * 86_400)
-        guard pubDate >= cutoff,
+        guard pubDate.timeIntervalSinceReferenceDate >= cutoff.timeIntervalSinceReferenceDate,
               episode.status == .newEpisode,
               !episode.inboxDismissed,
               episode.recentlyExpired == nil,
