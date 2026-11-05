@@ -187,8 +187,49 @@ Chapter 108 tester notes. The build is `IN_BETA_TESTING` for the Internal
 Testing Group with automatic notifications. It is assigned to Public Testers,
 but remains `READY_FOR_BETA_SUBMISSION`: Apple refused submission because build
 299 still occupies this version's public beta-review slot in
-`WAITING_FOR_REVIEW`. Submit build 301 after that review finishes or is
-withdrawn. No App Store version was submitted for release.
+`WAITING_FOR_REVIEW`. Build 301 was superseded by build 302 after the
+active-player check below. No App Store version was submitted for release.
+
+## Active mini-player follow-up, build 302
+
+An iOS 27.1 open-Duo simulator run used the app's seeded Now Playing fixture to
+load an episode, close the full player, and inspect the native accessory. Build
+301 placed the title in a two-row fallback, which rendered its first line above
+the capsule. Build 302 keeps native accessories in one row. The title is
+visually truncated as space requires, while the existing VoiceOver button
+label still contains the complete episode and podcast names. All four transport
+actions remain separate 44-point buttons. The pre-iOS-26 inset keeps its
+existing adaptive two-row layout.
+
+Debug screenshots on the open inner display confirmed the title and four
+controls fit inside the capsule. Folding to the cover kept the loaded episode
+and transport controls visible, but the narrow system accessory left only the
+episode button's icon visible. The full episode and podcast names remain in
+that button's VoiceOver label and the full player. This fixture is paused and
+does not establish uninterrupted streaming during a fold. The compact visual
+title limitation needs direct user feedback. Do not treat the screenshot as a
+VoiceOver announcement test. The seeded mini-player UI test on the closed Duo
+passed its full-label and reopen assertions; its custom-speed sheet step was
+updated to accept the iOS 27 automatic dismissal after Apply. The same test
+passed on an iPhone 17 Pro simulator running iOS 26.5.
+
+Build 301 was distributed internally before this finding. Build 302 is the
+corrected candidate. Its Xcode 27.2 signed Release archive and IPA export
+passed; App Store Connect processed build
+`8fb889c7-b47f-47af-bf2b-b08803abbe3b` as `VALID`. The Chapter 109 notes
+are attached. The Internal Testing Group has access, internal state is
+`IN_BETA_TESTING`, and automatic notifications are enabled (individual delivery
+was not verified). Public Testers is assigned the build, but its external state
+is `READY_FOR_BETA_SUBMISSION`: Apple refused beta-review submission because
+build 299 of version 1.2.6 remains `WAITING_FOR_REVIEW`. Submit build 302 when
+that review finishes. No App Store version was submitted for release.
+
+The open-Duo simulator at the largest accessibility text size displayed all
+mini-player transport controls and a visually shortened title. The full player
+keeps the complete title in a scrollable episode region; its initial viewport
+can show only part of a long title above the fixed transport dock. Direct
+VoiceOver focus and touch exploration, a playing stream through a fold, Split
+View, the 90-degree pose, and physical Duo acceptance remain unverified.
 
 ## Apple references
 

@@ -76,6 +76,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe used the full player title when the narrow Duo cover left room for
+  transport controls but little room for the mini-player title (Chapter 109).
 - Kashe noticed the empty mini-player frame on an unfolded Duo and checked
   that it disappeared when no episode was loaded (Chapter 108).
 - Kashe borrowed Renata's iPhone Duo to check Earshot's sidebar and playback
@@ -3800,3 +3802,19 @@ Kashe opened Inbox on Renata's Duo and noticed a quiet shape at the bottom of th
 Renata made a note while Kashe checked the next build. The empty shape was gone. Kashe opened Queue, unfolded the phone, and found the sidebar where she expected it.
 
 “Now there is room for the controls that matter,” she said.
+
+---
+
+Chapter 109 - Build 302
+
+What to try first:
+
+On iPhone Duo, start an episode and close the full player. Check that the mini-player's Play, skip-back, skip-forward, bookmark, and episode button remain reachable on the outer display, the open inner display, and during a fold. With VoiceOver, the episode button should speak the full episode and podcast names even when its visible title is shortened. Open the full player for the complete title and other controls. Then stop playback and check that the empty mini-player capsule disappears. Try large text, a partially folded pose, and Split View. Tell us the pose, iOS version, and exact spoken control if any action is missing or focus jumps. On a conventional iPhone, check the same mini-player actions.
+
+Kashe's story:
+
+The interview title was longer than the space beside the controls. Kashe heard the whole name when she moved VoiceOver to the mini-player, then opened the full player to see what Renata was reading on the screen.
+
+She folded the Duo. The controls stayed in reach. The name remained available when she asked for it.
+
+“Keep the buttons,” she told Renata. “I can always open the title.”
