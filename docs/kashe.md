@@ -76,6 +76,11 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe checks that a shared Listening Places folder keeps each device's file
+  separate before trusting it with everyday listening (Chapter 106).
+- Kashe tests a new Listening Places folder on her Mac, writes a snapshot,
+  and reopens Earshot before returning to a folder shared with her phone
+  (Chapter 105).
 - Kashe expects one clear VoiceOver action for each Quick Actions row; on a
   transport action, she can remove it once and still use the move actions
   (Chapter 103).
@@ -3719,3 +3724,41 @@ Renata had asked why a button that moved left was called “Move up.” Kashe tr
 “The button?” Renata asked.
 
 “Both of them.”
+
+---
+
+Chapter 105 - Build 297
+
+What to try first:
+
+On an Apple silicon Mac, install this over build 296. In Settings > Listening Places, choose a new local folder that is safe to use for testing. Confirm Selected folder changes, the status becomes Ready, and Write Now creates this Mac's file inside Listening Places/devices. Quit and reopen Earshot to check that the selection remains. Then try a separate new iCloud Drive test folder. If you already share a Listening Places folder with an iPhone, test it only after those checks and confirm the iPhone's file stays untouched.
+
+In Send Feedback, turn on the optional system info and check that the preview says Mac and macOS, with the correct macOS version. On iPhone, check that folder selection and the existing iPhone/iOS feedback details still work. If anything fails, tell me the folder type, the exact status text, and whether the folder stayed selected after relaunch. Please do not send a private folder path or file contents.
+
+Kashe's story:
+
+Kashe had a folder for her listening places on the phone. On the Mac, she chose it, heard the error, and tried again. Same error. She stopped there instead of moving files around to make the message go away.
+
+Renata suggested a fresh folder first. Kashe chose one, wrote a snapshot, then reopened Earshot to see whether it remembered. Only then did she return to the shared folder and check that the phone's file was still its own.
+
+“You tested the boring part first,” Renata said.
+
+“The boring part is where my data lives.”
+
+---
+
+Chapter 106 - Build 298
+
+What to try first:
+
+This build is for checking the Listening Places and download fixes before an App Store update. On an Apple silicon Mac, choose a disposable iCloud Drive folder that already has a Listening Places file from another device, if you have one. Confirm Earshot selects the folder, writes a separate file for this Mac, leaves the other file unchanged, and remembers the selection after you quit and reopen the app. If Earshot finds an invalid file where this Mac's file belongs, it should leave that file untouched and explain the problem. Please test with a copy or a disposable folder, never your only shared copy.
+
+On iPhone, clear or cancel a few disposable downloads, check the VoiceOver result, and reopen Earshot to confirm the state. Try a malformed OPML file and listen for a useful explanation. If you use chapters, keep the chapter sheet open while switching episodes and confirm it shows the new episode's chapters. On Mac, check that Send Feedback describes the machine as a Mac. Tell us the build number, steps, and exact spoken status if something fails; please do not send private folder paths or file contents.
+
+Kashe's story:
+
+Kashe made a spare listening folder before her first visit of the day. Her phone had already written its place in an interview there. She opened the folder on her Mac, wrote from the Mac, then checked both files. The phone's place was still its own.
+
+Renata called as Kashe was closing the laptop. “Did you get it working?”
+
+“I checked what it kept,” Kashe said. “That's how I know.”

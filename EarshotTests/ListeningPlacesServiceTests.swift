@@ -4,6 +4,11 @@ import XCTest
 
 @MainActor
 final class ListeningPlacesServiceTests: XCTestCase {
+    func testMacFolderBookmarkDoesNotUseIncompatibleMinimalOption() {
+        XCTAssertEqual(ListeningPlacesService.bookmarkOptions(isIOSAppOnMac: true), [])
+        XCTAssertTrue(ListeningPlacesService.bookmarkOptions(isIOSAppOnMac: false).contains(.minimalBookmark))
+    }
+
     func testOlderFileClassificationRequiresMatchingMetadataAndStrictVersion() {
         func isOlder(app: String, device: String = "1234abcd", format: String = "listening-places/1", current: String = "1.2.5") -> Bool {
             let snapshot = ListeningPlacesRestoredSnapshot(records: [], signatures: [:], updatedAtByID: [:], fileFormat: format, fileDevice: device, fileApp: app)
@@ -84,7 +89,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.releasePersistence()
     }
 
-    func testForeignFileWriteFailureIsNotAnnounced() async throws {
+    func testForeignFileIsPreservedBeforeAnyWrite() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -101,6 +106,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         let file = try deviceFile(in: directory)
         initial.releasePersistence()
         try setSelfReportedApp("another-app/0.0.1", in: file)
+        let foreignContents = try Data(contentsOf: file)
         let writer = LegacyFailureWriter()
         let confirmation = LegacyConfirmationProbe()
         var announcements: [String] = []
@@ -114,12 +120,44 @@ final class ListeningPlacesServiceTests: XCTestCase {
         let writeAttemptsBefore = await writer.attempts()
         await service.setIncludeLabels(true)
         let writeAttemptsAfter = await writer.attempts()
-        XCTAssertGreaterThan(writeAttemptsAfter, writeAttemptsBefore, "The injected writer must be called")
-        guard case .failed = service.status else { return XCTFail("The injected write must fail") }
+        XCTAssertEqual(writeAttemptsAfter, writeAttemptsBefore, "Foreign metadata must stop the write before it reaches the provider")
+        guard case .failed = service.status else { return XCTFail("The foreign file must be reported as a failure") }
+        XCTAssertEqual(try Data(contentsOf: file), foreignContents)
         let confirmationAttempts = await confirmation.attempts()
         XCTAssertEqual(confirmationAttempts, 0, "Foreign metadata must not schedule a confirmation")
         XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
         XCTAssertTrue(announcements.isEmpty)
+        service.releasePersistence()
+    }
+
+    func testForeignDeviceIDIsPreservedOnFolderSelectionAndRemove() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/foreign-guard", title: "Guard")
+        let episode = Episode(guid: "foreign-guard", title: "Episode", audioURL: "https://example.com/foreign-guard.mp3", positionSeconds: 30)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let initial = ListeningPlacesService()
+        initial.configure(context: container.mainContext)
+        await initial.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        initial.releasePersistence()
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        json["device"] = "foreign-device"
+        let foreignContents = try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])
+        try foreignContents.write(to: file, options: .atomic)
+
+        let service = ListeningPlacesService()
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        guard case .failed = service.status else { return XCTFail("Foreign device metadata must fail selection") }
+        XCTAssertEqual(try Data(contentsOf: file), foreignContents)
+        await service.stopSharingAndRemoveDeviceFile()
+        XCTAssertEqual(try Data(contentsOf: file), foreignContents, "A failed selection must not remove the foreign file")
         service.releasePersistence()
     }
 
@@ -1468,6 +1506,37 @@ final class ListeningPlacesServiceTests: XCTestCase {
         ))
     }
 
+    func testLateFailureFromPreviousFolderSelectionCannotReplaceCurrentStatus() async throws {
+        let firstDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "listening-places-first-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let secondDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "listening-places-second-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: firstDirectory)
+            try? FileManager.default.removeItem(at: secondDirectory)
+        }
+
+        let preparation = SuspendedListeningPlacesPreparation()
+        let service = ListeningPlacesService(prepareFolder: { bookmark in
+            try await preparation.prepare(bookmark: bookmark)
+        })
+        let container = try makeContainer()
+        service.configure(context: container.mainContext)
+
+        let firstSelection = Task { await service.chooseFolder(firstDirectory) }
+        await preparation.waitUntilSuspended()
+        await service.chooseFolder(secondDirectory)
+        let currentStatus = service.status
+        XCTAssertEqual(service.folderName, secondDirectory.lastPathComponent)
+
+        await preparation.failFirstPreparation()
+        await firstSelection.value
+        XCTAssertEqual(service.folderName, secondDirectory.lastPathComponent)
+        XCTAssertEqual(service.status, currentStatus)
+    }
+
     func testWritingIntoExistingListeningPlacesFolderCreatesDevicesFolder() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "listening-places-existing-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -1615,6 +1684,38 @@ private actor SuspendedListeningPlacesRemover {
             waiters.removeAll()
         }
         try await transport.removeDeviceFile(bookmarkData: bookmark, deviceID: deviceID)
+    }
+}
+
+private actor SuspendedListeningPlacesPreparation {
+    private let transport = ListeningPlacesFileTransport()
+    private var holdFirst = true
+    private var suspended = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func failFirstPreparation() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+
+    func prepare(bookmark: Data) async throws {
+        if holdFirst {
+            holdFirst = false
+            suspended = true
+            await withCheckedContinuation { continuation in
+                resumeContinuation = continuation
+                for waiter in waiters { waiter.resume() }
+                waiters.removeAll()
+            }
+            throw ListeningPlacesFileError.couldNotCreateDirectory("Listening Places")
+        }
+        try await transport.prepareFolder(bookmarkData: bookmark)
     }
 }
 
