@@ -514,6 +514,22 @@ final class EarshotUITests: XCTestCase {
     func testAnchoredPlayerStabilityAndSliderEdges() { verifyAnchoredPlayer(largeText: false) }
     func testAnchoredPlayerStabilityAtLargestText() { verifyAnchoredPlayer(largeText: true) }
 
+    func testPlayerTransportRemainsReachableInLandscape() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.launch()
+
+        let play = app.buttons["player.playPause"]
+        let position = app.descendants(matching: .any).matching(identifier: "player.position").firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(play.isHittable)
+        XCTAssertTrue(position.isHittable)
+        XCTAssertTrue(app.buttons["Close player"].isHittable)
+        XCTAssertTrue(app.buttons["More options"].isHittable)
+    }
+
     private func verifyAnchoredPlayer(largeText: Bool) {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying", "-playerLayoutTransition"]
