@@ -137,10 +137,58 @@ version was submitted for release. Build ID:
   notifications and the Chapter 107 tester notes. It was added to Public
   Testers, but Apple rejected its beta-review submission because build 299 of
   the same version is still `WAITING_FOR_REVIEW`. Apple permits one build per
-  version in beta review at a time. Submit build 300 after build 299's review
-  finishes, or withdraw build 299's beta review in App Store Connect first.
+  version in beta review at a time. Build 300 was superseded by build 301 after
+  the open-pose check below.
 
-These entries must be updated if the simulator gate is resolved before release.
+## Open-pose follow-up, build 301
+
+The iOS 27.1 Duo simulator was opened, partly folded, and closed with a local
+simulator-only `duoctl` helper that posts the fold event and reads the active
+display back. This tool is not an Earshot dependency. It uses private simulator
+interfaces; use Xcode Device Hub for the standard manual check when the Mac
+GUI is unlocked.
+
+- At 180 degrees, the inner display showed a system sidebar with all five
+  destinations. Selecting Queue and closing to 0 degrees retained Queue as the
+  selected section in the compact vertical bar. Reopening returned to the
+  sidebar. Screenshots of the inner and outer displays verified the selection.
+- This check exposed an empty native mini-player capsule when no episode was
+  loaded, on both poses. The `tabViewBottomAccessory(isEnabled:)` overload,
+  available from iOS 26.1, now hides the accessory until the shared player has
+  a title. The iOS 26.0 path stays unchanged. A Debug build and screenshots at
+  0 and 180 degrees confirmed that the empty capsule is gone.
+- On the closed Duo simulator, the build 301 source passed five
+  `MiniPlayerVisibilityTests`, five `RootTabLaunchTests`, and two Queue/Library
+  navigation UI tests. These automated checks do not assert inner-screen
+  VoiceOver behavior.
+- The seeded Library launch and tab navigation UI test also passed on an
+  iPhone 17 Pro simulator running iOS 26.5, exercising the accessory visibility
+  path on a conventional iPhone.
+- At `accessibility-extra-extra-extra-large` text size on the open Duo, the
+  sidebar labels wrapped and the last item moved below the viewport. Swiping
+  the sidebar brought Settings into view; all five destinations remained
+  visually reachable. This is not a VoiceOver focus or announcement test.
+- At 135 degrees, the inner display showed the sidebar and content without
+  clipped essential controls. At 90 degrees, the flat simulator screenshot
+  showed the content but did not render sidebar labels or icons. The capture
+  cannot establish whether this is a simulator rendering artifact or an
+  interactive failure. Check 90-degree navigation in Device Hub and on hardware.
+- The simulator's fresh store had no episode, so playback continuity and the
+  mini-player while playing were not validated in this open-pose run. The
+  sidebar VoiceOver order, focus, badges, and Split View still need direct
+  checks. No physical Duo check has been reported. The Mac GUI was unlocked,
+  but the newer CoreTypes/MobileDevice packages still need administrator
+  authentication before Xcode Device Hub can finish first launch.
+
+Build 301 keeps the iOS 18 deployment target and iPhone-only distribution.
+Its signed Release archive and IPA exported successfully. App Store Connect
+processed build `8e084a6d-7f67-4b38-83fc-efee6f50ca8d` as valid, with the
+Chapter 108 tester notes. The build is `IN_BETA_TESTING` for the Internal
+Testing Group with automatic notifications. It is assigned to Public Testers,
+but remains `READY_FOR_BETA_SUBMISSION`: Apple refused submission because build
+299 still occupies this version's public beta-review slot in
+`WAITING_FOR_REVIEW`. Submit build 301 after that review finishes or is
+withdrawn. No App Store version was submitted for release.
 
 ## Apple references
 

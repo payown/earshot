@@ -1,0 +1,13 @@
+Chapter 108 - Build 301
+
+What to try first:
+
+Open Earshot on iPhone Duo's inner display and move among Inbox, Queue, Library, Downloads, and Settings in the sidebar. With nothing playing, check that no empty mini-player frame takes space beside the navigation. Start an episode and check that the mini-player appears, stays reachable with VoiceOver, and keeps playing as you fold and unfold. Check the same section stays selected, then try a partially folded pose and a narrow Split View window. Try large text and tell us the pose, iOS version, screen, and exact spoken control if anything is missing or hard to reach. On a conventional iPhone, check that the familiar tabs and mini-player still work.
+
+Kashe's story:
+
+Kashe opened Inbox on Renata's Duo and noticed a quiet shape at the bottom of the screen. Nothing was playing, but the shape looked ready to be pressed. She traced its edge, then folded the phone. It was still there.
+
+Renata made a note while Kashe checked the next build. The empty shape was gone. Kashe opened Queue, unfolded the phone, and found the sidebar where she expected it.
+
+“Now there is room for the controls that matter,” she said.

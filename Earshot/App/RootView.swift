@@ -866,9 +866,20 @@ private struct TabChrome: ViewModifier {
 /// Hosts the mini player in the system-managed tab accessory introduced in
 /// iOS 26. Earlier systems retain the proven per-tab safe-area inset above.
 private struct TabPlayerAccessory: ViewModifier {
+    @Environment(PlayerService.self) private var player
+
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.1, *) {
+            // An empty accessory leaves a visible capsule beside the vertical
+            // tab bar on Duo. Keep the native accessory attached to the same
+            // TabView, but let the system hide it until a title is loaded.
+            content
+                .tabViewBottomAccessory(isEnabled: player.currentTitle != nil) {
+                    NowPlayingBar()
+                        .accessibilitySortPriority(0)
+                }
+        } else if #available(iOS 26.0, *) {
             content
                 .tabViewBottomAccessory {
                     NowPlayingBar()

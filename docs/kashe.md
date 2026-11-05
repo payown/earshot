@@ -76,6 +76,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe noticed the empty mini-player frame on an unfolded Duo and checked
+  that it disappeared when no episode was loaded (Chapter 108).
 - Kashe borrowed Renata's iPhone Duo to check Earshot's sidebar and playback
   continuity while folding it (Chapter 107).
 - Kashe checks that a shared Listening Places folder keeps each device's file
@@ -3782,3 +3784,19 @@ The controls moved. The sentence kept going.
 “Still in Queue?” Renata asked.
 
 Kashe checked before answering. “Still here. Now let me hear the rest.”
+
+---
+
+Chapter 108 - Build 301
+
+What to try first:
+
+Open Earshot on iPhone Duo's inner display and move among Inbox, Queue, Library, Downloads, and Settings in the sidebar. With nothing playing, check that no empty mini-player frame takes space beside the navigation. Start an episode and check that the mini-player appears, stays reachable with VoiceOver, and keeps playing as you fold and unfold. Check the same section stays selected, then try a partially folded pose and a narrow Split View window. Try large text and tell us the pose, iOS version, screen, and exact spoken control if anything is missing or hard to reach. On a conventional iPhone, check that the familiar tabs and mini-player still work.
+
+Kashe's story:
+
+Kashe opened Inbox on Renata's Duo and noticed a quiet shape at the bottom of the screen. Nothing was playing, but the shape looked ready to be pressed. She traced its edge, then folded the phone. It was still there.
+
+Renata made a note while Kashe checked the next build. The empty shape was gone. Kashe opened Queue, unfolded the phone, and found the sidebar where she expected it.
+
+“Now there is room for the controls that matter,” she said.
