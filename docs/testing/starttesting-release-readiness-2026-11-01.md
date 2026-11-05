@@ -64,6 +64,13 @@ The handoff folder now contains a real iPhone-origin Listening Places device fil
 
 This **passes the real two-device folder selection and file-preservation check**. It does not establish that Earshot imports Listening Places changes from the other device; the feature is an export. Actual Mac VoiceOver speech/focus remains unobserved.
 
+## 1.2.5 release decision — 5 November 2026
+
+- The accepted integrated PR #1043 was squash-merged to `main` as `360d95c13f84e804817c6248e6b15a3d882c7af5`. Its tree hash exactly matches tested head `3b208f7b`; full CI passed on that exact head (41577427944). The merged-head CI run 42085011492 was queued when App Store staging began. A focused PR review found no new code blocker in the changed Listening Places, download, OPML, or chapter paths.
+- App Store Connect version **1.2.5** was created in PREPARE_FOR_SUBMISSION with manual release after approval. Build **298** was attached; en-US What's New was updated and read back. `asc validate` reported **0 errors, 0 blocking issues, 2 optional subscription-image warnings, and 2 informational notices** (manual release and unverifiable App Privacy publish state). The review-submission dry run found the correct build already attached.
+- Scope decision: proceed toward App Store review with this targeted maintenance fix. The cleanup-before-save and offline Listening Places timestamp defects predate #1043 and remain open at high attention. Build 298 improves the tested paths but does **not** claim to solve either failure case. Neither an ordinary green phone pass nor a focused code review establishes their failure-path safety. Keep them separate for a follow-up fix rather than implying they are complete in release notes or StartTesting.
+- Mac VoiceOver speech/focus and macOS patch-version feedback metadata remain open. The original Mac folder-write and foreign-file-protection behaviors passed on physical build 298, including a real iPhone-origin folder. Do not mark the whole release as live merely because the build is staged or submitted; record App Review and manual release separately.
+
 ## Build 298 acceptance sequence
 
 1. Confirm TestFlight, the in-app About screen, and App Store Connect all say **1.2.5 (298)**. Record the final candidate commit and CI run. Do not use build 297's result as acceptance of #1041.
