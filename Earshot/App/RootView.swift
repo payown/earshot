@@ -876,13 +876,13 @@ private struct TabPlayerAccessory: ViewModifier {
             // TabView, but let the system hide it until a title is loaded.
             content
                 .tabViewBottomAccessory(isEnabled: player.currentTitle != nil) {
-                    NowPlayingBar()
+                    NowPlayingBar(nativeAccessory: true)
                         .accessibilitySortPriority(0)
                 }
         } else if #available(iOS 26.0, *) {
             content
                 .tabViewBottomAccessory {
-                    NowPlayingBar()
+                    NowPlayingBar(nativeAccessory: true)
                         .accessibilitySortPriority(0)
                 }
         } else {

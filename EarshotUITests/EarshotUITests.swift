@@ -264,7 +264,10 @@ final class EarshotUITests: XCTestCase {
         let apply = app.buttons["Apply custom speed"]
         for _ in 0..<4 where !apply.isHittable { app.swipeUp() }
         apply.tap()
-        app.buttons["Done"].tap()
+        // iOS 27 can dismiss the custom-speed sheet when Apply is pressed.
+        // Earlier systems leave Done visible; both return to the same player.
+        let done = app.buttons["Done"]
+        if done.exists { done.tap() }
         XCTAssertTrue(speed.waitForExistence(timeout: 5))
         XCTAssertTrue((speed.value as? String ?? "").contains("0.98"))
         app.buttons["Close player"].tap()
