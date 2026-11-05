@@ -1,0 +1,15 @@
+Chapter 111 - Build 304
+
+What to try first:
+
+If build 303 crashed on an iPhone running iOS 27.2 beta, update to this build in place from TestFlight. Keep your app data installed. Tap Open in TestFlight, then open Earshot again from its Home Screen icon. Check that your shows, Queue, and saved playback position are still there. Start an episode, move Earshot to the background, and return to it. If it crashes, please submit the report and tell us the build number, iOS version, and approximate time. On iPhone Duo, check that the familiar tabs and the lists beside their details still work after the update.
+
+Kashe's story:
+
+Kashe tapped Open after an update. The Home Screen came back. She tried the Earshot icon and landed there again.
+
+She sent Renata the build number and the time it happened. Renata asked her to keep the app installed while they looked at the report.
+
+The next build opened. Kashe checked her Queue first, then found the interview waiting at the same place.
+
+“Good,” she said. “That was the part I didn't want to lose.”

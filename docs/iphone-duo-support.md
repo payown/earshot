@@ -287,6 +287,57 @@ runtime remain outside this validation. The latest conventional iPhone runtime
 tested here was iOS 26.5; source deployment compatibility and the signed
 archive remain iOS 18.0.
 
+The Duo tester later reported that the requested scenarios, including
+VoiceOver folding, passed on the device. This is tester confirmation, not a
+local physical-device run or a substitute for the simulator results above.
+
+## Conventional iPhone launch crash follow-up
+
+An iPhone 17 Pro Max running iOS 27.2 beta (24B5084k) repeatedly terminated
+Earshot 1.2.6 builds 301 and 303, including immediately after opening build
+303 from TestFlight or SpringBoard. The build 303 reports end in
+`FeedRefreshStatusMonitor.wasRunningAttemptSkipped` during app startup. The
+thread's program counter and `x16` register are zero; its return address is
+the instruction after a call through the Foundation `Date >=` symbol stub.
+The release executable imports this operator weakly. The corresponding
+`Date <=` operator is also a weak import and is called elsewhere in feed
+refresh, Queue, folders, playback handoff, sleep timer, and entitlement checks.
+On this beta runtime the `Date >=` import appears to resolve to zero. The
+report labels the termination `CODESIGNING 2 Invalid Page`, but the matching
+registers and disassembly point to a missing weak operator as the actionable
+cause. Reinstalling without a code fix would also risk app data and does not
+explain why two different builds failed at the same source call.
+
+The corrective source change compares `Date.timeIntervalSinceReferenceDate`
+values at those sites, preserving the same inclusive boundaries and the iOS
+18 deployment target. The Xcode 27.2 signed Release archive and exported IPA
+for 1.2.6 (304) passed `codesign --verify --deep --strict`; neither binary
+imports the weak Foundation `Date <=` or `Date >=` operators. The corrected
+Debug app launched twice and stayed running on an iOS 27.2 iPhone 18 Pro
+simulator. The simulator runtime is newer than the affected physical beta.
+An in-place TestFlight update and launch check on that iPhone are still needed
+before calling the crash fixed on the reported device. The source change does
+not modify persistence, signing settings, or accessibility semantics.
+
+The iOS 26.5 iPhone 17 Pro simulator full test run (excluding the two known
+host-blocked StoreKit suites) recorded 2,736 passes, 34 skips, and one UI
+failure. That UI test measured a 56-point focus frame as
+`55.99999999999994` and also required the visible transport row to sit within
+an arbitrary percentage of screen height. The captured screen showed the
+transport and notes controls on screen. The test now tolerates floating-point
+rounding and relies on its existing hit-target, safe-area, and scroll-stability
+checks. The corrected test passed in a fresh DerivedData run. The complete
+suite was not rerun after this test-only correction.
+
+Build 304's uploaded IPA processed as `VALID` in App Store Connect
+(`04d75c5b-1507-40af-8404-12547c2ebe34`). The Chapter 111 What to Test
+notes match `docs/testflight/build-304-notes.txt`. Internal Testing Group and
+Public Testers both have access, both report `IN_BETA_TESTING`, and the build
+304 Beta App Review submission is `APPROVED`. Automatic tester notifications
+are enabled; delivery to individual testers was not verified. No App Store
+release was submitted. Physical iPhone 17 Pro Max launch and background
+relaunch after updating in place to build 304 remain unverified.
+
 ## Apple references
 
 - [Preparation guide](https://developer.apple.com/iphone-duo/prepare/)

@@ -79,6 +79,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 - Kashe asked Renata to leave the five tabs as tabs and put each list beside its
   own details on the open Duo. She checked that selecting an episode stayed
   silent until she pressed Play (Chapter 110).
+- Kashe reported a launch crash after an update with the build number and time,
+  kept the app installed, and checked her Queue and saved place when the next
+  build opened (Chapter 111).
 - Kashe used the full player title when the narrow Duo cover left room for
   transport controls but little room for the mini-player title (Chapter 109).
 - Kashe noticed the empty mini-player frame on an unfolded Duo and checked
@@ -3835,3 +3838,21 @@ Renata opened the Library on the Duo. Kashe found the same five tabs she knew on
 “Now Play,” she said. Renata pressed the button, and the player opened at once.
 
 Kashe returned to the show list and tried another. The route back was where she expected it.
+
+---
+
+Chapter 111 - Build 304
+
+What to try first:
+
+If build 303 crashed on an iPhone running iOS 27.2 beta, update to this build in place from TestFlight. Keep your app data installed. Tap Open in TestFlight, then open Earshot again from its Home Screen icon. Check that your shows, Queue, and saved playback position are still there. Start an episode, move Earshot to the background, and return to it. If it crashes, please submit the report and tell us the build number, iOS version, and approximate time. On iPhone Duo, check that the familiar tabs and the lists beside their details still work after the update.
+
+Kashe's story:
+
+Kashe tapped Open after an update. The Home Screen came back. She tried the Earshot icon and landed there again.
+
+She sent Renata the build number and the time it happened. Renata asked her to keep the app installed while they looked at the report.
+
+The next build opened. Kashe checked her Queue first, then found the interview waiting at the same place.
+
+“Good,” she said. “That was the part I didn't want to lose.”
