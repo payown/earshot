@@ -832,8 +832,9 @@ enum GroupedQueueDrag {
 /// One queue item whose selection button's Actions rotor is the user's
 /// configured queue Quick Actions (in order), so a screen-reader user can play,
 /// reorder, or remove without a drag gesture. The row selects details; its
-/// separate Play button starts audio. Swipe exposes destructive actions and
-/// the context menu exposes the other configured actions.
+/// visible Play button starts audio for touch users. VoiceOver keeps one stop
+/// per episode and offers Play in the Actions rotor. Swipe exposes destructive
+/// actions and the context menu exposes the other configured actions.
 private struct QueueRow: View {
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
@@ -868,6 +869,9 @@ private struct QueueRow: View {
     private var rowContent: some View {
         let episodeID = episode.persistentModelID
         let presentations = QueueItemAction.presentations(actions, for: episode, moveMode: moveMode)
+        let rotorPresentations = voiceOverEnabled && !actions.contains(.playNow)
+            ? QueueItemAction.presentations(actions + [.playNow], for: episode, moveMode: moveMode)
+            : presentations
         // Castro-style "X min left" / total length, the same treatment EpisodeRow
         // gives every other list. The Queue was the original surface this was
         // requested for but #493 only reached the shared row, not this bespoke
@@ -950,7 +954,7 @@ private struct QueueRow: View {
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572). The
         // selection double-tap and hint above stay independent of those actions.
-        .queueActionsRotor(presentations, supplementalActions: supplementalActions) { action in
+        .queueActionsRotor(rotorPresentations, supplementalActions: supplementalActions) { action in
             guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
             performAction(action)
         }
@@ -972,6 +976,7 @@ private struct QueueRow: View {
             .accessibilityLabel("Play \(episode.title)")
             .accessibilityHint("Starts playback immediately")
             .accessibilityIdentifier("queue.row.play")
+            .accessibilityHidden(voiceOverEnabled)
         }
     }
 

@@ -54,6 +54,68 @@ final class EarshotUITests: XCTestCase {
         XCTAssertEqual(app.buttons["player.playPause"].label, "Pause")
     }
 
+    func testQueueVoiceOverHasOneStopPerEpisode() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch.waitForExistence(timeout: 15))
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+
+        // Drive real VoiceOver focus rather than inferring its order from the
+        // XCTest element tree, which includes touch-only visual controls.
+        var speech: [String] = []
+        for _ in 0..<40 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("#165 – No Excuses Left") { break }
+        }
+
+        let firstIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#166 – If You Used a Passkey") }),
+                                       "Queue's first episode was not reached: \(speech)")
+        let secondIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#165 – No Excuses Left") }),
+                                        "Queue's second episode was not reached: \(speech)")
+        XCTAssertEqual(secondIndex, firstIndex + 1,
+                       "Each Queue episode should be one VoiceOver stop: \(speech)")
+    }
+
+    func testSharedEpisodeRowVoiceOverHasOneStopPerEpisode() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+
+        var speech: [String] = []
+        for _ in 0..<40 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("#169 – Apple's Price Hikes") { break }
+        }
+
+        let firstIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#170 – Turn the Right Knob") }),
+                                       "The first show episode was not reached: \(speech)")
+        let secondIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#169 – Apple's Price Hikes") }),
+                                        "The second show episode was not reached: \(speech)")
+        XCTAssertEqual(secondIndex, firstIndex + 1,
+                       "Each shared episode row should be one VoiceOver stop: \(speech)")
+    }
+
     func testFolderMembershipPickerKeepsSelectionCurrent() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]

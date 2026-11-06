@@ -21,9 +21,9 @@ struct DetailSelectionTrait: ViewModifier {
 }
 
 /// One episode row. A list/detail host makes the row's double tap select the
-/// episode and adds a separate Play button. Other hosts retain the configured
-/// primary action. The configured actions remain on the VoiceOver Actions
-/// rotor in the user's order.
+/// episode and adds a visible Play button. VoiceOver keeps one stop per row and
+/// offers Play in the Actions rotor. Other hosts retain the configured primary
+/// action. The configured actions remain in the user's order.
 ///
 /// Selection mode is NOT handled here anymore: episode multi-select (#758)
 /// swaps this row out for the shared ``SelectableRow`` scaffold (via
@@ -96,6 +96,12 @@ struct EpisodeRow: View {
         } else {
             let episodeID = episode.persistentModelID
             let presentations = EpisodeAction.presentations(actions, for: episode)
+            // VoiceOver moves through the episode list one row at a time. The
+            // visible Play button remains touchable, while its equivalent row
+            // action is available even if Play now was hidden in Quick Actions.
+            let rotorPresentations = onSelect != nil && voiceOverEnabled && !actions.contains(.playNow)
+                ? EpisodeAction.presentations(actions + [.playNow], for: episode)
+                : presentations
             let primary = presentations.first
             let base = rowButton(primaryLabel: primary?.label) {
                 if let onSelect {
@@ -108,7 +114,7 @@ struct EpisodeRow: View {
                 performAction(primary.action)
             }
             .episodeActionsRotor(
-                presentations,
+                rotorPresentations,
                 supplementalActions: supplementalActions,
                 perform: { action in
                     guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
@@ -147,6 +153,7 @@ struct EpisodeRow: View {
                     .accessibilityLabel("Play \(episode.title)")
                     .accessibilityHint("Starts playback immediately")
                     .accessibilityIdentifier("episode.row.play")
+                    .accessibilityHidden(voiceOverEnabled)
                 }
             } else if voiceOverEnabled {
                 base
