@@ -175,8 +175,12 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
                 accepted = false
                 reason = "Phone playback changed before handoff"
             }
-        case "back": player.skipBack()
-        case "forward": player.skipForward()
+        case "back":
+            if player.nowPlayingEpisode == nil { accepted = false; reason = "Start an episode on iPhone first" }
+            else { player.skipBack() }
+        case "forward":
+            if player.nowPlayingEpisode == nil { accepted = false; reason = "Start an episode on iPhone first" }
+            else { player.skipForward() }
         case "prepareHandoff":
             guard let feedURL, let guid, let container = runtime.readyContainer else {
                 return ["accepted": false, "reason": "Phone library unavailable"]

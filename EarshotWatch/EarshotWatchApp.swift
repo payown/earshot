@@ -13,6 +13,7 @@ final class WatchRuntime {
 
     init() throws {
         library = try WatchLibrary()
+        library.startObservingEntitlementUpdates()
         player = WatchPlayer(library: library)
         downloads = WatchDownloadManager(library: library)
         phone = WatchPhoneControl()
