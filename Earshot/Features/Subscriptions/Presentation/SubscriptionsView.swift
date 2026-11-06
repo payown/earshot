@@ -237,6 +237,7 @@ struct SubscriptionsView: View {
                 } label: {
                     Label("Search your library", systemImage: "magnifyingglass")
                 }
+                .keyboardShortcut("f", modifiers: .command)
             }
             ToolbarItem(placement: .topBarLeading) {
                 NavigationLink {

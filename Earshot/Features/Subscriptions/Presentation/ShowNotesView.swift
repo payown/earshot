@@ -8,6 +8,8 @@ struct ShowNotesView: View {
         NavigationStack {
             ScrollView {
                 ShowNotesContent(episode: episode)
+                    .frame(maxWidth: 720, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                     .padding()
             }
             .navigationTitle("Show notes")
