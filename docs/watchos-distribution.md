@@ -1,40 +1,40 @@
 # Integrated Apple Watch TestFlight candidate
 
-Candidate: Earshot **1.2.6 (307)** from `feature/watchos-126-integration`. Target: existing App Store Connect app `6770760602`, **Internal Testing Group** only. App Store Connect reports 1.2.6 build 306 as the latest processed and uploaded build and 307 as the next available number. This is an internal evaluation build; do not submit for public review or merge before Michael's physical-device approval.
+Earshot **1.2.6 (309)** is the internal evaluation candidate from `feature/watchos-126-integration` for App Store Connect app `6770760602`, **Internal Testing Group** only. Do not submit for public review or merge before Michael's physical-device approval.
 
-## Current blocker
+## Version and validation history
 
-The signed **307** archive stopped at provisioning. Xcode reports no configured Apple developer account; its fallback wildcard profile lacks the watch App Group and CloudKit entitlements required by `media.payown.earshot.watchkitapp` and `media.payown.earshot.watchkitapp.widgets`. The installed dedicated profiles cover only the iPhone bundle. `asc bundle-ids list` returns Apple's **PLA Update available** response, explicitly requiring Account Holder Michael Babcock to accept the updated Program License Agreement before membership resources can be used. Apple confirms this requirement in [Roles and access](https://developer.apple.com/help/account/access/roles/). The assistant must not accept a legal agreement for Michael.
+App Store Connect's latest processed 1.2.6 build before the watch integration was **306**. Build **307** was signed and uploaded, but Apple rejected it with validation error **90680**: the watch app was embedded in `Earshot.app/PlugIns` instead of `Earshot.app/Watch`. The failed upload reserves 307; App Store Connect reported **308** as the next available build number. `project.yml` now uses XcodeGen's native **Embed Watch Content** phase, which sets the Watch destination. Build **308** passed bundle validation and reached processing, but Apple rejected four App Intent descriptions with error **90626** because they used the word “Apple.” Those descriptions have been corrected. The failed upload reserves 308; App Store Connect reports **309** as the next available build. The regenerated project must be used for 309.
 
-## Resume after the account holder accepts the agreement
+The Apple Developer Program License Agreement has been accepted. Team `72PH974742` owns the two watch App IDs. Both have the approved `group.media.payown.earshot.watch` App Group; the watch app also has the existing `iCloud.media.payown.earshot` container. App Store profiles for the phone, watch app and widget extension are installed. No phone signing, entitlement or purchase UI settings were changed.
 
-1. Sign in to [Apple Developer Account](https://developer.apple.com/account/) as Account Holder, review and accept the pending Program License Agreement. Verify `asc bundle-ids list` succeeds.
-2. Register the two watch bundle identifiers and their approved capabilities if they do not already exist: App Groups on both targets; the existing `iCloud.media.payown.earshot` CloudKit container on the watch app. Create App Store provisioning profiles for both watch bundles with the installed Apple Distribution certificate. Do not edit phone entitlements or production signing settings.
-3. In this linked worktree, run the signed archive with command-line signing overrides:
+## Build and export
 
-   ```bash
-   xcodegen generate
-   xcodebuild archive -project Earshot.xcodeproj -scheme Earshot -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/EarshotWatch307.xcarchive -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=72PH974742
-   ```
+From the linked worktree, regenerate the project, then archive with command-line signing overrides. The Xcode/App Store Connect API authentication key may be supplied through Xcode's `-authenticationKeyPath`, `-authenticationKeyID` and `-authenticationKeyIssuerID` options when needed; keep the private key out of the repository and logs.
 
-4. Confirm `Earshot.app`, its `PlugIns/EarshotWatch.app`, and the nested `PlugIns/EarshotWatchWidgets.appex` have the expected bundle IDs and version **1.2.6 (307)**. Confirm the watch Info.plist has `WKRunsIndependentlyOfCompanionApp = true`, `UIBackgroundModes = audio`, and `EarshotCloudKitEnabled = YES`. Inspect the signed entitlements for the approved App Group and existing CloudKit container.
-5. Create the export-options plist and export:
+```bash
+xcodegen generate
+xcodebuild archive -project Earshot.xcodeproj -scheme Earshot -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/EarshotWatch309Signed.xcarchive -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=72PH974742
+```
 
-   ```bash
-   cat > /tmp/EarshotWatchExportOptions.plist <<'PLIST'
-   <?xml version="1.0" encoding="UTF-8"?>
-   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-   <plist version="1.0"><dict>
-     <key>method</key><string>app-store-connect</string>
-     <key>teamID</key><string>72PH974742</string>
-     <key>signingStyle</key><string>automatic</string>
-     <key>uploadSymbols</key><true/>
-   </dict></plist>
-   PLIST
-   xcodebuild -exportArchive -archivePath /tmp/EarshotWatch307.xcarchive -exportPath /tmp/EarshotWatch307Export -exportOptionsPlist /tmp/EarshotWatchExportOptions.plist -allowProvisioningUpdates
-   asc publish testflight --app 6770760602 --ipa /tmp/EarshotWatch307Export/Earshot.ipa --group 'Internal Testing Group' --wait --notify
-   ```
+The archive must contain `Products/Applications/Earshot.app/Watch/EarshotWatch.app` and the watch widget at `Watch/EarshotWatch.app/PlugIns/EarshotWatchWidgets.appex`. All three bundles must report **1.2.6 (309)**. Confirm the watch Info.plist declares independent installation and background audio, and inspect the signed entitlements for the watch App Group and existing CloudKit container.
 
-6. Check App Store Connect/TestFlight processing and record the actual uploaded build number and availability. Use the one-session `docs/watchos-device-testing.md` guide. No simulator result substitutes for that physical watch pass.
+Export with `method = app-store-connect`, `destination = export`, `teamID = 72PH974742`, `signingStyle = manual`, and an Apple Distribution certificate. The `provisioningProfiles` dictionary maps the three bundle IDs to the installed App Store profile names. The initial 307 export used:
 
-The existing `tool/swiftui-testflight.sh --test` can upload internal builds, but its fallback export profile map contains only the iPhone bundle. Use the explicit archive/export path above until a watch-aware fallback has been validated.
+- `media.payown.earshot`: `Earshot App Store Build 205`
+- `media.payown.earshot.watchkitapp`: `Earshot Watch App Store 307 Final`
+- `media.payown.earshot.watchkitapp.widgets`: `Earshot Watch Widgets App Store 307 Final`
+
+Profile names contain 307 but their contents are independent of build number. Verify they remain active before reuse. Export with `xcodebuild -exportArchive -archivePath /tmp/EarshotWatch309Signed.xcarchive -exportPath /tmp/EarshotWatch309Export -exportOptionsPlist /tmp/EarshotWatch309ExportOptions.plist -allowProvisioningUpdates`. Verify the IPA's bundle layout, signatures and entitlements before upload.
+
+Upload only to the existing internal group:
+
+```bash
+asc publish testflight --app 6770760602 --ipa /tmp/EarshotWatch309Export/Earshot.ipa --group 0d4027e4-f63b-4798-a882-5c8c29b16d89 --test-notes "$(cat docs/testflight/build-309-notes.txt)" --locale en-US --wait --notify --timeout 30m
+```
+
+Check App Store Connect's upload validation, processing, build-group assignment and availability. A committed upload alone does not establish that TestFlight is ready. Use the one-session `docs/watchos-device-testing.md` guide after processing. The existing `tool/swiftui-testflight.sh --test` fallback profile map contains only the iPhone bundle, so the explicit archive/export path is used for this integrated build.
+
+## Verified internal distribution
+
+The signed 309 archive and export succeeded. The IPA contains the watch app in the iPhone app's `Watch` directory, with its widget in the watch app's `PlugIns` directory. All bundles report 1.2.6 (309); signatures verify, and the watch has the approved App Group and CloudKit entitlements with `get-task-allow = false`. App Store Connect build `02931f5f-0fa3-462b-b152-4698f6d508b9` is **VALID**, upload **COMPLETE**, and internal state **IN_BETA_TESTING**. The existing **Internal Testing Group** receives all builds and includes 309. Test notes are present; `autoNotifyEnabled` is true. Hardware validation is still required before merge or public release.

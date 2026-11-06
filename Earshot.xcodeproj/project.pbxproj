@@ -299,7 +299,6 @@
 		9EAFD236D817C1E0BE979FAA /* FolderRunController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99B2109D775D5AD589BB90AC /* FolderRunController.swift */; };
 		9FFE10BD7168BCAEA2B8B0FF /* EpisodeListDataSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABAB3C4388D47FA0BCCDDFFC /* EpisodeListDataSourceTests.swift */; };
 		A018725498F695455E96B4F3 /* PersonalAudioFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7F4B26C3FA2AF8A1C4E2779 /* PersonalAudioFoundationTests.swift */; };
-		A04AEDD5B0F930E3AFCB167E /* EarshotWatch.app in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 57B581041041416B760895BB /* EarshotWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A0D368264B5AC56143DBDE48 /* StoreMigrationV13ToV14Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CB64E7843BB4B9A0F97254 /* StoreMigrationV13ToV14Tests.swift */; };
 		A11D95D395F148768C78B0FE /* SearchContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C723BD6C55F2EDD21D5B8BD8 /* SearchContent.swift */; };
 		A17BD04A2E9B376E2A5F0351 /* PodcastCapPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDEE459C0D777CB9F63272B /* PodcastCapPolicy.swift */; };
@@ -455,6 +454,7 @@
 		D9461712C09C0BA1E024B285 /* PodcastPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F0790D68AE461D591E68D1 /* PodcastPreviewView.swift */; };
 		DA8A89E9C242146855F938FE /* ChapterSkipLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FD316F5819C53E890B613A2 /* ChapterSkipLogic.swift */; };
 		DAE5B17F783B9608A4E356A3 /* QuickActionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD6029A247CD01E7E6D06F1 /* QuickActionStore.swift */; };
+		DB3D47328E81FF28B9002E18 /* EarshotWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 57B581041041416B760895BB /* EarshotWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DC2DEAD1499DC1849661C3DB /* FolderDetailLabelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4638BF38BD5D15F30DD349BF /* FolderDetailLabelTests.swift */; };
 		DCF615FEA133899EEF5D2798 /* TranscriptViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3489F4131C5F01EEE8BC34C0 /* TranscriptViewModelTests.swift */; };
 		DD85373EE189A1D263322047 /* OPMLImportProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 682B36BB7BE40E963A213FAF /* OPMLImportProgressTests.swift */; };
@@ -578,17 +578,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		002A034CF39DCDA3916E372F /* Embed Dependencies */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				A04AEDD5B0F930E3AFCB167E /* EarshotWatch.app in Embed Dependencies */,
-			);
-			name = "Embed Dependencies";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		3AF43A2A3AAACBB5A29EB8FC /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -598,6 +587,17 @@
 				2CA182D7B0F1ACBA868723A8 /* EarshotWatchWidgets.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C737036BC656E3BF4244893C /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				DB3D47328E81FF28B9002E18 /* EarshotWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -2515,7 +2515,7 @@
 			buildPhases = (
 				5D13E956E409F7051DBFD895 /* Sources */,
 				7CFCE4E4E5D99BE35181A59E /* Resources */,
-				002A034CF39DCDA3916E372F /* Embed Dependencies */,
+				C737036BC656E3BF4244893C /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
@@ -3269,7 +3269,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 307;
+				CURRENT_PROJECT_VERSION = 309;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -3413,7 +3413,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 307;
+				CURRENT_PROJECT_VERSION = 309;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -3569,7 +3569,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 307;
+				CURRENT_PROJECT_VERSION = 309;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
