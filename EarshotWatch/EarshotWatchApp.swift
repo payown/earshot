@@ -13,7 +13,13 @@ final class WatchRuntime {
         player = WatchPlayer(library: library)
         downloads = WatchDownloadManager(library: library)
         phone = WatchPhoneControl()
+        WatchRuntimeRegistry.runtime = self
     }
+}
+
+@MainActor
+enum WatchRuntimeRegistry {
+    static weak var runtime: WatchRuntime?
 }
 
 @main
@@ -51,8 +57,9 @@ struct WatchLaunchView: View {
 
 struct WatchHomeView: View {
     let runtime: WatchRuntime
+    @State private var path: [String] = []
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if let episode = runtime.player.episode {
                     Section("Continue Listening") {
@@ -75,6 +82,20 @@ struct WatchHomeView: View {
                 if let message = runtime.library.message { Text(message) }
             }
             .navigationTitle("Earshot")
+            .navigationDestination(for: String.self) { destination in
+                if destination == "now-playing" { WatchNowPlayingView(runtime: runtime) }
+            }
+            .onOpenURL { url in
+                if url.scheme == "earshot-watch", url.host == "now-playing" {
+                    path.append("now-playing")
+                }
+            }
+            .onAppear {
+                if UserDefaults.standard.string(forKey: "watchPendingDestination") == "now-playing" {
+                    UserDefaults.standard.removeObject(forKey: "watchPendingDestination")
+                    path.append("now-playing")
+                }
+            }
         }
     }
 }
@@ -111,13 +132,10 @@ struct WatchPodcastView: View {
     let podcast: WatchPodcast
     var body: some View {
         List {
-            if !podcast.summary.isEmpty { Section("About") { Text(podcast.summary) } }
+            if !podcast.summary.isEmpty { Section("About") { Text(EpisodeSummary.plainText(podcast.summary)) } }
             Section("Episodes") {
                 ForEach(runtime.library.episodes.filter { $0.feedURL == podcast.feedURL }) { episode in
-                    NavigationLink { WatchEpisodeView(runtime: runtime, episode: episode) } label: { WatchEpisodeLabel(episode: episode) }
-                        .accessibilityAction(named: "Play") { Task { await runtime.player.play(episode) } }
-                        .accessibilityAction(named: "Play Next") { runtime.library.enqueue(episode, next: true) }
-                        .accessibilityAction(named: "Play Later") { runtime.library.enqueue(episode, next: false) }
+                    WatchPlayableEpisodeRow(runtime: runtime, episode: episode)
                 }
             }
             Button("Refresh podcast") { Task { await runtime.library.refresh(feedURL: podcast.feedURL) } }
@@ -145,6 +163,55 @@ struct WatchEpisodeLabel: View {
     }
 }
 
+/// The first control is Play so a VoiceOver double tap starts listening.
+/// Details remains a separate, discoverable control.
+struct WatchPlayableEpisodeRow: View {
+    enum Context { case library, inbox, queue, downloads }
+    let runtime: WatchRuntime
+    let episode: WatchEpisode
+    var context: Context = .library
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Group {
+                switch context {
+                case .library:
+                    playButton
+                case .inbox:
+                    playButton
+                        .accessibilityAction(named: "Mark Played") { runtime.library.markPlayed(episode, played: true) }
+                case .queue:
+                    playButton
+                        .accessibilityAction(named: "Move Up") { runtime.library.moveQueue(episode, offset: -1) }
+                        .accessibilityAction(named: "Move Down") { runtime.library.moveQueue(episode, offset: 1) }
+                        .accessibilityAction(named: "Remove from Queue") { runtime.library.removeFromQueue(episode) }
+                case .downloads:
+                    playButton
+                        .accessibilityAction(named: "Delete Download") { runtime.downloads.delete(episode) }
+                }
+            }
+            NavigationLink("Episode details") {
+                WatchEpisodeView(runtime: runtime, episode: episode)
+            }
+            .font(.caption)
+            .accessibilityLabel("Details for \(episode.title)")
+        }
+    }
+
+    private var playButton: some View {
+        Button {
+            Task { await runtime.player.play(episode) }
+        } label: {
+            WatchEpisodeLabel(episode: episode)
+        }
+        .accessibilityLabel("Play \(episode.title)")
+        .accessibilityValue(episode.isPlayed ? "Played" : episode.positionSeconds > 0 ? "Partly played" : "Unplayed")
+        .accessibilityHint("Plays on Apple Watch")
+        .accessibilityAction(named: "Play Next") { runtime.library.enqueue(episode, next: true) }
+        .accessibilityAction(named: "Play Later") { runtime.library.enqueue(episode, next: false) }
+    }
+}
+
 struct WatchEpisodeView: View {
     let runtime: WatchRuntime
     let episode: WatchEpisode
@@ -163,6 +230,9 @@ struct WatchEpisodeView: View {
                 Button("Play Later") { runtime.library.enqueue(episode, next: false) }
                 Button(episode.isPlayed ? "Mark Unplayed" : "Mark Played") { runtime.library.markPlayed(episode, played: !episode.isPlayed) }
                 if runtime.downloads.activeIDs.contains(episode.identity) {
+                    ProgressView(value: runtime.downloads.progressByID[episode.identity] ?? 0)
+                        .accessibilityLabel("Download progress")
+                        .accessibilityValue("\(Int((runtime.downloads.progressByID[episode.identity] ?? 0) * 100)) percent")
                     Button("Cancel download") { runtime.downloads.cancel(episode) }
                 } else if episode.downloadFilename == nil {
                     Button("Download to Apple Watch") { runtime.downloads.start(episode) }
@@ -171,7 +241,13 @@ struct WatchEpisodeView: View {
                 }
                 Button("Add bookmark") { runtime.library.addBookmark(episode) }
             }
-            if !episode.summary.isEmpty { Section("Show notes") { Text(episode.summary) } }
+            if !episode.summary.isEmpty {
+                Section("Show notes") {
+                    ForEach(Array(EpisodeSummary.paragraphs(episode.summary).enumerated()), id: \.offset) { _, paragraph in
+                        Text(paragraph)
+                    }
+                }
+            }
             if let error = runtime.downloads.errorByID[episode.identity] ?? episode.downloadError { Text("Download error: \(error)") }
         }
         .navigationTitle("Episode")
@@ -183,10 +259,7 @@ struct WatchInboxView: View {
     var body: some View {
         List {
             ForEach(runtime.library.inbox) { episode in
-                NavigationLink { WatchEpisodeView(runtime: runtime, episode: episode) } label: { WatchEpisodeLabel(episode: episode) }
-                    .accessibilityAction(named: "Play") { Task { await runtime.player.play(episode) } }
-                    .accessibilityAction(named: "Play Next") { runtime.library.enqueue(episode, next: true) }
-                    .accessibilityAction(named: "Mark Played") { runtime.library.markPlayed(episode, played: true) }
+                WatchPlayableEpisodeRow(runtime: runtime, episode: episode, context: .inbox)
             }
             if runtime.library.inbox.isEmpty { Text("No new episodes") }
         }
@@ -199,11 +272,7 @@ struct WatchQueueView: View {
     var body: some View {
         List {
             ForEach(runtime.library.queue) { episode in
-                NavigationLink { WatchEpisodeView(runtime: runtime, episode: episode) } label: { WatchEpisodeLabel(episode: episode) }
-                    .accessibilityAction(named: "Play") { Task { await runtime.player.play(episode) } }
-                    .accessibilityAction(named: "Move Up") { runtime.library.moveQueue(episode, offset: -1) }
-                    .accessibilityAction(named: "Move Down") { runtime.library.moveQueue(episode, offset: 1) }
-                    .accessibilityAction(named: "Remove from Queue") { runtime.library.removeFromQueue(episode) }
+                WatchPlayableEpisodeRow(runtime: runtime, episode: episode, context: .queue)
             }
             if runtime.library.queue.isEmpty { Text("Your queue is empty") }
         }
@@ -215,11 +284,20 @@ struct WatchDownloadsView: View {
     let runtime: WatchRuntime
     var body: some View {
         List {
-            Text("Available space: \(ByteCountFormatter.string(fromByteCount: runtime.downloads.availableBytes, countStyle: .file))")
+            if runtime.downloads.availableBytes > 0 {
+                Text("Available space: \(ByteCountFormatter.string(fromByteCount: runtime.downloads.availableBytes, countStyle: .file))")
+            } else { Text("Storage information unavailable") }
+            ForEach(runtime.library.episodes.filter { runtime.downloads.activeIDs.contains($0.identity) }) { episode in
+                VStack(alignment: .leading) {
+                    Text(episode.title)
+                    ProgressView(value: runtime.downloads.progressByID[episode.identity] ?? 0)
+                        .accessibilityLabel("Download progress for \(episode.title)")
+                        .accessibilityValue("\(Int((runtime.downloads.progressByID[episode.identity] ?? 0) * 100)) percent")
+                    Button("Cancel download") { runtime.downloads.cancel(episode) }
+                }
+            }
             ForEach(runtime.library.downloads) { episode in
-                NavigationLink { WatchEpisodeView(runtime: runtime, episode: episode) } label: { WatchEpisodeLabel(episode: episode) }
-                    .accessibilityAction(named: "Play") { Task { await runtime.player.play(episode) } }
-                    .accessibilityAction(named: "Delete Download") { runtime.downloads.delete(episode) }
+                WatchPlayableEpisodeRow(runtime: runtime, episode: episode, context: .downloads)
             }
             if runtime.library.downloads.isEmpty { Text("No downloaded episodes") }
         }
@@ -235,6 +313,8 @@ struct WatchBookmarksView: View {
                 Button("\(bookmark.episodeTitle), \(Int(bookmark.positionSeconds)) seconds") {
                     if let episode = runtime.library.episodes.first(where: { $0.identity == bookmark.episodeIdentity }) {
                         Task { await runtime.player.play(episode, at: bookmark.positionSeconds) }
+                    } else {
+                        runtime.library.report("This bookmarked episode is not available on Apple Watch")
                     }
                 }
                 .accessibilityAction(named: "Delete Bookmark") { runtime.library.removeBookmark(bookmark) }

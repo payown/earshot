@@ -64,6 +64,17 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
         case "pause": player.pause()
         case "back": player.skipBack()
         case "forward": player.skipForward()
+        case "prepareHandoff":
+            guard let feedURL, let guid, let container = runtime.readyContainer else {
+                return ["accepted": false, "reason": "Phone library unavailable"]
+            }
+            let descriptor = FetchDescriptor<Episode>(predicate: #Predicate {
+                $0.guid == guid && $0.podcast?.feedURL == feedURL
+            })
+            if (try? container.mainContext.fetch(descriptor).first) == nil {
+                accepted = false
+                reason = "Episode is not in the phone library"
+            }
         case "play":
             guard let feedURL, let guid, let container = runtime.readyContainer else {
                 return ["accepted": false, "reason": "Phone library unavailable"]
@@ -106,6 +117,7 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
             result["guid"] = episode.guid
             result["feedURL"] = episode.podcast?.feedURL ?? ""
             result["audioURL"] = episode.audioURL
+            result["podcastTitle"] = episode.podcast?.title ?? "Podcast"
         }
         return result
     }

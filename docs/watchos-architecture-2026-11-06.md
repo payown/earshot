@@ -1,6 +1,6 @@
 # Earshot for Apple Watch: audit and implementation plan
 
-**Status:** Architecture proposed; implementation awaits Michael's approval under `CLAUDE.md` and `.claude/rules/phase-progression.md`. No target, capability, entitlement, signing, purchase UI, or frozen schema has been changed.
+**Status:** Michael approved all six implementation phases on 2026-11-06. Implementation is in progress; `docs/watchos-progress.md` is the current checkpoint. This architecture document preserves the original audit and design contract.
 
 **Branch/worktree:** `feature/watchos-architecture` at `/Users/michaelbabcock/code/earshot-watchos`, based on `main` at `360d95c1`.
 
@@ -51,7 +51,7 @@ Each phase gets a small PR to `main`, assigned to `@payown`, with non-generated 
 
 ## Approval gates and unknowns
 
-- **Approval now:** `CLAUDE.md` requires an outline and confirmation before code; its phase-progression rule requires confirmation before a new phase. Phase 1 changes the project and introduces watch capabilities. Michael must approve the target identifier and watch background-audio mode, and whether the existing CloudKit container entitlement may be added to the watch target. Existing iOS signing/entitlements/capabilities remain untouched.
+- **Approval received:** Michael authorized all six phases, the watch target identifier, watch background audio, watch-specific CloudKit use with the existing container, and an integrated TestFlight candidate. Existing iOS signing/entitlements/capabilities remain protected.
 - **CloudKit:** Verify that the current production compact projection schema and per-device contribution model can safely accept watch records. Never initialize/deploy a new production CloudKit schema or change entitlements silently. The existing tombstone-retention follow-up remains unresolved.
 - **StoreKit:** Apple documents universal purchases for companion watch/iOS apps, but the current product configuration and `Transaction.currentEntitlements` must be tested on a paired device and an independently installed watch. Purchase UI/restoration changes require separate approval.
 - **Audio/ATS:** Verify watch SDK availability for MediaPlayer remote commands, AVPlayer media formats, background URLSession behavior and direct HTTP media policy. Do not copy iOS ATS exception without review.
