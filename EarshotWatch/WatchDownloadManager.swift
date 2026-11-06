@@ -20,6 +20,13 @@ enum WatchDownloadValidation {
     }
 }
 
+enum WatchStoragePolicy {
+    static let minimumFreeBytes: Int64 = 50 * 1_024 * 1_024
+    static func hasReserve(availableBytes: Int64) -> Bool {
+        availableBytes == 0 || availableBytes >= minimumFreeBytes
+    }
+}
+
 @MainActor
 @Observable
 final class WatchDownloadManager {
@@ -31,14 +38,21 @@ final class WatchDownloadManager {
 
     init(library: WatchLibrary) {
         self.library = library
+        try? FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
+        var recover: [WatchEpisode] = []
         for episode in library.episodes {
+            if episode.downloadState == "downloading" && episode.downloadFilename == nil {
+                recover.append(episode)
+            }
             guard let filename = episode.downloadFilename else { continue }
             if !FileManager.default.fileExists(atPath: Self.destination(for: filename).path) {
                 episode.downloadFilename = nil
+                episode.downloadState = "failed"
                 episode.downloadError = "Download file missing. Download this episode again."
             }
         }
         if library.context.hasChanges { library.persist() }
+        for episode in recover { start(episode) }
     }
 
     static var directory: URL {
@@ -49,12 +63,18 @@ final class WatchDownloadManager {
 
     func start(_ episode: WatchEpisode) {
         guard tasks[episode.identity] == nil else { return }
+        guard episode.downloadFilename == nil else { return }
         guard let url = URL(string: episode.audioURL), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else {
             errorByID[episode.identity] = "Invalid audio address"
+            episode.downloadState = "failed"
+            episode.downloadError = "Invalid audio address"
+            library.persist()
             return
         }
         let identity = episode.identity
         activeIDs.insert(identity)
+        episode.downloadState = "downloading"
+        library.persist()
         progressByID[identity] = 0
         errorByID.removeValue(forKey: identity)
         tasks[identity] = Task { @MainActor [weak self] in
@@ -76,7 +96,7 @@ final class WatchDownloadManager {
                     throw WatchLibraryError.badResponse
                 }
                 let available = self.availableBytes
-                guard available == 0 || size < available else {
+                guard WatchStoragePolicy.hasReserve(availableBytes: available) else {
                     throw CocoaError(.fileWriteOutOfSpace)
                 }
                 let filename = WatchDownloadValidation.filename(for: url)
@@ -93,15 +113,19 @@ final class WatchDownloadManager {
                     throw error
                 }
                 episode.downloadFilename = filename
+                episode.downloadState = "completed"
                 episode.downloadError = nil
                 self.library.persist()
                 AccessibilityNotification.Announcement("Download complete: \(episode.title)").post()
             } catch {
-                let message = error is CancellationError ? "Download cancelled" : error.localizedDescription
+                let cancelled = Task.isCancelled || error is CancellationError ||
+                    (error as? URLError)?.code == .cancelled
+                let message = cancelled ? "Download cancelled" : error.localizedDescription
                 episode.downloadError = message
+                episode.downloadState = cancelled ? "none" : "failed"
                 self.errorByID[identity] = message
                 self.library.persist()
-                AccessibilityNotification.Announcement("Download failed: \(message)").post()
+                AccessibilityNotification.Announcement(cancelled ? "Download cancelled: \(episode.title)" : "Download failed: \(message)").post()
             }
         }
     }
@@ -113,6 +137,7 @@ final class WatchDownloadManager {
         do {
             try FileManager.default.removeItem(at: Self.destination(for: filename))
             episode.downloadFilename = nil
+            episode.downloadState = "none"
             library.persist()
         } catch {
             errorByID[episode.identity] = "Could not remove the download"
@@ -127,6 +152,8 @@ final class WatchDownloadManager {
 
 private final class WatchDownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let onProgress: @Sendable (Double) -> Void
+    private let lock = NSLock()
+    private var lastStep = -1
 
     init(onProgress: @escaping @Sendable (Double) -> Void) {
         self.onProgress = onProgress
@@ -136,7 +163,13 @@ private final class WatchDownloadProgressDelegate: NSObject, URLSessionDownloadD
                     didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
                     totalBytesExpectedToWrite: Int64) {
         guard totalBytesExpectedToWrite > 0 else { return }
-        onProgress(min(1, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)))
+        let fraction = min(1, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+        let step = Int(fraction * 20)
+        lock.lock()
+        let shouldPublish = step > lastStep
+        if shouldPublish { lastStep = step }
+        lock.unlock()
+        if shouldPublish { onProgress(fraction) }
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
