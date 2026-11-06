@@ -17,6 +17,15 @@ struct WatchPlaybackRequestGate {
     func owns(_ request: UUID) -> Bool { current == request }
 }
 
+enum WatchPlaybackSource {
+    static func choose(local: URL?, remoteAddress: String) -> URL? {
+        if let local, FileManager.default.fileExists(atPath: local.path) { return local }
+        guard let remote = URL(string: remoteAddress),
+              ["https", "http"].contains(remote.scheme?.lowercased() ?? "") else { return nil }
+        return remote
+    }
+}
+
 @MainActor
 @Observable
 final class WatchPlayer {
@@ -24,6 +33,7 @@ final class WatchPlayer {
     private var observer: Any?
     private var lastSavedSecond = -1
     private var sleepTask: Task<Void, Never>?
+    private var sleepDeadline: Date?
     private var notificationTokens: [NSObjectProtocol] = []
     private var playbackRequests = WatchPlaybackRequestGate()
     private let library: WatchLibrary
@@ -36,12 +46,24 @@ final class WatchPlayer {
     private(set) var rate: Float = 1
     private(set) var status = "Not playing"
     private(set) var sleepDescription = "Sleep timer off"
+    private(set) var routeDescription = "Route unavailable"
     private(set) var chapters: [Chapter] = []
 
     var currentChapterIndex: Int? { chapters.activeChapterIndex(at: positionSeconds) }
 
     init(library: WatchLibrary) {
         self.library = library
+        if let resumable = library.episodes
+            .filter({ !$0.isPlayed && $0.positionSeconds > 0 })
+            .max(by: { $0.updatedAt < $1.updatedAt }) {
+            episode = resumable
+            positionSeconds = resumable.positionSeconds
+            durationSeconds = Double(resumable.durationSeconds ?? 0)
+            status = "Ready to continue on Apple Watch"
+            WatchWidgetSnapshot.save(title: resumable.title, playing: false)
+        } else {
+            WatchWidgetSnapshot.save(title: nil, playing: false)
+        }
         observer = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 1), queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in self?.timeDidChange(time.seconds) }
         }
@@ -55,24 +77,31 @@ final class WatchPlayer {
             Task { @MainActor [weak self] in self?.handleRouteChange(raw) }
         })
         configureRemoteCommands()
+        updateRoute()
+        if let deadline = UserDefaults.standard.object(forKey: "watchSleepDeadline") as? Date,
+           deadline > .now {
+            installSleepTimer(until: deadline)
+        } else {
+            UserDefaults.standard.removeObject(forKey: "watchSleepDeadline")
+        }
     }
 
     func play(_ item: WatchEpisode, at requestedPosition: Double? = nil,
               announce: Bool = true, requestID: UUID = UUID()) async {
-        guard let remote = URL(string: item.audioURL), ["https", "http"].contains(remote.scheme?.lowercased() ?? "") else {
+        let local = item.downloadFilename.map { WatchDownloadManager.destination(for: $0) }
+        guard let url = WatchPlaybackSource.choose(local: local, remoteAddress: item.audioURL) else {
             status = "This episode has no playable audio address"
             if announce { AccessibilityNotification.Announcement(status).post() }
             return
         }
-        let local = item.downloadFilename.map { WatchDownloadManager.destination(for: $0) }
-        let url = local.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil } ?? remote
         let request = playbackRequests.begin(requestID)
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
             try await session.activate()
             guard playbackRequests.owns(request) else { return }
-            let changedEpisode = episode?.identity != item.identity
+            updateRoute()
+            let changedEpisode = player.currentItem == nil || episode?.identity != item.identity
             if changedEpisode {
                 player.replaceCurrentItem(with: AVPlayerItem(url: url))
                 episode = item
@@ -106,6 +135,8 @@ final class WatchPlayer {
             }
             isPlaying = true
             isBuffering = false
+            positionSeconds = resume
+            savePosition()
             status = "Playing on Apple Watch"
             if announce { AccessibilityNotification.Announcement(status).post() }
             publishNowPlaying()
@@ -167,6 +198,7 @@ final class WatchPlayer {
         rate = min(3, max(0.5, newRate))
         if isPlaying { player.rate = rate }
         publishNowPlaying()
+        AccessibilityNotification.Announcement("Speed set to \(rate.formatted()) times").post()
     }
 
     func nextChapter() async {
@@ -195,13 +227,43 @@ final class WatchPlayer {
 
     func setSleepTimer(minutes: Int?) {
         sleepTask?.cancel()
-        guard let minutes else { sleepDescription = "Sleep timer off"; return }
-        sleepDescription = "Sleep timer set for \(minutes) minutes"
+        guard let minutes else {
+            sleepDeadline = nil
+            UserDefaults.standard.removeObject(forKey: "watchSleepDeadline")
+            sleepDescription = "Sleep timer off"
+            AccessibilityNotification.Announcement(sleepDescription).post()
+            return
+        }
+        let deadline = Date.now.addingTimeInterval(Double(minutes * 60))
+        UserDefaults.standard.set(deadline, forKey: "watchSleepDeadline")
+        installSleepTimer(until: deadline)
+        AccessibilityNotification.Announcement("Sleep timer set for \(minutes) minutes").post()
+    }
+
+    private func installSleepTimer(until deadline: Date) {
+        sleepDeadline = deadline
+        sleepTask?.cancel()
+        sleepDescription = "Sleep timer on, \(max(1, Int(ceil(deadline.timeIntervalSinceNow / 60)))) minutes remaining"
         sleepTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(minutes * 60))
-            guard !Task.isCancelled else { return }
-            self?.pause()
-            self?.sleepDescription = "Sleep timer finished"
+            var lastAnnounced = Int(ceil(deadline.timeIntervalSinceNow / 60))
+            while !Task.isCancelled {
+                let remaining = deadline.timeIntervalSinceNow
+                if remaining <= 0 {
+                    self?.pause(announce: false)
+                    self?.sleepDescription = "Sleep timer finished"
+                    self?.sleepDeadline = nil
+                    UserDefaults.standard.removeObject(forKey: "watchSleepDeadline")
+                    AccessibilityNotification.Announcement("Sleep timer finished").post()
+                    return
+                }
+                let minutes = max(1, Int(ceil(remaining / 60)))
+                self?.sleepDescription = "Sleep timer on, \(minutes) minutes remaining"
+                if minutes % 5 == 0, minutes != lastAnnounced {
+                    AccessibilityNotification.Announcement("Sleep timer: \(minutes) minutes remaining").post()
+                    lastAnnounced = minutes
+                }
+                try? await Task.sleep(for: .seconds(min(60, remaining)))
+            }
         }
     }
 
@@ -227,6 +289,11 @@ final class WatchPlayer {
             status = "Episode finished"
             publishNowPlaying()
             WatchWidgetSnapshot.save(title: episode?.title, playing: false)
+            if let episode {
+                let next = library.queue.first { $0.identity != episode.identity }
+                if episode.queuePosition != nil { library.removeFromQueue(episode, announce: false) }
+                if let next { Task { @MainActor [weak self] in await self?.play(next) } }
+            }
         }
     }
 
@@ -238,17 +305,33 @@ final class WatchPlayer {
         library.persist()
     }
 
+    func saveForLifecycle() { if episode != nil { savePosition() } }
+
     private func handleInterruption(_ raw: UInt?) {
         guard let raw,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-        if type == .began { pause(); status = "Playback interrupted" }
+        if type == .began {
+            pause(announce: false)
+            status = "Playback interrupted"
+            AccessibilityNotification.Announcement(status).post()
+        }
         else { status = "Interruption ended. Resume playback when ready." }
     }
 
     private func handleRouteChange(_ raw: UInt?) {
+        updateRoute()
         guard let raw,
               let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
-        if reason == .oldDeviceUnavailable { pause(); status = "Headphones disconnected. Playback paused." }
+        if reason == .oldDeviceUnavailable {
+            pause(announce: false)
+            status = "Headphones disconnected. Playback paused."
+            AccessibilityNotification.Announcement(status).post()
+        }
+    }
+
+    private func updateRoute() {
+        let names = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName)
+        routeDescription = names.isEmpty ? "No audio output selected" : names.joined(separator: ", ")
     }
 
     private func publishNowPlaying() {

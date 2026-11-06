@@ -6,6 +6,8 @@ enum WatchWidgetSnapshot {
 
     static func save(title: String?, playing: Bool) {
         guard let defaults = UserDefaults(suiteName: group) else { return }
+        let changed = defaults.string(forKey: "episodeTitle") != title || defaults.bool(forKey: "isPlaying") != playing
+        guard changed else { return }
         defaults.set(title, forKey: "episodeTitle")
         defaults.set(playing, forKey: "isPlaying")
         defaults.set(Date.now, forKey: "updatedAt")
