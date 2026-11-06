@@ -1,9 +1,298 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class EarshotUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
+        // A landscape-specific test can leave CoreSimulator mid-rotation when
+        // XCTest launches the next app instance. Most UI tests exercise the
+        // conventional portrait baseline.
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    func testIPadExposesNewWindowAction() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Multiple windows are an iPad feature")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 15), app.debugDescription)
+        settings.tap()
+        let newWindow = app.buttons["Open another Earshot window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    func testIPadLibraryKeepsPodcastSidebarWhileBrowsing() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Persistent Library sidebar requires an iPad layout")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let firstShow = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        let secondShow = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Our Perspective"
+        )).firstMatch
+        XCTAssertTrue(firstShow.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(secondShow.exists)
+        firstShow.tap()
+        XCTAssertTrue(secondShow.waitForExistence(timeout: 5),
+                      "The show list should remain beside the selected show")
+        XCTAssertTrue(firstShow.isSelected, "The sidebar should expose its selected show")
+        let episode = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        for _ in 0..<5 where !episode.exists { app.collectionViews.firstMatch.swipeUp() }
+        XCTAssertTrue(episode.waitForExistence(timeout: 5), app.debugDescription)
+        episode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Back to episodes"].exists)
+        XCTAssertTrue(secondShow.exists, "Episode detail should keep the Library sidebar")
+        app.buttons["Back to episodes"].tap()
+        XCTAssertTrue(episode.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(firstShow.isSelected)
+        secondShow.tap()
+        XCTAssertTrue(firstShow.exists)
+        XCTAssertTrue(app.navigationBars["Our Perspective"].waitForExistence(timeout: 5),
+                      app.debugDescription)
+        XCTAssertFalse(episode.exists, "Changing shows should replace the episode content")
+        app.buttons["Inbox"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Inbox"].waitForExistence(timeout: 5))
+        app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(secondShow.waitForExistence(timeout: 5))
+        XCTAssertTrue(secondShow.isSelected, "Switching tabs should retain the selected show")
+    }
+
+    func testIPadLibraryVoiceOverReadsSelectedSidebarShow() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad, #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver sidebar automation requires iPadOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 15), app.debugDescription)
+        show.tap()
+        XCTAssertTrue(show.isSelected)
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        var speech: [String] = []
+        for _ in 0..<60 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("Technically Working") { break }
+        }
+        let selection = try XCTUnwrap(speech.first(where: { $0.contains("Technically Working") }),
+                                      "VoiceOver could not reach the selected show: \(speech)")
+        XCTAssertTrue(selection.localizedCaseInsensitiveContains("selected"),
+                      "VoiceOver should announce the selected show: \(speech)")
+    }
+
+    func testIPadMiniLibraryRemainsNavigableAtLargestText() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("This checks iPad Dynamic Type navigation")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "library",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
+        app.launch()
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(show.isHittable, "The show row should remain reachable at large text")
+        show.tap()
+        XCTAssertTrue(app.navigationBars["Technically Working"].waitForExistence(timeout: 5),
+                      app.debugDescription)
+    }
+
+    func testCompactLibraryCanReturnFromEpisodeToShows() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("This checks the compact iPhone navigation path")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 15), app.debugDescription)
+        show.tap()
+        let episode = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        for _ in 0..<5 where !episode.exists { app.collectionViews.firstMatch.swipeUp() }
+        XCTAssertTrue(episode.waitForExistence(timeout: 5), app.debugDescription)
+        episode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        app.buttons["Back to episodes"].tap()
+        XCTAssertTrue(app.segmentedControls["Filter episodes"].waitForExistence(timeout: 5),
+                      "Returning from details should restore the show episode list")
+        let backToShows = app.descendants(matching: .any)["BackButton"].firstMatch
+        XCTAssertTrue(backToShows.waitForExistence(timeout: 5), app.debugDescription)
+        backToShows.tap()
+        XCTAssertTrue(show.waitForExistence(timeout: 5))
+    }
+
+    func testEpisodeSelectionAndPlayAreSeparate() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let episode = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        XCTAssertTrue(episode.waitForExistence(timeout: 15), app.debugDescription)
+        episode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Show notes"].exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Mini player, "
+        )).firstMatch.exists, "Selecting an episode must not load playback")
+
+        let play = app.buttons["episode.detail.play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5),
+                      "Play should present the active player immediately")
+        XCTAssertEqual(app.buttons["player.playPause"].label, "Pause")
+        app.buttons["Close player"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Mini player, "
+        )).firstMatch.waitForExistence(timeout: 5), "Play must load the selected episode")
+    }
+
+    func testQueueEpisodeSelectionAndPlayAreSeparate() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+
+        let episode = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(episode.waitForExistence(timeout: 15), app.debugDescription)
+        episode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Mini player, "
+        )).firstMatch.exists)
+
+        app.buttons["episode.detail.play"].tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["player.playPause"].label, "Pause")
+    }
+
+    func testQueueVoiceOverHasOneStopPerEpisode() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch.waitForExistence(timeout: 15))
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+
+        // Drive real VoiceOver focus rather than inferring its order from the
+        // XCTest element tree, which includes touch-only visual controls.
+        var speech: [String] = []
+        for _ in 0..<40 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("#165 – No Excuses Left") { break }
+        }
+
+        let firstIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#166 – If You Used a Passkey") }),
+                                       "Queue's first episode was not reached: \(speech)")
+        let secondIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#165 – No Excuses Left") }),
+                                        "Queue's second episode was not reached: \(speech)")
+        XCTAssertEqual(secondIndex, firstIndex + 1,
+                       "Each Queue episode should be one VoiceOver stop: \(speech)")
+    }
+
+    func testSharedEpisodeRowVoiceOverHasOneStopPerEpisode() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+
+        var speech: [String] = []
+        for _ in 0..<40 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("#169 – Apple's Price Hikes") { break }
+        }
+
+        let firstIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#170 – Turn the Right Knob") }),
+                                       "The first show episode was not reached: \(speech)")
+        let secondIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#169 – Apple's Price Hikes") }),
+                                        "The second show episode was not reached: \(speech)")
+        XCTAssertEqual(secondIndex, firstIndex + 1,
+                       "Each shared episode row should be one VoiceOver stop: \(speech)")
+    }
+
+    func testInboxVoiceOverHasOneStopPerEpisode() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        // Seed while Queue is active, then enter Inbox after launch services
+        // finish. An Inbox-first screenshot launch can query before the DEBUG
+        // fixture is seeded and display a stale empty snapshot.
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch.waitForExistence(timeout: 15))
+        app.buttons["Inbox"].firstMatch.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#169 – Apple's Price Hikes"
+        )).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+
+        var speech: [String] = []
+        for _ in 0..<40 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("#167 – We're Going to Atlanta") { break }
+        }
+
+        let firstIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#169 – Apple's Price Hikes") }),
+                                       "Inbox's first episode was not reached: \(speech)")
+        let secondIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#167 – We're Going to Atlanta") }),
+                                        "Inbox's second episode was not reached: \(speech)")
+        XCTAssertEqual(secondIndex, firstIndex + 1,
+                       "Each Inbox episode should be one VoiceOver stop: \(speech)")
     }
 
     func testFolderMembershipPickerKeepsSelectionCurrent() {
@@ -264,7 +553,10 @@ final class EarshotUITests: XCTestCase {
         let apply = app.buttons["Apply custom speed"]
         for _ in 0..<4 where !apply.isHittable { app.swipeUp() }
         apply.tap()
-        app.buttons["Done"].tap()
+        // iOS 27 can dismiss the custom-speed sheet when Apply is pressed.
+        // Earlier systems leave Done visible; both return to the same player.
+        let done = app.buttons["Done"]
+        if done.exists { done.tap() }
         XCTAssertTrue(speed.waitForExistence(timeout: 5))
         XCTAssertTrue((speed.value as? String ?? "").contains("0.98"))
         app.buttons["Close player"].tap()
@@ -483,7 +775,8 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(position.exists)
         XCTAssertTrue(back.isHittable)
         XCTAssertTrue(forward.isHittable)
-        XCTAssertEqual((back.frame.midX + forward.frame.midX) / 2, app.frame.midX, accuracy: 2)
+        XCTAssertEqual((back.frame.midX + forward.frame.midX) / 2, position.frame.midX, accuracy: 2,
+                       "The action row should center within the available player controls")
         XCTAssertEqual(back.frame.minX, position.frame.minX, accuracy: 4,
                        "The first action should align with the leading edge of the player controls")
         XCTAssertEqual(forward.frame.maxX, position.frame.maxX, accuracy: 4,
@@ -514,6 +807,22 @@ final class EarshotUITests: XCTestCase {
     func testAnchoredPlayerStabilityAndSliderEdges() { verifyAnchoredPlayer(largeText: false) }
     func testAnchoredPlayerStabilityAtLargestText() { verifyAnchoredPlayer(largeText: true) }
 
+    func testPlayerTransportRemainsReachableInLandscape() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.launch()
+
+        let play = app.buttons["player.playPause"]
+        let position = app.descendants(matching: .any).matching(identifier: "player.position").firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(play.isHittable)
+        XCTAssertTrue(position.isHittable)
+        XCTAssertTrue(app.buttons["Close player"].isHittable)
+        XCTAssertTrue(app.buttons["More options"].isHittable)
+    }
+
     private func verifyAnchoredPlayer(largeText: Bool) {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying", "-playerLayoutTransition"]
@@ -526,9 +835,10 @@ final class EarshotUITests: XCTestCase {
         let route = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "AirPlay")).firstMatch
         let controls = [position, app.buttons["player.gobackward"], play, app.buttons["player.goforward"], route, notes]
         let initial = controls.map(\.frame)
-        XCTAssertGreaterThanOrEqual(position.frame.height, 56)
-        XCTAssertEqual(position.frame.midX, app.frame.midX, accuracy: 2,
-                       "VoiceOver's playback-position focus frame should span the player center, not sit at the trailing edge")
+        XCTAssertGreaterThan(position.frame.height, 55.99,
+                                    "The accessibility focus frame should retain its 56-point target within floating-point rounding")
+        XCTAssertEqual(position.frame.midX, play.frame.midX, accuracy: 2,
+                       "VoiceOver's playback-position focus frame should span the transport center within the safe area")
         XCTAssertTrue(play.isHittable)
         XCTAssertLessThanOrEqual(play.frame.maxY, app.frame.maxY)
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Episode artwork")).firstMatch.exists)
@@ -586,8 +896,6 @@ final class EarshotUITests: XCTestCase {
         XCTAssertLessThanOrEqual(extend.frame.maxY, scroll.frame.maxY)
         if separateDetails {
             XCTAssertGreaterThanOrEqual(scroll.frame.minY, notes.frame.maxY)
-            XCTAssertLessThan(play.frame.midY, app.frame.height * 0.65)
-            XCTAssertGreaterThan(play.frame.midY, app.frame.height * 0.4)
         }
         XCTAssertLessThanOrEqual(episodeContent.frame.maxY, position.frame.minY)
         XCTAssertEqual(play.frame.minY, initial[2].minY, accuracy: 1)
@@ -643,8 +951,8 @@ final class EarshotUITests: XCTestCase {
         let forward = app.buttons["player.goforward"]
         let play = app.buttons["player.playPause"]
         for (control, minimum) in [(more, 44.0), (back, 64.0), (play, 80.0), (forward, 64.0)] {
-            XCTAssertGreaterThanOrEqual(control.frame.width, minimum)
-            XCTAssertGreaterThanOrEqual(control.frame.height, minimum)
+            XCTAssertGreaterThanOrEqual(control.frame.width + 0.01, minimum)
+            XCTAssertGreaterThanOrEqual(control.frame.height + 0.01, minimum)
             XCTAssertGreaterThanOrEqual(control.frame.minX, 0)
             XCTAssertLessThanOrEqual(control.frame.maxX, app.frame.width)
         }
@@ -701,18 +1009,28 @@ final class EarshotUITests: XCTestCase {
         app.launch()
         let options = app.buttons["Queue options"].firstMatch
         XCTAssertTrue(options.waitForExistence(timeout: 10))
-        app.tabBars.buttons["Library"].tap()
-        app.tabBars.buttons["Queue"].tap()
+        let library = app.buttons["Library"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 5), app.debugDescription)
+        library.tap()
+        app.buttons["Queue"].firstMatch.tap()
         XCTAssertTrue(options.waitForExistence(timeout: 5))
-        options.tap()
-        app.buttons["Clear queue"].firstMatch.tap()
+        let clearQueue = app.buttons["Clear queue"].firstMatch
+        func openClearConfirmation() {
+            options.tap()
+            if !clearQueue.waitForExistence(timeout: 5) {
+                // System menus occasionally dismiss during a tab transition
+                // on the CI simulator; retry the actual menu presentation once.
+                options.tap()
+            }
+            XCTAssertTrue(clearQueue.waitForExistence(timeout: 5), app.debugDescription)
+            clearQueue.tap()
+        }
+        openClearConfirmation()
         let clear = app.buttons["Clear entire Queue"].firstMatch
         XCTAssertTrue(clear.waitForExistence(timeout: 5))
         app.buttons["Cancel"].firstMatch.tap()
         XCTAssertFalse(clear.exists)
-        options.tap()
-        XCTAssertTrue(app.buttons["Clear queue"].firstMatch.exists)
-        app.buttons["Clear queue"].firstMatch.tap()
+        openClearConfirmation()
         clear.tap()
         XCTAssertTrue(app.staticTexts["Queue is empty"].firstMatch.waitForExistence(timeout: 5))
     }

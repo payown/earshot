@@ -267,7 +267,7 @@ final class FeedRefreshStatusMonitor {
     private var wasRunningAttemptSkipped: Bool {
         guard let startedAt = snapshot.startedAt,
               let skippedAt = snapshot.lastSkippedAt else { return false }
-        return skippedAt >= startedAt
+        return skippedAt.timeIntervalSinceReferenceDate >= startedAt.timeIntervalSinceReferenceDate
     }
 
     private func restoreStateBeforeSkippedAttempt() {

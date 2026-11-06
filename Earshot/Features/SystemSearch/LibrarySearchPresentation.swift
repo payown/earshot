@@ -4,6 +4,7 @@ import SwiftUI
 /// never dismisses another flow or changes the existing VoiceOver focus rules.
 struct LibrarySearchPresentation: ViewModifier {
     @Binding var episode: Episode?
+    let window: UIWindow?
     let isReady: Bool
     let route: @MainActor (SearchContent) -> Void
 
@@ -28,10 +29,9 @@ struct LibrarySearchPresentation: ViewModifier {
     }
 
     private var presentationIsReady: Bool {
-        guard let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive }),
-              let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController else { return false }
+        guard let window, window.isKeyWindow,
+              window.traitCollection.activeAppearance == .active,
+              let root = window.rootViewController else { return false }
         return root.presentedViewController == nil && episode == nil
     }
 }

@@ -2,6 +2,16 @@ import SwiftUI
 import AVKit
 import SwiftData
 
+enum PlayerLayoutPolicy {
+    // Two panes require space for independently usable content and transport.
+    // This is a window-width requirement, not a device or orientation check.
+    static func usesTwoRegions(width: CGFloat) -> Bool { width >= 700 }
+
+    static func separatesDetails(width: CGFloat, height: CGFloat, accessibilityText: Bool) -> Bool {
+        usesTwoRegions(width: width) || !accessibilityText || height >= 800
+    }
+}
+
 /// Root-provided route from the modal player back into Library folder detail.
 /// A missing handler means the host has no compatible navigation state, in
 /// which case Now Playing omits the control instead of presenting a dead button.
@@ -93,37 +103,42 @@ struct NowPlayingScreen: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
+                // A two-region player needs room for two full-width transport
+                // targets and readable text. Read the current window proposal:
+                // Duo folds and Split View can change it while this sheet is open.
+                let expanded = PlayerLayoutPolicy.usesTwoRegions(width: geometry.size.width)
                 // Two readable regions plus enlarged header/controls need this
                 // height budget at accessibility text sizes. This breakpoint
                 // depends only on available space and text size, never an episode.
-                let separateDetails = !dynamicTypeSize.isAccessibilitySize || geometry.size.height >= 800
+                let separateDetails = PlayerLayoutPolicy.separatesDetails(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    accessibilityText: dynamicTypeSize.isAccessibilitySize
+                )
                 VStack(spacing: 0) {
                     playerHeader
-                    ScrollView {
-                        VStack(spacing: Spacing.xl) {
-                            artworkBlock
-                                .padding(.top, Spacing.lg)
-                            titleBlock
-                            if !separateDetails { playerDetails }
+                    if #available(iOS 27.1, *), expanded {
+                        // The split arrangement places each peer region around
+                        // an active fold instead of putting the transport over
+                        // the center division. Each region keeps its own scroll.
+                        ArrangementView {
+                            episodeRegion(expanded: true, separateDetails: separateDetails,
+                                          windowWidth: geometry.size.width)
+                        } secondary: {
+                            controlsRegion(separateDetails: separateDetails)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, Spacing.lg)
-                        .padding(.bottom, Spacing.xl)
-                    }
-                    .frame(maxHeight: .infinity)
-                    .accessibilityIdentifier("player.episodeContent")
-                    playbackDock
-                    if separateDetails {
-                        ScrollView {
-                            VStack(spacing: Spacing.xl) {
-                                playerDetails
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, Spacing.lg)
-                            .padding(.vertical, Spacing.lg)
+                        .arrangementViewStyle(.split)
+                    } else {
+                        // Earlier systems use the same regions with a standard
+                        // adaptive stack; narrow windows remain vertical.
+                        let playerLayout = expanded
+                            ? AnyLayout(HStackLayout(alignment: .top, spacing: Spacing.lg))
+                            : AnyLayout(VStackLayout(spacing: 0))
+                        playerLayout {
+                            episodeRegion(expanded: expanded, separateDetails: separateDetails,
+                                          windowWidth: geometry.size.width)
+                            controlsRegion(separateDetails: separateDetails)
                         }
-                        .frame(maxHeight: .infinity)
-                        .accessibilityIdentifier("player.details")
                     }
                 }
             }
@@ -181,6 +196,39 @@ struct NowPlayingScreen: View {
         .onChange(of: player.nowPlayingPersonalAudioID) { oldID, newID in
             if oldID != nil && newID == nil && player.nowPlayingEpisodeID == nil { dismiss() }
         }
+    }
+
+    private func episodeRegion(expanded: Bool, separateDetails: Bool, windowWidth: CGFloat) -> some View {
+        ScrollView {
+            VStack(spacing: Spacing.xl) {
+                artworkBlock(side: expanded ? min(280, windowWidth * 0.28) : 140)
+                    .padding(.top, Spacing.lg)
+                titleBlock
+                if !separateDetails { playerDetails }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.bottom, Spacing.xl)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("player.episodeContent")
+    }
+
+    private func controlsRegion(separateDetails: Bool) -> some View {
+        VStack(spacing: 0) {
+            playbackDock
+            if separateDetails {
+                ScrollView {
+                    playerDetails
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Spacing.lg)
+                        .padding(.vertical, Spacing.lg)
+                }
+                .frame(maxHeight: .infinity)
+                .accessibilityIdentifier("player.details")
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // When space permits, two equally flexible scroll regions share the space
@@ -290,10 +338,9 @@ struct NowPlayingScreen: View {
     /// VoiceOver-touch-conflict risk. The sighted press-and-hold is itself always
     /// available too.
     @ViewBuilder
-    private var artworkBlock: some View {
+    private func artworkBlock(side: CGFloat) -> some View {
         // Compact visible artwork retains its accessibility stop and actions.
         // The transport occupies a separate, reserved region below this scroll view.
-        let side: CGFloat = 140
         let base = PodcastArtwork(urlString: artworkURLString, size: side, cornerRadius: 16)
             // A zero-distance long press fires `pressing:` on touch-down and again
             // on release, giving us begin/end without a separate drag gesture.
@@ -648,6 +695,7 @@ struct NowPlayingScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+            .keyboardShortcut(.space, modifiers: [])
             .accessibilityIdentifier("player.playPause")
 
             transportButton(

@@ -4,7 +4,13 @@ import SwiftData
 
 struct EpisodeListView: View {
     let podcast: Podcast
+    let showsBackToShows: Bool
     private let nonPlayedBatchLimit = 1_000
+
+    init(podcast: Podcast, showsBackToShows: Bool = true) {
+        self.podcast = podcast
+        self.showsBackToShows = showsBackToShows
+    }
 
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
@@ -12,9 +18,12 @@ struct EpisodeListView: View {
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
 
     @State private var showNotesEpisode: Episode?
+    @State private var selectedDetailEpisode: Episode?
+    @State private var compactDetailEpisode: Episode?
     @State private var sharingEpisode: Episode?
     // The episode a pending "Export audio" Quick Action targets (#689). Drives
     // the shared `.episodeAudioExport` download-then-share flow.
@@ -63,6 +72,7 @@ struct EpisodeListView: View {
     // (mirrors SubscriptionsView's podcast multi-select, #757).
     @AccessibilityFocusState private var focusedRowID: PersistentIdentifier?
     @AccessibilityFocusState private var focusSelectButton: Bool
+    @AccessibilityFocusState private var focusEmbeddedBackButton: Bool
 
     // Focus targets for the rotor "Mark as played" under the Unheard filter,
     // where the marked row leaves the visible list (#579): the neighbor row, or
@@ -119,77 +129,131 @@ struct EpisodeListView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                header
-            }
-            Section {
-                Picker("Filter episodes", selection: filterSelection) {
-                    ForEach(EpisodeListFilter.allCases) { option in
-                        Text(option.title).tag(option)
+        GeometryReader { geometry in
+            let wide = ListDetailLayoutPolicy.usesTwoPanes(
+                width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
+            )
+            HStack(spacing: 0) {
+                if !wide && !showsBackToShows,
+                   let selectedDetailEpisode, !selectedDetailEpisode.isDeleted {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            let episodeID = selectedDetailEpisode.persistentModelID
+                            self.selectedDetailEpisode = nil
+                            DispatchQueue.main.async { focusedEpisode = episodeID }
+                        } label: {
+                            Label("Back to episodes", systemImage: "chevron.left")
+                        }
+                        .accessibilityFocused($focusEmbeddedBackButton)
+                        .padding(.horizontal)
+                        .padding(.top)
+                        EpisodeDetailPane(episode: selectedDetailEpisode)
                     }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityLabel("Filter episodes")
-            }
-            if filteredCount > 0 {
-                Section {
-                    chronologicalSortButton
-                }
-            }
-            if allEpisodeCount == 0 && podcast.refreshedAt == nil {
-                // Freshly-migrated show whose episodes haven't been fetched yet.
-                // Distinguish "still loading" from a genuinely empty feed so a
-                // VoiceOver user isn't told "no episodes" prematurely.
-                Section {
-                    Label("Loading episodes…", systemImage: "arrow.triangle.2.circlepath")
-                        .foregroundStyle(.secondary)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Loading episodes")
-                        .accessibilityAddTraits(.updatesFrequently)
-                }
-            } else if filteredCount == 0 {
-                // Episodes exist but none match the current filter. Give a
-                // descriptive message and a one-tap way out, not a blank list.
-                Section {
-                    emptyFilterState
-                }
-            } else if visibleEpisodes.isEmpty {
-                Section {
-                    NoSearchMatchesView(query: searchText)
-                        .accessibilityFocused($focusEmptyFilter)
-                }
-            } else {
-                Section {
-                    ForEach(visibleEpisodes) { episode in
-                        rowContainer(for: episode)
-                            // Lets the rotor mark-played runner hand VoiceOver focus
-                            // to this row when its neighbor vanishes (#579).
-                            .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
-                            // Same focus id on whichever row variant renders, so
-                            // focus can be moved onto the first row when selection
-                            // mode is entered (#758).
-                            .accessibilityFocused($focusedRowID, equals: episode.persistentModelID)
-                    }
-                    if episodeList?.hasMore == true {
-                        Button(showMoreEpisodesLabel) {
-                            episodeList?.loadMore(
-                                filter: filter,
-                                sort: sortOrder,
-                                searchText: searchText
-                            )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        if wide && showsBackToShows {
+                            Section {
+                                Button {
+                                    dismiss()
+                                } label: {
+                                    Label("Back to Library shows", systemImage: "chevron.left")
+                                }
+                                .accessibilityIdentifier("library.backToShows")
+                            }
+                        } else {
+                            Section { header }
+                        }
+                        Section {
+                            Picker("Filter episodes", selection: filterSelection) {
+                                ForEach(EpisodeListFilter.allCases) { option in
+                                    Text(option.title).tag(option)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .accessibilityLabel("Filter episodes")
+                        }
+                        if filteredCount > 0 {
+                            Section {
+                                chronologicalSortButton
+                            }
+                        }
+                        if allEpisodeCount == 0 && podcast.refreshedAt == nil {
+                            // Freshly-migrated show whose episodes haven't been fetched yet.
+                            // Distinguish "still loading" from a genuinely empty feed so a
+                            // VoiceOver user isn't told "no episodes" prematurely.
+                            Section {
+                                Label("Loading episodes…", systemImage: "arrow.triangle.2.circlepath")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel("Loading episodes")
+                                    .accessibilityAddTraits(.updatesFrequently)
+                            }
+                        } else if filteredCount == 0 {
+                            // Episodes exist but none match the current filter. Give a
+                            // descriptive message and a one-tap way out, not a blank list.
+                            Section {
+                                emptyFilterState
+                            }
+                        } else if visibleEpisodes.isEmpty {
+                            Section {
+                                NoSearchMatchesView(query: searchText)
+                                    .accessibilityFocused($focusEmptyFilter)
+                            }
+                        } else {
+                            Section {
+                                ForEach(visibleEpisodes) { episode in
+                                    rowContainer(for: episode, wide: wide)
+                                        // Lets the rotor mark-played runner hand VoiceOver focus
+                                        // to this row when its neighbor vanishes (#579).
+                                        .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
+                                        // Same focus id on whichever row variant renders, so
+                                        // focus can be moved onto the first row when selection
+                                        // mode is entered (#758).
+                                        .accessibilityFocused($focusedRowID, equals: episode.persistentModelID)
+                                }
+                                if episodeList?.hasMore == true {
+                                    Button(showMoreEpisodesLabel) {
+                                        episodeList?.loadMore(
+                                            filter: filter,
+                                            sort: sortOrder,
+                                            searchText: searchText
+                                        )
+                                    }
+                                }
+                            } header: {
+                                Text(filter == .unheard
+                                     ? "^[\(matchingCount) unheard episode](inflect: true)"
+                                     : "^[\(matchingCount) episode](inflect: true)")
+                                    .accessibilityFocused($focusResultsHeading)
+                            }
+                        }
+                        if episodeList != nil && episodeList?.hasMore == false {
+                            Section {
+                                olderEpisodesControl
+                            }
                         }
                     }
-                } header: {
-                    Text(filter == .unheard
-                         ? "^[\(matchingCount) unheard episode](inflect: true)"
-                         : "^[\(matchingCount) episode](inflect: true)")
-                        .accessibilityFocused($focusResultsHeading)
+                    .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                    .frame(maxWidth: wide ? nil : .infinity)
+                    if wide {
+                        Divider()
+                        Group {
+                            if let episode = selectedDetailEpisode, !episode.isDeleted {
+                                EpisodeDetailPane(episode: episode)
+                            } else {
+                                PodcastDetailPane(podcast: podcast)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
-            if episodeList != nil && episodeList?.hasMore == false {
-                Section {
-                    olderEpisodesControl
+            .onChange(of: wide) { oldValue, newValue in
+                if showsBackToShows && oldValue && !newValue, compactDetailEpisode == nil {
+                    compactDetailEpisode = selectedDetailEpisode
+                } else if !oldValue && newValue {
+                    compactDetailEpisode = nil
                 }
             }
         }
@@ -370,6 +434,7 @@ struct EpisodeListView: View {
             PodcastSettingsView(podcast: podcast)
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .sheet(item: $compactDetailEpisode) { EpisodeDetailSheet(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
@@ -454,7 +519,7 @@ struct EpisodeListView: View {
     /// selection mode (#758, via the shared ``SelectableRow`` scaffold),
     /// otherwise the normal navigate/rotor row with its full Quick Actions.
     @ViewBuilder
-    private func rowContainer(for episode: Episode) -> some View {
+    private func rowContainer(for episode: Episode, wide: Bool) -> some View {
         if selection.isSelecting {
             EpisodeSelectableRow(
                 episode: episode,
@@ -473,6 +538,17 @@ struct EpisodeListView: View {
                     supportsAddToFolder: true,
                     supportsMoveToFolder: true
                 ),
+                onSelect: {
+                    if wide || !showsBackToShows {
+                        selectedDetailEpisode = episode
+                        if !wide {
+                            DispatchQueue.main.async { focusEmbeddedBackButton = true }
+                        }
+                    } else {
+                        compactDetailEpisode = episode
+                    }
+                },
+                isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
                 performAction: { action in perform(action, for: episode) }
             )
         }

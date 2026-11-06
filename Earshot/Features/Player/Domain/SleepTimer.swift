@@ -50,7 +50,7 @@ enum SleepTimerLogic {
     }
 
     static func isExpired(endDate: Date, now: Date) -> Bool {
-        now >= endDate
+        now.timeIntervalSinceReferenceDate >= endDate.timeIntervalSinceReferenceDate
     }
 
     /// A VoiceOver-friendly description of the timer's state.
