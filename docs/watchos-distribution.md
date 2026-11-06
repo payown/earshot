@@ -1,10 +1,10 @@
 # Integrated Apple Watch TestFlight candidate
 
-Candidate: Earshot **1.2.5 (299)** from `feature/watchos-architecture`. Target: existing App Store Connect app `6770760602`, **Internal Testing Group** only. This is an internal evaluation build; do not submit for public review or merge before Michael's physical-device approval.
+Candidate: Earshot **1.2.6 (307)** from `feature/watchos-126-integration`. Target: existing App Store Connect app `6770760602`, **Internal Testing Group** only. App Store Connect reports 1.2.6 build 306 as the latest processed and uploaded build and 307 as the next available number. This is an internal evaluation build; do not submit for public review or merge before Michael's physical-device approval.
 
 ## Current blocker
 
-The signed archive stopped at provisioning. Xcode reports no configured Apple developer account and cannot provision `media.payown.earshot.watchkitapp` or `media.payown.earshot.watchkitapp.widgets`. The five installed profiles cover only the iPhone bundle. `asc bundle-ids list` returns Apple's **PLA Update available** response, explicitly requiring Account Holder Michael Babcock to accept the updated Program License Agreement before membership resources can be used. Apple confirms this requirement in [Roles and access](https://developer.apple.com/help/account/access/roles/). The assistant must not accept a legal agreement for Michael.
+The signed **307** archive stopped at provisioning. Xcode reports no configured Apple developer account; its fallback wildcard profile lacks the watch App Group and CloudKit entitlements required by `media.payown.earshot.watchkitapp` and `media.payown.earshot.watchkitapp.widgets`. The installed dedicated profiles cover only the iPhone bundle. `asc bundle-ids list` returns Apple's **PLA Update available** response, explicitly requiring Account Holder Michael Babcock to accept the updated Program License Agreement before membership resources can be used. Apple confirms this requirement in [Roles and access](https://developer.apple.com/help/account/access/roles/). The assistant must not accept a legal agreement for Michael.
 
 ## Resume after the account holder accepts the agreement
 
@@ -14,10 +14,10 @@ The signed archive stopped at provisioning. Xcode reports no configured Apple de
 
    ```bash
    xcodegen generate
-   xcodebuild archive -project Earshot.xcodeproj -scheme Earshot -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/EarshotWatch299.xcarchive -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=72PH974742
+   xcodebuild archive -project Earshot.xcodeproj -scheme Earshot -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/EarshotWatch307.xcarchive -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=72PH974742
    ```
 
-4. Confirm `Earshot.app`, its `PlugIns/EarshotWatch.app`, and the nested `PlugIns/EarshotWatchWidgets.appex` have the expected bundle IDs and version **1.2.5 (299)**. Confirm the watch Info.plist has `WKRunsIndependentlyOfCompanionApp = true`, `UIBackgroundModes = audio`, and `EarshotCloudKitEnabled = YES`. Inspect the signed entitlements for the approved App Group and existing CloudKit container.
+4. Confirm `Earshot.app`, its `PlugIns/EarshotWatch.app`, and the nested `PlugIns/EarshotWatchWidgets.appex` have the expected bundle IDs and version **1.2.6 (307)**. Confirm the watch Info.plist has `WKRunsIndependentlyOfCompanionApp = true`, `UIBackgroundModes = audio`, and `EarshotCloudKitEnabled = YES`. Inspect the signed entitlements for the approved App Group and existing CloudKit container.
 5. Create the export-options plist and export:
 
    ```bash
@@ -31,8 +31,8 @@ The signed archive stopped at provisioning. Xcode reports no configured Apple de
      <key>uploadSymbols</key><true/>
    </dict></plist>
    PLIST
-   xcodebuild -exportArchive -archivePath /tmp/EarshotWatch299.xcarchive -exportPath /tmp/EarshotWatch299Export -exportOptionsPlist /tmp/EarshotWatchExportOptions.plist -allowProvisioningUpdates
-   asc publish testflight --app 6770760602 --ipa /tmp/EarshotWatch299Export/Earshot.ipa --group 'Internal Testing Group' --wait --notify
+   xcodebuild -exportArchive -archivePath /tmp/EarshotWatch307.xcarchive -exportPath /tmp/EarshotWatch307Export -exportOptionsPlist /tmp/EarshotWatchExportOptions.plist -allowProvisioningUpdates
+   asc publish testflight --app 6770760602 --ipa /tmp/EarshotWatch307Export/Earshot.ipa --group 'Internal Testing Group' --wait --notify
    ```
 
 6. Check App Store Connect/TestFlight processing and record the actual uploaded build number and availability. Use the one-session `docs/watchos-device-testing.md` guide. No simulator result substitutes for that physical watch pass.

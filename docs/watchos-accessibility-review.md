@@ -1,6 +1,6 @@
 # Earshot Apple Watch accessibility review
 
-Reviewed 2026-11-06 against `/Users/michaelbabcock/.claude/agents/earshot-accessibility.md` and `.claude/rules/accessibility.md`. Scope: all new watch SwiftUI views, widget, and the two new iPhone Settings destinations. This is a **code and simulator review**; Michael's physical VoiceOver pass remains the release gate. No GitHub issue number was assigned to this implementation, so this report is kept with the branch instead of posting an issue comment.
+Reviewed 2026-11-06 against `/Users/michaelbabcock/.claude/agents/earshot-accessibility.md` and `.claude/rules/accessibility.md`. Scope: all new watch SwiftUI views, widget, and the two new iPhone Settings destinations. Rechecked after merging the complete 1.2.6 Duo/iPad branch at `f34d2897`; its iPad list/detail code is retained from that branch, while the watch integration adds only the two Settings destinations and the process-owned connectivity startup to the phone UI. This is a **code and simulator review**; Michael's physical VoiceOver pass remains the release gate. No GitHub issue number was assigned to this implementation, so this report is kept with the branch instead of posting an issue comment.
 
 ## VoiceOver
 
@@ -31,5 +31,6 @@ Reviewed 2026-11-06 against `/Users/michaelbabcock/.claude/agents/earshot-access
 1. VoiceOver rotor ordering, focus landing after navigation, slider adjustment, background announcements and Bluetooth route feedback require Michael's physical watch test. Simulator UI tests cannot certify them.
 2. A live two-device run must verify that quick-action order arrives when the phone reconnects, and that an offline watch keeps its cached order.
 3. The new iPhone Settings rows add new focus stops but do not alter existing row labels or rotor actions. Michael should confirm their placement and wording during the integrated test.
+4. The merged iPad panes use a selected episode and a separate, labeled Play control. The 1.2.6 iPad UI checks and physical VoiceOver reading order remain required; simulator assertions cannot certify spoken order across multiple windows.
 
 **Gate:** Code review complete. Physical VoiceOver review **pending**; do not merge or release on this report alone.
