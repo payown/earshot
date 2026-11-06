@@ -2,7 +2,7 @@
 
 Updated 2026-11-06. The integrated device build is **not ready**. This file records implementation state so work can continue without treating an intermediate simulator build as the release candidate.
 
-Integrated candidate version: **1.2.5 (299)**. An unsigned Release archive for build 298 embeds `media.payown.earshot`, `media.payown.earshot.watchkitapp`, and `media.payown.earshot.watchkitapp.widgets` with matching versions. The watch Info.plist includes independent installation, background audio, and the Release CloudKit gate. Build 299 is committed and must be rearchived after signing becomes available.
+Integrated candidate version: **1.2.5 (299)**. The final unsigned Release archive at `/tmp/EarshotWatch299Unsigned.xcarchive` embeds `media.payown.earshot`, `media.payown.earshot.watchkitapp`, and `media.payown.earshot.watchkitapp.widgets` with matching versions. The watch Info.plist includes independent installation, background audio, and the Release CloudKit gate. This archive is build evidence, not an installable TestFlight IPA; it must be rearchived with signing after provisioning becomes available.
 
 **Distribution blocker:** `xcodebuild archive -allowProvisioningUpdates` for build 299 fails because Xcode has no Apple developer account configured and no watch/watch-widget provisioning profiles. `asc bundle-ids list` returns Apple's "PLA Update available" error: Account Holder Michael Babcock must accept the latest Program License Agreement before the API can manage membership resources. The Apple Distribution certificate and iPhone profiles are installed, but neither watch bundle has a profile with its approved App Group/CloudKit entitlements. No signed IPA or TestFlight upload exists yet. Resume by accepting the PLA, configuring Xcode account or creating matching watch app/widget App IDs and profiles through the CLI, then rerun signed archive/export and internal TestFlight upload.
 
@@ -50,6 +50,6 @@ The physical Apple Watch is listed by `devicectl` as unavailable. A simulator ca
 
 The source work is kept in the linked worktree on `feature/watchos-architecture`. Build 299 is the internal testing candidate; do not merge it to `main` or release it publicly before Michael's physical-device approval.
 
-The foundation slice is in [draft PR #1045](https://github.com/payown/earshot/pull/1045), targeted to `main` and assigned to `@payown`. It stays unmerged. The integrated branch contains later dependent commits; follow-up PRs will be opened in slices that meet the repository's 1,500-line non-generated limit after the foundation is approved, rather than posting one oversized integration PR.
+The foundation slice is in [draft PR #1045](https://github.com/payown/earshot/pull/1045), targeted to `main` and assigned to `@payown`; its `Build and test (EarshotTests)` CI check passed. It stays unmerged. The integrated branch contains later dependent commits; follow-up PRs will be opened in slices that meet the repository's 1,500-line non-generated limit after the foundation is approved, rather than posting one oversized integration PR.
 
 The current iOS target remains iPhone-only (`TARGETED_DEVICE_FAMILY = 1`) under the repository's #643 decision. No existing iPad implementation or target setting was changed; an iPad app regression run cannot establish product support until that separate project policy changes.
