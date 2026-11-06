@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class EarshotUITests: XCTestCase {
@@ -8,6 +9,24 @@ final class EarshotUITests: XCTestCase {
         // XCTest launches the next app instance. Most UI tests exercise the
         // conventional portrait baseline.
         XCUIDevice.shared.orientation = .portrait
+    }
+
+    func testIPadCanOpenAnotherWindow() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Multiple windows are an iPad feature")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 15), app.debugDescription)
+        settings.tap()
+        let newWindow = app.buttons["Open another Earshot window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5), app.debugDescription)
+        newWindow.tap()
+        XCTAssertTrue(app.windows.element(boundBy: 1).waitForExistence(timeout: 10),
+                      "The New Window action should create a second app scene")
     }
 
     func testEpisodeSelectionAndPlayAreSeparate() {

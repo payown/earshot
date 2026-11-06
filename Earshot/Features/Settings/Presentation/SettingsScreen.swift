@@ -8,6 +8,8 @@ import SwiftUI
 /// alone) with a hint describing what the screen contains.
 struct SettingsScreen: View {
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     @State private var showPaywall = false
     @State private var paywallMode: PaywallPresentationMode = .upgrade
 
@@ -37,6 +39,16 @@ struct SettingsScreen: View {
                     }
                     .accessibilityHint("Unlimited podcast subscriptions, no free-tier cap")
                     RestorePurchasesRow()
+                }
+            }
+            if supportsMultipleWindows {
+                Section("Windows") {
+                    Button {
+                        openWindow(id: "earshot-main")
+                    } label: {
+                        Label("Open another Earshot window", systemImage: "plus.rectangle.on.rectangle")
+                    }
+                    .keyboardShortcut("n", modifiers: .command)
                 }
             }
 

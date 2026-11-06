@@ -31,11 +31,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot
         INFOPLIST_FILE: Earshot/App/Info.plist
-        # iPhone-only for 1.0 (#643 decision): iPad has had no real testing this
-        # cycle, so we won't ship it to App Review blind. iPad support (family
-        # "1,2") + its own VoiceOver/layout QA and screenshot set is tracked for
-        # 1.1. See docs/orchestration-state.md and the #643 iPad note.
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         DEVELOPMENT_TEAM: "72PH974742"
         CODE_SIGN_STYLE: Automatic
         EARSHOT_CLOUDKIT_ENABLED: NO

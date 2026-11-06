@@ -2936,7 +2936,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -3035,7 +3035,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = CloudKitDevelopment;
 		};
@@ -3154,7 +3154,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};

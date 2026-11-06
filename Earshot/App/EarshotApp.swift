@@ -1597,7 +1597,7 @@ struct EarshotApp: App {
     #endif
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "earshot-main") {
             Group {
                 switch runtime.phase {
                 case .unavailable:
