@@ -90,6 +90,15 @@ final class EarshotWatchTests: XCTestCase {
         XCTAssertEqual(WatchPlaybackSource.choose(local: file, remoteAddress: "expired"), file)
     }
 
+    func testPlayerReplacesStreamWithNewlyDownloadedFileForOfflineResume() {
+        let remote = URL(string: "https://example.com/episode.mp3")!
+        let local = URL(fileURLWithPath: "/tmp/episode.mp3")
+        XCTAssertTrue(WatchPlaybackSource.needsReplacement(currentURL: remote, chosenURL: local,
+                                                          currentIdentity: "episode", chosenIdentity: "episode"))
+        XCTAssertFalse(WatchPlaybackSource.needsReplacement(currentURL: local, chosenURL: local,
+                                                           currentIdentity: "episode", chosenIdentity: "episode"))
+    }
+
     @MainActor
     func testOfflineOutboxPublishesWithoutUsingProductionCloud() throws {
         let library = try WatchLibrary(inMemory: true)

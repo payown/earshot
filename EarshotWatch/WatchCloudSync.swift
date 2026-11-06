@@ -72,11 +72,18 @@ final class WatchCloudSync {
             CloudFolderProjection.self
         ])
         let store = URL.applicationSupportDirectory.appending(path: "WatchCloudProjection.sqlite")
+        #if targetEnvironment(simulator)
+        // Unsigned simulator builds have no iCloud entitlement. Core Data's
+        // CloudKit setup traps instead of reporting a recoverable error.
+        let database: ModelConfiguration.CloudKitDatabase = .none
+        #else
+        let database = CloudKitLaunchPolicy.projectionDatabase()
+        #endif
         let config = inMemory
             ? ModelConfiguration("WatchCloudProjectionTest", schema: schema,
                                  isStoredInMemoryOnly: true, cloudKitDatabase: .none)
             : ModelConfiguration("WatchCloudProjection", schema: schema,
-                                 url: store, cloudKitDatabase: CloudKitLaunchPolicy.projectionDatabase())
+                                 url: store, cloudKitDatabase: database)
         container = try ModelContainer(for: schema, configurations: config)
         context = container.mainContext
         if let saved = UserDefaults.standard.string(forKey: "watchProjectionDeviceID") {

@@ -12,6 +12,11 @@ enum WatchPlaybackSource {
               ["https", "http"].contains(remote.scheme?.lowercased() ?? "") else { return nil }
         return remote
     }
+
+    static func needsReplacement(currentURL: URL?, chosenURL: URL,
+                                 currentIdentity: String?, chosenIdentity: String) -> Bool {
+        currentURL != chosenURL || currentIdentity != chosenIdentity
+    }
 }
 
 @MainActor
@@ -40,6 +45,8 @@ final class WatchPlayer {
 
     init(library: WatchLibrary) {
         self.library = library
+        let savedRate = UserDefaults.standard.float(forKey: "watchPlaybackRate")
+        if (0.5...3).contains(savedRate) { rate = savedRate }
         if let resumable = library.episodes
             .filter({ !$0.isPlayed && $0.positionSeconds > 0 })
             .max(by: { $0.updatedAt < $1.updatedAt }) {
@@ -63,6 +70,23 @@ final class WatchPlayer {
             let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
             Task { @MainActor [weak self] in self?.handleRouteChange(raw) }
         })
+        notificationTokens.append(center.addObserver(forName: .AVPlayerItemPlaybackStalled, object: nil, queue: .main) { [weak self] note in
+            let item = note.object as? AVPlayerItem
+            Task { @MainActor [weak self] in
+                guard let self, item === self.player.currentItem else { return }
+                self.isBuffering = true
+                self.status = "Playback is buffering. Check the watch connection if it does not resume."
+            }
+        })
+        notificationTokens.append(center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: nil, queue: .main) { [weak self] note in
+            let item = note.object as? AVPlayerItem
+            Task { @MainActor [weak self] in
+                guard let self, item === self.player.currentItem else { return }
+                self.pause(announce: false)
+                self.status = "Episode playback failed. Try again or download this episode."
+                AccessibilityNotification.Announcement(self.status).post()
+            }
+        })
         configureRemoteCommands()
         updateRoute()
         if let deadline = UserDefaults.standard.object(forKey: "watchSleepDeadline") as? Date,
@@ -85,7 +109,10 @@ final class WatchPlayer {
             try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
             try await session.activate()
             updateRoute()
-            let changedEpisode = player.currentItem == nil || episode?.identity != item.identity
+            let currentURL = (player.currentItem?.asset as? AVURLAsset)?.url
+            let changedEpisode = WatchPlaybackSource.needsReplacement(
+                currentURL: currentURL, chosenURL: url,
+                currentIdentity: episode?.identity, chosenIdentity: item.identity)
             if changedEpisode {
                 player.replaceCurrentItem(with: AVPlayerItem(url: url))
                 episode = item
@@ -160,6 +187,7 @@ final class WatchPlayer {
 
     func setRate(_ newRate: Float) {
         rate = min(3, max(0.5, newRate))
+        UserDefaults.standard.set(rate, forKey: "watchPlaybackRate")
         if isPlaying { player.rate = rate }
         publishNowPlaying()
         AccessibilityNotification.Announcement("Speed set to \(rate.formatted()) times").post()
