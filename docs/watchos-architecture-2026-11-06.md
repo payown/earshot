@@ -1,6 +1,6 @@
 # Earshot for Apple Watch: audit and implementation plan
 
-**Status:** Michael approved all six implementation phases on 2026-11-06. Implementation is in progress; `docs/watchos-progress.md` is the current checkpoint. This architecture document preserves the original audit and design contract.
+**Status:** Michael approved all six implementation phases and one integrated internal TestFlight build on 2026-11-06. Implementation is in progress; `docs/watchos-progress.md` is the current checkpoint. This architecture document preserves the original audit and design contract. The code and limitations that differ from the proposal are recorded there.
 
 **Branch/worktree:** `feature/watchos-architecture` at `/Users/michaelbabcock/code/earshot-watchos`, based on `main` at `360d95c1`.
 
@@ -40,7 +40,7 @@ Relevant references inspected: `docs/icloud-sync-v1.1-plan.md`, `docs/sync-a2-id
 
 ## Reviewable implementation phases
 
-Each phase gets a small PR to `main`, assigned to `@payown`, with non-generated changes under 1,500 lines. Each is built and tested, includes VoiceOver review for UI, and stays unmerged until Michael approves a physical-device test build.
+The approved implementation proceeds through all phases without intermediate device requests. Keep commits and PRs reviewable, target `main`, assign `@payown`, and do not merge before Michael approves the integrated physical-device result. The branch currently integrates interdependent phases; `docs/watchos-progress.md` records their test status and any PR-size exception that remains to resolve.
 
 1. **Foundation and project generation.** Approve watch bundle ID, watch-specific Info.plist/background audio, CloudKit/App Groups if needed, independent installation flag and target packaging. Add watch app/unit/UI test targets in `project.yml`; run `xcodegen generate`; prove empty-library independent launch and iOS regression. No phone signing changes.
 2. **Portable core and watch library.** Extract feed parser/network, natural keys, cap rules and select playback/queue policies. Add watch-local persistence/recovery, direct subscribe/search/refresh, library, inbox, folders and offline metadata. Validate migration and 10-subscription cap before watch CloudKit writes.
@@ -55,11 +55,11 @@ Each phase gets a small PR to `main`, assigned to `@payown`, with non-generated 
 - **CloudKit:** Verify that the current production compact projection schema and per-device contribution model can safely accept watch records. Never initialize/deploy a new production CloudKit schema or change entitlements silently. The existing tombstone-retention follow-up remains unresolved.
 - **StoreKit:** Apple documents universal purchases for companion watch/iOS apps, but the current product configuration and `Transaction.currentEntitlements` must be tested on a paired device and an independently installed watch. Purchase UI/restoration changes require separate approval.
 - **Audio/ATS:** Verify watch SDK availability for MediaPlayer remote commands, AVPlayer media formats, background URLSession behavior and direct HTTP media policy. Do not copy iOS ATS exception without review.
-- **Distribution:** Current `tool/swiftui-testflight.sh` assumes one app target. Audit and extend it only after watch packaging/signing are approved. No release or upload is authorized by this plan.
+- **Distribution:** The current `tool/swiftui-testflight.sh` assumes one app target, but the approved integrated internal TestFlight upload is authorized. The watch target is embedded as an iOS app PlugIn; archive, export and upload must confirm all three nested bundle identifiers and versions. Production release and merge still require Michael's approval.
 
 ## Build and validation commands
 
-After Phase 1 approval and code changes, from the linked worktree:
+From the linked worktree:
 
 ```bash
 xcodegen generate
@@ -69,7 +69,7 @@ xcodebuild test -project Earshot.xcodeproj -scheme EarshotWatch -configuration D
 xcodebuild test -project Earshot.xcodeproj -scheme Earshot -configuration Debug -destination 'platform=iOS Simulator,name=<installed iPhone simulator>' -skip-testing:EarshotTests/PaywallViewModelTests -skip-testing:EarshotTests/ProductCatalogServiceTests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
-The watch scheme and target above are **planned, not yet present**. Choose installed simulator names with `xcrun simctl list devices available`. For hardware builds, use command-line automatic signing and `-allowProvisioningUpdates DEVELOPMENT_TEAM=72PH974742`; do not change signing files.
+The watch scheme and target are present. Choose installed simulator names with `xcrun simctl list devices available`. For hardware builds, use command-line automatic signing and `-allowProvisioningUpdates DEVELOPMENT_TEAM=72PH974742`; do not change phone signing files.
 
 ## Michael's VoiceOver hardware checklist (release gate)
 

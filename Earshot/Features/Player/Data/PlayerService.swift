@@ -544,6 +544,10 @@ final class PlayerService {
     /// act on the current item — e.g. bookmarking the current position.
     var nowPlayingEpisode: Episode? { currentEpisode }
 
+    /// A narrow readiness signal for paired-device handoff. `isPlaying` can
+    /// represent a requested stream while AVPlayer is still buffering.
+    var isAudiblyPlayingForWatchHandoff: Bool { player.timeControlStatus == .playing }
+
     /// Recovery must respect requested playback while AVPlayer buffers or a
     /// cross-device position lookup is still finishing, not just audible state.
     var hasActivePlaybackRequest: Bool {
