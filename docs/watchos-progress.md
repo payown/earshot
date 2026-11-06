@@ -2,6 +2,8 @@
 
 Updated 2026-11-06. The integrated device build is **not ready**. This file records implementation state so work can continue without treating an intermediate simulator build as the release candidate.
 
+Integrated candidate version: **1.2.5 (299)**. The unsigned Release archive embeds `media.payown.earshot`, `media.payown.earshot.watchkitapp`, and `media.payown.earshot.watchkitapp.widgets` with matching versions. The watch Info.plist includes independent installation, background audio, and the Release CloudKit gate. Signing, export and TestFlight processing remain to be verified.
+
 ## Implemented and compiled
 
 - Independent watchOS 11 target `media.payown.earshot.watchkitapp`, watch unit/UI test targets, iPhone embedding in `PlugIns`, and watch background-audio Info.plist entry.
