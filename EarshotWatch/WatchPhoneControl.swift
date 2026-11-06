@@ -78,7 +78,10 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         let available = activationState == .activated && session.isReachable
         Task { @MainActor [weak self] in
             self?.phoneAvailable = available
-            if available { self?.refreshQuickActions() }
+            if available {
+                self?.refreshQuickActions()
+                self?.refresh()
+            }
         }
     }
 
@@ -86,7 +89,10 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         let available = session.isReachable
         Task { @MainActor [weak self] in
             self?.phoneAvailable = available
-            if available { self?.refreshQuickActions() }
+            if available {
+                self?.refreshQuickActions()
+                self?.refresh()
+            }
             if !available { self?.status = "iPhone unavailable. Watch playback works independently." }
         }
     }
@@ -134,10 +140,10 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                 else { await player.toggle() }
             case "pause": player.pause()
             case "back":
-                if player.episode == nil { accepted = false; reason = "Nothing playing on watch" }
+                if !player.hasLoadedItem { accepted = false; reason = "Start an episode on watch first" }
                 else { await player.skipBackward() }
             case "forward":
-                if player.episode == nil { accepted = false; reason = "Nothing playing on watch" }
+                if !player.hasLoadedItem { accepted = false; reason = "Start an episode on watch first" }
                 else { await player.skipForward() }
             default: accepted = false; reason = "Unsupported watch control"
             }

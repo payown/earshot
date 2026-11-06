@@ -8,6 +8,15 @@ Integrated candidate version: **1.2.5 (299)**. An unsigned Release archive for b
 
 ## Implemented and compiled
 
+| Approved phase | Implementation state | Remaining release proof |
+| --- | --- | --- |
+| 1. Foundation | Watch target, independent launch, generated project and tests | Signed watch provisioning |
+| 2. Portable core and library | Shared identity/parser, local SwiftData, Library, Inbox and folders | Live CloudKit account/bootstrap |
+| 3. Independent player | Direct stream/local AVPlayer, controls, chapters, sleep and remote commands | Background, route and interruption hardware pass |
+| 4. Downloads and bookmarks | Direct validated downloads, restart/cancel/delete, local bookmarks | Offline and low-storage hardware pass |
+| 5. Device coordination | Watch Connectivity control/handoff, private projection reconciliation, offline outbox | Two-device conflict and handoff hardware pass |
+| 6. Widgets, intents, hardening | Accessory widget, watch shortcuts, code accessibility review and automated suites | Widget tap, VoiceOver, signed TestFlight processing |
+
 - Independent watchOS 11 target `media.payown.earshot.watchkitapp`, watch unit/UI test targets, iPhone embedding in `PlugIns`, and watch background-audio Info.plist entry.
 - Watch-local SwiftData models separate from all frozen phone schemas and the phone store. Shared phone RSS parser, chapter parser, product identifiers, logger, and sleep-timer rules are compiled into the watch target.
 - Watch UI for Home, Library, podcast/episode details, Inbox, Queue, Downloads, Bookmarks, Settings, Now Playing, and optional iPhone control. The Library can fetch an HTTPS RSS feed directly, and episode playback and downloads use watch networking and storage.
@@ -20,8 +29,9 @@ Integrated candidate version: **1.2.5 (299)**. An unsigned Release archive for b
 - The existing feed URL identity rules are shared with watchOS, preserving path and query case when matching subscriptions and episodes.
 - A separate watch Cloud projection store now uses those exact seven model types. Release/CloudKitDevelopment enable the approved existing private container; Debug remains local-only. A compact watch SwiftData outbox retains offline follow/unfollow, progress, played, inbox, queue, bookmark and skip-setting edits. Reconciliation applies the phone projection's explicit progress-reset and queue-membership clocks. Folder membership is read from the existing projection for watch Library browsing.
 - Unsigned Release simulator builds use a local-only watch projection because Core Data's CloudKit setup traps without simulator iCloud entitlements; the watch Release binary retains the approved CloudKit container on physical devices.
-- Watch Connectivity now carries acknowledged two-way playback commands, a cached Quick Actions order, and queued iPhone-to-watch download requests. The iPhone Settings screen can select an episode for direct watch download; the watch can process a request after reconnecting.
+- Watch Connectivity now carries acknowledged two-way playback commands, a cached Quick Actions order, and queued iPhone-to-watch download requests. On reconnect, the watch refreshes phone playback state and Quick Actions order. The iPhone Settings screen can select an episode for direct watch download; the watch can process a request after reconnecting.
 - The watch exposes a separate App Intents implementation for Open Now Playing, Resume, Pause and Skip, and the iPhone has a Send Episode to Watch shortcut. The watch widget supports circular, rectangular and inline accessory families with bounded snapshot freshness.
+- The watch reads verified StoreKit 2 current entitlements, persists the last Plus decision for immediate offline startup, and listens for transaction updates. It uses the existing product identifiers and free ten-podcast cap; there is no watch purchase UI or second product catalog. Universal-purchase behavior still needs physical Sandbox verification.
 - The watch Now Playing screen identifies the audio route and offers Restart. At episode end, it marks played and advances to Up Next. Missing download files are detected on launch; completed downloads are checked with AVFoundation before they become playable. A newly completed local download replaces an already loaded stream when the same episode resumes offline. Show notes use the existing shared paragraph parser.
 - iPhone and watch simulator targets build. A direct `simctl install` and `simctl launch` of the watch app succeeded, and its Home was visually inspected. The RSS/parser watch unit test passed.
 
@@ -31,7 +41,7 @@ Integrated candidate version: **1.2.5 (299)**. An unsigned Release archive for b
 - Prove both handoff directions, timeout and crash recovery on physical devices. The sender waits for audio readiness and a matching acknowledgement, but a lost acknowledgement after the other device starts can leave an ambiguous state; the UI reports this and requests reconciliation.
 - Test direct download cancellation, storage pressure and offline playback on hardware. Watch transfers use foreground `URLSession` and restart an interrupted transfer; watchOS does not guarantee unlimited background transfer execution. iPhone-to-watch selection sends a queued request and the watch downloads directly.
 - Verify widget extension activation, deep links and App Intents on device. The `widgetURL` and matching `onOpenURL` handler are present as Apple documents. `simctl openurl` against the watchOS simulator returned `LSApplicationWorkspaceErrorDomain 115`, so a widget tap has not been proven by that command.
-- Add more deterministic end-to-end sync tests where the system frameworks allow. The watch unit/UI suite passed with **15 passed, zero failed** on Series 11/watchOS 26.5 simulator. The iPhone unit suite passed with **2,702 passed, 34 skipped, zero failed** on iPhone 17 Pro/iOS 26.0 simulator on 2026-11-06. The two known StoreKit simulator suites were excluded by repository policy. The structured accessibility code review is in `docs/watchos-accessibility-review.md`; physical VoiceOver/device checks remain.
+- Add more deterministic end-to-end sync tests where the system frameworks allow. The watch unit/UI suite passed **18 of 18** on Series 11/watchOS 26.5 simulator. The iPhone unit suite passed with **2,702 passed, 34 skipped, zero failed**, and the separate iPhone UI suite passed **29 of 29**, on iPhone 17 Pro/iOS 26.0 simulator on 2026-11-06. The two known StoreKit simulator suites were excluded by repository policy. The structured accessibility code review is in `docs/watchos-accessibility-review.md`; physical VoiceOver/device checks remain.
 - Validate universal purchase on watch hardware without changing purchase UI. Verify signed archive packaging and TestFlight distribution.
 
 ## Current testing limits

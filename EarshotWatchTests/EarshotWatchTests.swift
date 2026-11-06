@@ -249,4 +249,18 @@ final class EarshotWatchTests: XCTestCase {
         XCTAssertTrue(library.bookmarks.isEmpty)
     }
 
+
+    @MainActor
+    func testOfflineUnfollowRetainsHistoryAndStagesTombstone() throws {
+        let library = try WatchLibrary(inMemory: true)
+        let podcast = WatchPodcast(feedURL: "https://example.com/feed", title: "Show")
+        library.context.insert(podcast)
+        let episode = try XCTUnwrap(library.playablePhoneEpisode(feedURL: podcast.feedURL, guid: "one",
+                                                                 title: "One", podcastTitle: "Show", audioURL: "https://example.com/one.mp3"))
+        library.unsubscribe(podcast)
+        XCTAssertTrue(library.podcasts.isEmpty)
+        XCTAssertTrue(library.episodes.contains { $0.identity == episode.identity })
+        let pending = try library.context.fetch(FetchDescriptor<WatchPendingSyncEvent>())
+        XCTAssertTrue(pending.contains { $0.kind == "unfollow" })
+    }
 }
