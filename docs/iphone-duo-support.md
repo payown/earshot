@@ -363,15 +363,13 @@ passed after the change. They verify touch behavior. A dedicated iPhone 17/
 iOS 27.2 simulator build and launch passed; with VoiceOver off, its semantic
 snapshot retained the visible Play buttons. New Xcode 27 `XCUIVoiceOverService`
 tests enabled VoiceOver and passed the one-stop sequence for two adjacent
-Queue episodes and two adjacent show episodes using the shared `EpisodeRow`.
-This directly checks the spoken focus order for the two row implementations.
-The shared-row test covers the same component used by Inbox and Downloads,
-but it does not exercise their complete screens.
-
-An attempted Inbox-specific VoiceOver test did not reach its row assertion:
-the seeded iOS 27.2 Inbox opened empty despite an Inbox badge of three items.
-That fixture/query disagreement needs separate investigation; this build does
-not change Inbox fetching. The Actions rotor, physical iPhone 17 flick order,
+Queue episodes, Inbox episodes, and show episodes using the shared
+`EpisodeRow`. The Inbox test starts in Queue, then enters Inbox after the
+debug fixture finishes seeding; an Inbox-first fixture launch can cache an
+empty pre-seed snapshot despite its badge reporting three items. This test
+arrangement verifies the actual Inbox screen without changing production
+fetching. Downloads use the same shared row but were not separately driven
+by this VoiceOver test. The Actions rotor, physical iPhone 17 flick order,
 and focus after folding still require tester verification because the new
 VoiceOver automation API does not manipulate rotor actions or fold hardware.
 The tester's earlier Duo folding pass predates this row change and must not

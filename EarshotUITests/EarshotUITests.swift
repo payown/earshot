@@ -116,6 +116,43 @@ final class EarshotUITests: XCTestCase {
                        "Each shared episode row should be one VoiceOver stop: \(speech)")
     }
 
+    func testInboxVoiceOverHasOneStopPerEpisode() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        // Seed while Queue is active, then enter Inbox after launch services
+        // finish. An Inbox-first screenshot launch can query before the DEBUG
+        // fixture is seeded and display a stale empty snapshot.
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch.waitForExistence(timeout: 15))
+        app.tabBars.buttons["Inbox"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#169 – Apple's Price Hikes"
+        )).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+
+        var speech: [String] = []
+        for _ in 0..<40 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("#167 – We're Going to Atlanta") { break }
+        }
+
+        let firstIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#169 – Apple's Price Hikes") }),
+                                       "Inbox's first episode was not reached: \(speech)")
+        let secondIndex = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#167 – We're Going to Atlanta") }),
+                                        "Inbox's second episode was not reached: \(speech)")
+        XCTAssertEqual(secondIndex, firstIndex + 1,
+                       "Each Inbox episode should be one VoiceOver stop: \(speech)")
+    }
+
     func testFolderMembershipPickerKeepsSelectionCurrent() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
