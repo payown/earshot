@@ -4,6 +4,7 @@ options:
   defaultConfig: Release
   deploymentTarget:
     iOS: "18.0"
+    watchOS: "11.0"
   createIntermediateGroups: true
 configs:
   Debug: debug
@@ -27,6 +28,11 @@ targets:
           - "Testing/**"
       - path: docs/inbox-queue-downloads-guide.md
         buildPhase: resources
+    dependencies:
+      - target: EarshotWatch
+        embed: true
+        copy:
+          destination: plugins
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot
@@ -87,6 +93,58 @@ targets:
         DEVELOPMENT_TEAM: "72PH974742"
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
+  EarshotWatch:
+    type: application
+    platform: watchOS
+    info:
+      path: EarshotWatch/Info.plist
+      properties:
+        CFBundleDisplayName: Earshot
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: media.payown.earshot
+        WKRunsIndependentlyOfCompanionApp: true
+        UIBackgroundModes: [audio]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsForMedia: true
+    sources:
+      - path: EarshotWatch
+      - path: Earshot/Features/Subscriptions/Data/RSSParser.swift
+      - path: Earshot/Features/Transcripts/Domain/TranscriptFormat.swift
+      - path: Earshot/Core/Logging/Logger+Earshot.swift
+      - path: Earshot/Core/WatchFeedSnapshot.swift
+      - path: Earshot/Features/Player/Domain/SleepTimer.swift
+      - path: Earshot/Features/Player/Domain/Chapter.swift
+      - path: Earshot/Features/Player/Domain/ChapterParser.swift
+      - path: Earshot/Features/Player/Domain/ChapterNavLogic.swift
+      - path: Earshot/Features/Monetization/Domain/EarshotPlusProduct.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+        DEVELOPMENT_TEAM: "72PH974742"
+        CODE_SIGN_STYLE: Automatic
+  EarshotWatchTests:
+    type: bundle.unit-test
+    platform: watchOS
+    sources:
+      - path: EarshotWatchTests
+    dependencies:
+      - target: EarshotWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.watchkitapp.tests
+        GENERATE_INFOPLIST_FILE: YES
+  EarshotWatchUITests:
+    type: bundle.ui-testing
+    platform: watchOS
+    sources:
+      - path: EarshotWatchUITests
+    dependencies:
+      - target: EarshotWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.watchkitapp.uitests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Earshot:
     build:
@@ -109,3 +167,15 @@ schemes:
         Earshot: all
     run:
       config: CloudKitDevelopment
+  EarshotWatch:
+    build:
+      targets:
+        EarshotWatch: all
+        EarshotWatchTests: [test]
+        EarshotWatchUITests: [test]
+    test:
+      targets:
+        - EarshotWatchTests
+        - EarshotWatchUITests
+    run:
+      config: Debug

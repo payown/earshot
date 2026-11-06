@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the independent Apple Watch app foundation with watch-local library, direct feed and audio access, playback, downloads, and watchOS test targets. Full integration and device testing continue on the watch feature branch.
+
 - Now Playing's More options includes Share episode link, separate from exporting the audio file.
 
 - Opt-in podcast and episode results in system search open Earshot's library and show notes. Siri and Shortcuts can resume listening and play selected episodes; iOS 27 adds podcast audio search and latest locally stored episode playback.
