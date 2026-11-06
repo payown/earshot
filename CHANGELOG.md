@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An independent Apple Watch podcast player now browses and follows feeds, streams and downloads episodes, manages Inbox, Queue and bookmarks, provides accessible playback controls, and adds watch complications and Shortcuts. It uses the existing private iCloud projection for user state and Watch Connectivity for optional phone control and playback transfer. The integrated internal TestFlight build awaits watch signing and physical VoiceOver validation.
+
 - Now Playing's More options includes Share episode link, separate from exporting the audio file.
 
 - Opt-in podcast and episode results in system search open Earshot's library and show notes. Siri and Shortcuts can resume listening and play selected episodes; iOS 27 adds podcast audio search and latest locally stored episode playback.

@@ -50,8 +50,9 @@ struct SkipWatchForwardIntent: AppIntent {
     static let title: LocalizedStringResource = "Skip Forward in Earshot on Apple Watch"
 
     func perform() async throws -> some IntentResult {
-        guard let runtime = await MainActor.run(body: { WatchRuntimeRegistry.currentOrCreate() }) else {
-            return .result(dialog: "Open Earshot on Apple Watch first.")
+        guard let runtime = await MainActor.run(body: { WatchRuntimeRegistry.currentOrCreate() }),
+              await MainActor.run(body: { runtime.player.hasLoadedItem }) else {
+            return .result(dialog: "Start an episode in Earshot on Apple Watch first.")
         }
         await runtime.player.skipForward()
         return .result(dialog: "Skipped forward on Apple Watch.")
@@ -62,8 +63,9 @@ struct SkipWatchBackwardIntent: AppIntent {
     static let title: LocalizedStringResource = "Skip Back in Earshot on Apple Watch"
 
     func perform() async throws -> some IntentResult {
-        guard let runtime = await MainActor.run(body: { WatchRuntimeRegistry.currentOrCreate() }) else {
-            return .result(dialog: "Open Earshot on Apple Watch first.")
+        guard let runtime = await MainActor.run(body: { WatchRuntimeRegistry.currentOrCreate() }),
+              await MainActor.run(body: { runtime.player.hasLoadedItem }) else {
+            return .result(dialog: "Start an episode in Earshot on Apple Watch first.")
         }
         await runtime.player.skipBackward()
         return .result(dialog: "Skipped back on Apple Watch.")
