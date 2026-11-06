@@ -10,6 +10,9 @@ each window. Tab selection and navigation state live in each view; `SceneStorage
 restores the selected tab and Library podcast for that window. The `App` owns one `AppRuntime`, so
 all windows use the same `ModelContainer`, download service, and `PlayerService`.
 Settings offers **Open another Earshot window** when the system supports it.
+The full-player sheet and external navigation requests are claimed by the
+focused window. Search indexing belongs to the process, so opening or closing
+a scene does not restart it. Tab badges update in every scene.
 
 The five primary tabs remain tabs. The Duo width policy supplies list and detail
 panes in Inbox, Queue, Library, Downloads, and episode lists when the current
@@ -25,9 +28,11 @@ With Xcode 27.2, the app built for iPad Pro 11-inch and iPhone 18 Pro simulators
 Five targeted layout and UI tests passed on iPad Pro 11-inch. Two additional UI
 tests passed on iPad mini, covering compact episode detail and landscape player
 control reachability. Another iPad Pro run passed real VoiceOver episode-row
-navigation and the full player at the largest accessibility text size. After
-correcting an ambiguous XCTest tab query, the New Window UI test passed and
-observed a second app window. On iPhone 18 Pro, 68 focused unit tests and the
+navigation and the full player at the largest accessibility text size. The New
+Window action appears in iPad Settings. XCTest exposed an auxiliary UIKit
+window as a second `Window`, so its window count cannot establish that a second
+Earshot scene opened. Independent scene behavior requires a device check. On
+iPhone 18 Pro, 68 focused unit tests and the
 episode-selection and playback UI test passed.
 The same episode-selection and playback UI test passed on the iOS 27.1 Duo
 simulator. These simulator runs do not cover a physical Duo hinge transition.
@@ -35,6 +40,18 @@ simulator. These simulator runs do not cover a physical Duo hinge transition.
 The build still emits pre-existing warnings in `EpisodeRow` and App Intents code.
 The iPad test results include an existing system warning about synchronous
 audio-session activation; no test failed on that warning.
+
+The follow-up window-routing changes built with Xcode 27.2. Playback and the
+New Window action were rerun as targeted iPad UI tests. These checks do not
+prove independent navigation or shared playback across two visible scenes.
+Build 1.2.6 (306) archived for iOS Release, exported as a signed IPA, and was
+verified to contain both device families, an iOS 18 minimum, iPad portrait and
+landscape orientation support, and the multiple-scenes declaration. It was
+processed as `VALID` in App Store Connect and is `IN_BETA_TESTING` for the
+Internal Testing Group. Its build ID is
+`4f6b6cc8-56e0-4d0b-afaf-bf92f43ebf09`. It has not been submitted to the
+Public Testers group or for an App Store release. The app and its older
+iPhone/Duo paths still require the physical-device checks below.
 
 ## Manual validation still needed
 
