@@ -13,8 +13,8 @@ fileGroups:
   - Earshot/Testing
 settings:
   base:
-    MARKETING_VERSION: "1.2.5"
-    CURRENT_PROJECT_VERSION: "298"
+    MARKETING_VERSION: "1.2.6"
+    CURRENT_PROJECT_VERSION: "305"
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
 targets:

@@ -12,7 +12,7 @@ enum FolderLogic {
         guard let ageLimitDays else { return true }
         guard let pubDate else { return true }
         let cutoff = now.addingTimeInterval(-Double(ageLimitDays) * 86_400)
-        return pubDate >= cutoff
+        return pubDate.timeIntervalSinceReferenceDate >= cutoff.timeIntervalSinceReferenceDate
     }
 
     /// Newest-first ordering for the episodes gathered across a folder's

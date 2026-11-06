@@ -65,11 +65,15 @@ struct QueueScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @Query(sort: \QueueItem.position) private var items: [QueueItem]
 
     @State private var confirmingClearQueue = false
     @State private var showNotesEpisode: Episode?
+    @State private var selectedDetailEpisode: Episode?
+    @State private var compactDetailEpisode: Episode?
+    @State private var isWide = false
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
     // queue itself is never touched — rows are hidden from display only.
     @State private var searchText = ""
@@ -106,7 +110,40 @@ struct QueueScreen: View {
     }
 
     var body: some View {
-        content
+        GeometryReader { geometry in
+            let wide = ListDetailLayoutPolicy.usesTwoPanes(
+                width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
+            )
+            HStack(spacing: 0) {
+                content
+                    .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                    .frame(maxWidth: wide ? nil : .infinity)
+                if wide {
+                    Divider()
+                    Group {
+                        if let episode = selectedDetailEpisode, !episode.isDeleted {
+                            EpisodeDetailPane(episode: episode)
+                        } else {
+                            ContentUnavailableView(
+                                "Select an episode",
+                                systemImage: "list.bullet",
+                                description: Text("Choose a Queue episode to read its information and show notes.")
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .onAppear { isWide = wide }
+            .onChange(of: wide) { oldValue, newValue in
+                isWide = newValue
+                if oldValue && !newValue, compactDetailEpisode == nil {
+                    compactDetailEpisode = selectedDetailEpisode
+                } else if !oldValue && newValue {
+                    compactDetailEpisode = nil
+                }
+            }
+        }
             // Mirrors the Inbox pattern (#422): a plain `navigationTitle` keeps the
             // bar's title identity (back-button context) while `.inline` collapses
             // the large title out of the scrollable content area. The visible,
@@ -211,6 +248,7 @@ struct QueueScreen: View {
                 }
             }
             .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+            .sheet(item: $compactDetailEpisode) { EpisodeDetailSheet(episode: $0) }
             .onAppear {
                 savedLineupCount = lineupStore.savedCount
                 requestLaunchHeadingFocus()
@@ -519,6 +557,11 @@ struct QueueScreen: View {
     ) -> some View {
         QueueRow(
             episode: episode,
+            isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
+            onSelect: {
+                selectedDetailEpisode = episode
+                if !isWide { compactDetailEpisode = episode }
+            },
             position: position,
             total: total,
             moveMode: moveMode,
@@ -786,10 +829,12 @@ enum GroupedQueueDrag {
     }
 }
 
-/// One queue row: a single VoiceOver element whose Actions rotor is the user's
+/// One queue item whose selection button's Actions rotor is the user's
 /// configured queue Quick Actions (in order), so a screen-reader user can play,
-/// reorder, or remove without a drag gesture. Swipe exposes the destructive
-/// actions; the context menu exposes the non-default ones.
+/// reorder, or remove without a drag gesture. The row selects details; its
+/// visible Play button starts audio for touch users. VoiceOver keeps one stop
+/// per episode and offers Play in the Actions rotor. Swipe exposes destructive
+/// actions and the context menu exposes the other configured actions.
 private struct QueueRow: View {
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
@@ -802,6 +847,8 @@ private struct QueueRow: View {
     // QueueScreen, which is under the app root that injects PlayerService.
     @Environment(PlayerService.self) private var player
     let episode: Episode
+    let isDetailSelected: Bool
+    let onSelect: () -> Void
     let position: Int?
     let total: Int?
     let moveMode: QueueMoveMode
@@ -822,7 +869,9 @@ private struct QueueRow: View {
     private var rowContent: some View {
         let episodeID = episode.persistentModelID
         let presentations = QueueItemAction.presentations(actions, for: episode, moveMode: moveMode)
-        let primary = presentations.first
+        let rotorPresentations = voiceOverEnabled && !actions.contains(.playNow)
+            ? QueueItemAction.presentations(actions + [.playNow], for: episode, moveMode: moveMode)
+            : presentations
         // Castro-style "X min left" / total length, the same treatment EpisodeRow
         // gives every other list. The Queue was the original surface this was
         // requested for but #493 only reached the shared row, not this bespoke
@@ -833,10 +882,9 @@ private struct QueueRow: View {
             isPlayed: episode.isPlayed
         )
 
-        return Button {
-            guard let primary,
-                  PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
-            performAction(primary.action)
+        let selectionButton = Button {
+            guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+            onSelect()
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title)
@@ -900,12 +948,13 @@ private struct QueueRow: View {
         // there's something to speak: `.accessibilityValue("")` makes VoiceOver
         // utter a stray pause, so a played/unknown-duration row omits it.
         .accessibilityValueIfPresent(accessibilityValue)
-        .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
+        .accessibilityHint("Double tap to view episode details")
+        .modifier(DetailSelectionTrait(selected: isDetailSelected))
         .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572). The
-        // default double-tap and hint above keep the UN-reversed `actions.first`.
-        .queueActionsRotor(presentations, supplementalActions: supplementalActions) { action in
+        // selection double-tap and hint above stay independent of those actions.
+        .queueActionsRotor(rotorPresentations, supplementalActions: supplementalActions) { action in
             guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
             performAction(action)
         }
@@ -915,6 +964,20 @@ private struct QueueRow: View {
             actions: presentations,
             performAction: performAction
         ))
+        return HStack(spacing: Spacing.sm) {
+            selectionButton
+            Button {
+                guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                player.playFromEpisodeList(episode)
+            } label: {
+                Image(systemName: "play.fill")
+                    .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+            }
+            .accessibilityLabel("Play \(episode.title)")
+            .accessibilityHint("Starts playback immediately")
+            .accessibilityIdentifier("queue.row.play")
+            .accessibilityHidden(voiceOverEnabled)
+        }
     }
 
     /// True when this row's episode is the one loaded in the player, compared by

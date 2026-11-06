@@ -76,6 +76,18 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe asked Renata to leave the five tabs as tabs and put each list beside its
+  own details on the open Duo. She checked that selecting an episode stayed
+  silent until she pressed Play (Chapter 110).
+- Kashe reported a launch crash after an update with the build number and time,
+  kept the app installed, and checked her Queue and saved place when the next
+  build opened (Chapter 111).
+- Kashe used the full player title when the narrow Duo cover left room for
+  transport controls but little room for the mini-player title (Chapter 109).
+- Kashe noticed the empty mini-player frame on an unfolded Duo and checked
+  that it disappeared when no episode was loaded (Chapter 108).
+- Kashe borrowed Renata's iPhone Duo to check Earshot's sidebar and playback
+  continuity while folding it (Chapter 107).
 - Kashe checks that a shared Listening Places folder keeps each device's file
   separate before trusting it with everyday listening (Chapter 106).
 - Kashe tests a new Listening Places folder on her Mac, writes a snapshot,
@@ -3762,3 +3774,99 @@ Kashe made a spare listening folder before her first visit of the day. Her phone
 Renata called as Kashe was closing the laptop. “Did you get it working?”
 
 “I checked what it kept,” Kashe said. “That's how I know.”
+
+---
+
+Chapter 107 - Build 300
+
+What to try first:
+
+On iPhone Duo with iOS 27.1 or later, open Earshot on the outer display, then unfold it. When the inner window has room, look for a sidebar with Inbox, Queue, Library, Downloads, and Settings. Choose a section, fold the phone, and check that the compact navigation keeps the same section. Start an episode before changing poses; check its playback position and Queue afterward. Try a narrow Split View window, VoiceOver, and large text. On a conventional iPhone, check that the familiar tabs still work. Tell us the pose, iOS version, screen, and exact spoken control if something moves or becomes hard to reach.
+
+Kashe's story:
+
+Renata handed Kashe an open Duo during lunch. Kashe moved through Earshot's sections with VoiceOver, chose Queue, and started an interview. She folded the phone while the host was mid-sentence.
+
+The controls moved. The sentence kept going.
+
+“Still in Queue?” Renata asked.
+
+Kashe checked before answering. “Still here. Now let me hear the rest.”
+
+---
+
+Chapter 108 - Build 301
+
+What to try first:
+
+Open Earshot on iPhone Duo's inner display and move among Inbox, Queue, Library, Downloads, and Settings in the sidebar. With nothing playing, check that no empty mini-player frame takes space beside the navigation. Start an episode and check that the mini-player appears, stays reachable with VoiceOver, and keeps playing as you fold and unfold. Check the same section stays selected, then try a partially folded pose and a narrow Split View window. Try large text and tell us the pose, iOS version, screen, and exact spoken control if anything is missing or hard to reach. On a conventional iPhone, check that the familiar tabs and mini-player still work.
+
+Kashe's story:
+
+Kashe opened Inbox on Renata's Duo and noticed a quiet shape at the bottom of the screen. Nothing was playing, but the shape looked ready to be pressed. She traced its edge, then folded the phone. It was still there.
+
+Renata made a note while Kashe checked the next build. The empty shape was gone. Kashe opened Queue, unfolded the phone, and found the sidebar where she expected it.
+
+“Now there is room for the controls that matter,” she said.
+
+---
+
+Chapter 109 - Build 302
+
+What to try first:
+
+On iPhone Duo, start an episode and close the full player. Check that the mini-player's Play, skip-back, skip-forward, bookmark, and episode button remain reachable on the outer display, the open inner display, and during a fold. With VoiceOver, the episode button should speak the full episode and podcast names even when its visible title is shortened. Open the full player for the complete title and other controls. Then stop playback and check that the empty mini-player capsule disappears. Try large text, a partially folded pose, and Split View. Tell us the pose, iOS version, and exact spoken control if any action is missing or focus jumps. On a conventional iPhone, check the same mini-player actions.
+
+Kashe's story:
+
+The interview title was longer than the space beside the controls. Kashe heard the whole name when she moved VoiceOver to the mini-player, then opened the full player to see what Renata was reading on the screen.
+
+She folded the Duo. The controls stayed in reach. The name remained available when she asked for it.
+
+“Keep the buttons,” she told Renata. “I can always open the title.”
+
+Chapter 110 - Build 303
+
+What to try first:
+
+On an open iPhone Duo, check that Inbox, Queue, Library, Downloads, and Settings remain tabs. In Library, choose a show: its episodes should appear on the left and its description on the right. Choose an episode: its information and show notes should replace the right-hand detail without starting audio. Press Play in that detail or beside a list row: playback should start immediately. Use “Back to Library shows” to return to the show list. Check Inbox, Queue, and Downloads episode lists the same way. Fold the Duo, try a narrow Split View window, and try large accessibility text; details should remain reachable when the list takes the full width. With VoiceOver, check the list row, separate Play button, detail headings, and return control. Report any missing action or unexpected playback, including the pose and iOS version.
+
+Kashe's story:
+
+Renata opened the Library on the Duo. Kashe found the same five tabs she knew on her own phone, then chose a show from the list. Its episodes appeared beside the description. She opened one and read the notes without hearing it begin.
+
+“Now Play,” she said. Renata pressed the button, and the player opened at once.
+
+Kashe returned to the show list and tried another. The route back was where she expected it.
+
+---
+
+Chapter 111 - Build 304
+
+What to try first:
+
+If build 303 crashed on an iPhone running iOS 27.2 beta, update to this build in place from TestFlight. Keep your app data installed. Tap Open in TestFlight, then open Earshot again from its Home Screen icon. Check that your shows, Queue, and saved playback position are still there. Start an episode, move Earshot to the background, and return to it. If it crashes, please submit the report and tell us the build number, iOS version, and approximate time. On iPhone Duo, check that the familiar tabs and the lists beside their details still work after the update.
+
+Kashe's story:
+
+Kashe tapped Open after an update. The Home Screen came back. She tried the Earshot icon and landed there again.
+
+She sent Renata the build number and the time it happened. Renata asked her to keep the app installed while they looked at the report.
+
+The next build opened. Kashe checked her Queue first, then found the interview waiting at the same place.
+
+“Good,” she said. “That was the part I didn't want to lose.”
+
+---
+
+Chapter 112 - Build 305
+
+What to try first:
+
+On an iPhone 17 with VoiceOver, open Inbox and flick right through several episodes. Each episode should be one stop rather than alternating between its title and a separate Play button. Double tap an episode to open its details without starting audio. From the episode row, use the Actions rotor and choose Play to start it immediately. Try the same sequence in Queue, Downloads, and a show's episode list in Library. If you have removed Play from Quick Actions, check that the row still offers Play in the rotor. With VoiceOver off, the visible Play button beside a row should still start audio immediately. On iPhone Duo, try the lists while folded and unfolded. Tell us the build, device, iOS version, list, and exact spoken sequence if an extra stop or missing action remains.
+
+Kashe's story:
+
+Kashe moved through her Inbox on the bus. VoiceOver said an episode title, then made her flick again just to pass a Play button before reaching the next title. The Queue did the same.
+
+After updating, she heard one episode per flick. A double tap opened its notes; Play waited in the row's Actions rotor when she wanted to listen. Renata could still tap the visible Play button beside an episode without opening the notes first.
