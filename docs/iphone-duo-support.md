@@ -379,6 +379,13 @@ be counted as a build 305 result. The signed Release archive and IPA export
 passed; the extracted IPA passed strict codesign verification and reports
 build 305 with a minimum OS version of iOS 18.0.
 
+The uploaded build 305 processed as `VALID` in App Store Connect
+(`8d56a5ff-a047-42fe-9993-c2253ceae961`). Chapter 112 What to Test notes
+match `docs/testflight/build-305-notes.txt`. Internal Testing Group and Public
+Testers both have access and report `IN_BETA_TESTING`; public Beta App Review
+is `APPROVED`. Automatic tester notifications are enabled, but individual
+delivery was not verified. No App Store release was submitted.
+
 ## Apple references
 
 - [Preparation guide](https://developer.apple.com/iphone-duo/prepare/)
