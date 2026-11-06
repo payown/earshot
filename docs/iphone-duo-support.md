@@ -393,8 +393,10 @@ tests. The test harness now resets portrait orientation before each test,
 uses a small floating-point tolerance for hit targets, centers the transport
 row relative to its control pane, and retries Queue menu presentation once
 before failing. Four focused iOS 26.5 UI tests, including the landscape test
-followed by Queue clear, passed after these test-only changes. A full CI rerun
-is required before calling the broader suite green.
+followed by Queue clear, passed after these test-only changes. All three
+iOS 27.2 VoiceOver tests passed again after the setup change. The full PR CI
+rerun on the iOS 26.5 dedicated simulator then passed
+([run 42138330747](https://github.com/payown/earshot/actions/runs/42138330747)).
 
 ## Apple references
 
