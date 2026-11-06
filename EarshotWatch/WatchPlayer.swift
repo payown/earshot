@@ -54,6 +54,7 @@ final class WatchPlayer {
     private(set) var routeDescription = "Route unavailable"
     private(set) var chapters: [Chapter] = []
 
+    var hasLoadedItem: Bool { player.currentItem != nil }
     var currentChapterIndex: Int? { chapters.activeChapterIndex(at: positionSeconds) }
 
     init(library: WatchLibrary) {

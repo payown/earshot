@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added the independent Apple Watch app foundation with watch-local library, direct feed and audio access, playback, downloads, and watchOS test targets. Full integration and device testing continue on the watch feature branch.
+- An independent Apple Watch podcast player now browses and follows feeds, streams and downloads episodes, manages Inbox, Queue and bookmarks, provides accessible playback controls, and adds watch complications and Shortcuts. It uses the existing private iCloud projection for user state and Watch Connectivity for optional phone control and playback transfer. The integrated internal TestFlight build awaits watch signing and physical VoiceOver validation.
 
 - Now Playing's More options includes Share episode link, separate from exporting the audio file.
 
