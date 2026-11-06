@@ -338,6 +338,47 @@ are enabled; delivery to individual testers was not verified. No App Store
 release was submitted. Physical iPhone 17 Pro Max launch and background
 relaunch after updating in place to build 304 remain unverified.
 
+## VoiceOver episode-list regression follow-up (build 305)
+
+An iPhone 17 tester reported that VoiceOver's right flick visited each Inbox
+episode twice: once for the episode row and again for a separate “Play
+[episode]” button. The same sequence occurred in Queue. The shared
+`EpisodeRow` also serves Downloads and show episode lists, so those surfaces
+had the same potential extra stop. The extra buttons were introduced when
+selection and immediate playback became separate touch actions for list/detail
+navigation.
+
+In selection-enabled `EpisodeRow` and `QueueRow`, the visible Play button stays
+available to touch users but is hidden from VoiceOver when VoiceOver is on.
+The episode row remains the single linear navigation stop. Its double tap
+selects the episode and opens its details; its Actions rotor provides Play,
+which starts that episode immediately. If Play was removed from the user's
+configured Quick Actions, it is appended to the VoiceOver row rotor only in
+these selection-enabled lists. Other configured actions keep their order.
+The compact and expanded layouts, persistence, and iOS 18 deployment target
+are unchanged. A detail pane's Play button remains a separate labeled control.
+
+The two existing iPhone 17 Pro/iOS 26.5 UI tests for selection versus Play
+passed after the change. They verify touch behavior. A dedicated iPhone 17/
+iOS 27.2 simulator build and launch passed; with VoiceOver off, its semantic
+snapshot retained the visible Play buttons. New Xcode 27 `XCUIVoiceOverService`
+tests enabled VoiceOver and passed the one-stop sequence for two adjacent
+Queue episodes and two adjacent show episodes using the shared `EpisodeRow`.
+This directly checks the spoken focus order for the two row implementations.
+The shared-row test covers the same component used by Inbox and Downloads,
+but it does not exercise their complete screens.
+
+An attempted Inbox-specific VoiceOver test did not reach its row assertion:
+the seeded iOS 27.2 Inbox opened empty despite an Inbox badge of three items.
+That fixture/query disagreement needs separate investigation; this build does
+not change Inbox fetching. The Actions rotor, physical iPhone 17 flick order,
+and focus after folding still require tester verification because the new
+VoiceOver automation API does not manipulate rotor actions or fold hardware.
+The tester's earlier Duo folding pass predates this row change and must not
+be counted as a build 305 result. The signed Release archive and IPA export
+passed; the extracted IPA passed strict codesign verification and reports
+build 305 with a minimum OS version of iOS 18.0.
+
 ## Apple references
 
 - [Preparation guide](https://developer.apple.com/iphone-duo/prepare/)

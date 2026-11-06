@@ -3856,3 +3856,17 @@ She sent Renata the build number and the time it happened. Renata asked her to k
 The next build opened. Kashe checked her Queue first, then found the interview waiting at the same place.
 
 “Good,” she said. “That was the part I didn't want to lose.”
+
+---
+
+Chapter 112 - Build 305
+
+What to try first:
+
+On an iPhone 17 with VoiceOver, open Inbox and flick right through several episodes. Each episode should be one stop rather than alternating between its title and a separate Play button. Double tap an episode to open its details without starting audio. From the episode row, use the Actions rotor and choose Play to start it immediately. Try the same sequence in Queue, Downloads, and a show's episode list in Library. If you have removed Play from Quick Actions, check that the row still offers Play in the rotor. With VoiceOver off, the visible Play button beside a row should still start audio immediately. On iPhone Duo, try the lists while folded and unfolded. Tell us the build, device, iOS version, list, and exact spoken sequence if an extra stop or missing action remains.
+
+Kashe's story:
+
+Kashe moved through her Inbox on the bus. VoiceOver said an episode title, then made her flick again just to pass a Play button before reaching the next title. The Queue did the same.
+
+After updating, she heard one episode per flick. A double tap opened its notes; Play waited in the row's Actions rotor when she wanted to listen. Renata could still tap the visible Play button beside an episode without opening the notes first.
