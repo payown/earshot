@@ -60,6 +60,20 @@ final class WatchEpisode {
         self.updatedAt = .now
     }
 
+    init(feedURL: String, guid: String, title: String, podcastTitle: String, audioURL: String) {
+        self.identity = Self.key(feedURL: feedURL, guid: guid)
+        self.feedURL = feedURL
+        self.guid = guid
+        self.title = title
+        self.podcastTitle = podcastTitle
+        self.audioURL = audioURL
+        self.summary = ""
+        self.positionSeconds = 0
+        self.isPlayed = false
+        self.inboxDismissed = true
+        self.updatedAt = .now
+    }
+
     static func key(feedURL: String, guid: String) -> String {
         feedURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() + "\u{001f}" + guid
     }
@@ -109,6 +123,7 @@ final class WatchLibrary {
     private(set) var isBusy = false
     private(set) var message: String?
     private(set) var isPlus = false
+    func report(_ text: String) { message = text }
     var skipBackward = 15 { didSet { UserDefaults.standard.set(skipBackward, forKey: "watchSkipBackward") } }
     var skipForward = 30 { didSet { UserDefaults.standard.set(skipForward, forKey: "watchSkipForward") } }
 
@@ -211,6 +226,21 @@ final class WatchLibrary {
         persist()
     }
 
+    func playablePhoneEpisode(feedURL: String, guid: String, title: String,
+                              podcastTitle: String, audioURL: String) -> WatchEpisode? {
+        if let existing = episodes.first(where: { $0.identity == WatchEpisode.key(feedURL: feedURL, guid: guid) }) {
+            return existing
+        }
+        guard let url = URL(string: audioURL), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else {
+            return nil
+        }
+        let episode = WatchEpisode(feedURL: feedURL, guid: guid, title: title,
+                                   podcastTitle: podcastTitle, audioURL: audioURL)
+        context.insert(episode)
+        persist()
+        return episode
+    }
+
     func markPlayed(_ episode: WatchEpisode, played: Bool) {
         episode.isPlayed = played
         episode.inboxDismissed = played
@@ -272,9 +302,18 @@ final class WatchLibrary {
     private func fetchFeed(_ url: URL) async throws -> ParsedFeed {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode), data.count <= 20_000_000,
-              let parsed = RSSParser().parse(data) else { throw WatchLibraryError.badResponse }
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode),
+              response.expectedContentLength <= 20_000_000 || response.expectedContentLength < 0 else {
+            throw WatchLibraryError.badResponse
+        }
+        var data = Data()
+        data.reserveCapacity(Int(min(max(0, response.expectedContentLength), 1_000_000)))
+        for try await byte in bytes {
+            guard data.count < 20_000_000 else { throw WatchLibraryError.badResponse }
+            data.append(byte)
+        }
+        guard let parsed = RSSParser().parse(data) else { throw WatchLibraryError.badResponse }
         return parsed
     }
 

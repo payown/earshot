@@ -1,7 +1,9 @@
 import AVFoundation
+import Accessibility
 import Foundation
 import Observation
 import MediaPlayer
+import WidgetKit
 
 @MainActor
 @Observable
@@ -45,6 +47,7 @@ final class WatchPlayer {
     func play(_ item: WatchEpisode, at requestedPosition: Double? = nil) async {
         guard let remote = URL(string: item.audioURL), ["https", "http"].contains(remote.scheme?.lowercased() ?? "") else {
             status = "This episode has no playable audio address"
+            AccessibilityNotification.Announcement(status).post()
             return
         }
         let local = item.downloadFilename.map { WatchDownloadManager.destination(for: $0) }
@@ -70,13 +73,29 @@ final class WatchPlayer {
             player.defaultRate = rate
             player.play()
             player.rate = rate
+            isBuffering = true
+            status = "Starting playback on Apple Watch"
+            for _ in 0..<20 where player.timeControlStatus != .playing {
+                try await Task.sleep(for: .milliseconds(500))
+            }
+            guard player.timeControlStatus == .playing else {
+                player.pause()
+                isPlaying = false
+                isBuffering = false
+                status = "Apple Watch could not start audio. Check the playback route or network."
+                AccessibilityNotification.Announcement(status).post()
+                return
+            }
             isPlaying = true
-            isBuffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            isBuffering = false
             status = "Playing on Apple Watch"
+            AccessibilityNotification.Announcement(status).post()
             publishNowPlaying()
+            WatchWidgetSnapshot.save(title: item.title, playing: true)
         } catch {
             isPlaying = false
             status = "Could not start watch playback: \(error.localizedDescription)"
+            AccessibilityNotification.Announcement(status).post()
             AppLog.player.error("Watch playback failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -85,8 +104,10 @@ final class WatchPlayer {
         player.pause()
         isPlaying = false
         status = "Paused on Apple Watch"
+        AccessibilityNotification.Announcement(status).post()
         savePosition()
         publishNowPlaying()
+        WatchWidgetSnapshot.save(title: episode?.title, playing: false)
     }
 
     func toggle() async {
