@@ -5,25 +5,28 @@ import SwiftData
 private struct PlayerCompletionDismissal: ViewModifier {
     let player: PlayerService
     let settings: SettingsStore
+    @Binding var isPresented: Bool
 
     func body(content: Content) -> some View {
         content.onChange(of: player.completedPlaybackStopID) { _, completionID in
             guard completionID != nil,
                   settings.dismissPlayerWhenPlaybackEnds,
-                  player.pendingFullPlayerPresentation else { return }
-            player.pendingFullPlayerPresentation = false
+                  isPresented else { return }
+            isPresented = false
         }
     }
 }
 
 private struct CleartextPlaybackWarningPresenter: ViewModifier {
     let player: PlayerService
+    let isActiveWindow: Bool
 
     private var isPresented: Binding<Bool> {
         Binding(
-            get: { player.pendingCleartextPlaybackWarning != nil },
+            get: { isActiveWindow && player.pendingCleartextPlaybackWarning != nil },
             set: { isPresented in
-                if !isPresented, player.pendingCleartextPlaybackWarning != nil {
+                if isActiveWindow, !isPresented,
+                   player.pendingCleartextPlaybackWarning != nil {
                     player.cancelPendingCleartextPlayback()
                 }
             }
@@ -266,6 +269,9 @@ struct RootView: View {
     @State private var confirmOPMLReplacement = false
     @State private var confirmUnreadableOPMLReplacement = false
     @State private var rootServicesActivated = false
+    @State private var showsFullPlayer = false
+    @State private var isFocusedWindow = false
+    @State private var windowReference = WeakWindowReference()
 
     /// Which tab is selected. Optional so the first paint can resolve the saved
     /// launch-screen preference synchronously (#492) instead of rendering Inbox
@@ -404,6 +410,36 @@ struct RootView: View {
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
         .background(QueueTabBadge(selectedTab: selectedTab))
         .background(AppIconBadgeObserver())
+        .background {
+            KeyWindowProbe { window in
+                windowReference.value = window
+                isFocusedWindow = window?.isKeyWindow == true
+                    && window?.traitCollection.activeAppearance == .active
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIWindow.didBecomeKeyNotification)) { note in
+            if let window = note.object as? UIWindow, window === windowReference.value {
+                isFocusedWindow = window.traitCollection.activeAppearance == .active
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIWindow.didResignKeyNotification)) { note in
+            if let window = note.object as? UIWindow, window === windowReference.value {
+                isFocusedWindow = false
+            }
+        }
+        .onChange(of: isFocusedWindow) { _, active in
+            guard active else {
+                confirmOPMLReplacement = false
+                confirmUnreadableOPMLReplacement = false
+                return
+            }
+            presentPendingFullPlayer()
+            routePendingNotification()
+            if rootServicesActivated {
+                handlePendingIncomingFile()
+                handlePendingOPMLState()
+            }
+        }
         .onChange(of: selectedTab) { _, tab in
             if let tab { restoredTab = tab.rawValue }
         }
@@ -415,22 +451,21 @@ struct RootView: View {
         // from the view tree.
         .modifier(LibrarySearchPresentation(
             episode: $searchNotesEpisode,
-            isReady: rootServicesActivated && !showOnboarding,
+            window: windowReference.value,
+            isReady: rootServicesActivated && !showOnboarding && isFocusedWindow,
             route: routeSearch
         ))
         .onChange(of: notificationRouter.pendingIntent) { _, intent in
-            if let intent { route(intent) }
+            if intent != nil { routePendingNotification() }
         }
         // The app host owns Open-in routing so a file handed to Earshot before
         // the data-bound root exists is retained. Consume it once this final
         // container's RootView is ready (#781).
         .onChange(of: runtime.pendingIncomingFileURL) { _, url in
-            if url != nil, rootServicesActivated { handlePendingIncomingFile() }
+            if url != nil, rootServicesActivated, isFocusedWindow { handlePendingIncomingFile() }
         }
-        .onChange(of: opmlImportCoordinator.state) { _, state in
-            if case .readyToImport = state, rootServicesActivated { continuePendingOPMLImport() }
-            if case .replacementRequested = state { confirmOPMLReplacement = true }
-            if case .unreadableReplacementRequested = state { confirmUnreadableOPMLReplacement = true }
+        .onChange(of: opmlImportCoordinator.state) { _, _ in
+            handlePendingOPMLState()
         }
         .confirmationDialog(
             "Replace pending OPML import?",
@@ -482,7 +517,7 @@ struct RootView: View {
         // announcement cannot live on NowPlayingBar without firing up to five
         // times per toggle. Announcer no-ops when VoiceOver is off.
         .onChange(of: player.isPlaying) { _, isPlaying in
-            Announcer.announce(isPlaying ? "Playing" : "Paused")
+            if isFocusedWindow { Announcer.announce(isPlaying ? "Playing" : "Paused") }
         }
         // Durably persist playback position + listening stats when the app goes
         // to the background (#736). The ~5s playback tick no longer writes to the
@@ -510,14 +545,16 @@ struct RootView: View {
         // tabs (#366), so a per-bar sheet would present up to five times. The row
         // "Play now" action sets `pendingFullPlayerPresentation`; the binding
         // clears it on dismiss so it never re-presents.
-        .sheet(isPresented: Binding(
-            get: { player.pendingFullPlayerPresentation },
-            set: { player.pendingFullPlayerPresentation = $0 }
-        )) {
+        .sheet(isPresented: $showsFullPlayer) {
             NowPlayingScreen()
         }
-        .modifier(PlayerCompletionDismissal(player: player, settings: settings))
-        .modifier(CleartextPlaybackWarningPresenter(player: player))
+        .onChange(of: player.pendingFullPlayerPresentation) { _, pending in
+            if pending { presentPendingFullPlayer() }
+        }
+        .modifier(PlayerCompletionDismissal(
+            player: player, settings: settings, isPresented: $showsFullPlayer
+        ))
+        .modifier(CleartextPlaybackWarningPresenter(player: player, isActiveWindow: isFocusedWindow))
         .sheet(isPresented: $showOPMLPaywall, onDismiss: {
             guard resumeImportAfterPaywall else { return }
             resumeImportAfterPaywall = false
@@ -634,9 +671,13 @@ struct RootView: View {
             )
         }
         #endif
-        if let intent = notificationRouter.pendingIntent { route(intent) }
         rootServicesActivated = true
-        handlePendingIncomingFile()
+        if isFocusedWindow {
+            routePendingNotification()
+            handlePendingIncomingFile()
+            handlePendingOPMLState()
+        }
+        presentPendingFullPlayer()
     }
 
     private func dismissLegacyPlayedInboxRows() async {
@@ -721,6 +762,20 @@ struct RootView: View {
         handleIncomingFile(url)
     }
 
+    private func handlePendingOPMLState() {
+        guard isFocusedWindow else { return }
+        switch opmlImportCoordinator.state {
+        case .readyToImport where rootServicesActivated:
+            continuePendingOPMLImport()
+        case .replacementRequested:
+            confirmOPMLReplacement = true
+        case .unreadableReplacementRequested:
+            confirmUnreadableOPMLReplacement = true
+        default:
+            break
+        }
+    }
+
     /// Handles a file handed to Earshot via the share sheet or "Open in". Only
     /// acts on `.opml`/`.xml` file URLs (the document types we registered);
     /// anything else is ignored gracefully. Routes through the shared importer so
@@ -775,13 +830,23 @@ struct RootView: View {
 
     // MARK: Notification routing (#72)
 
+    private func presentPendingFullPlayer() {
+        guard isFocusedWindow, player.pendingFullPlayerPresentation else { return }
+        player.pendingFullPlayerPresentation = false
+        showsFullPlayer = true
+    }
+
+    private func routePendingNotification() {
+        guard isFocusedWindow, rootServicesActivated,
+              let intent = notificationRouter.takePendingIntent() else { return }
+        route(intent)
+    }
+
     /// Resolves a notification intent against the model graph, performs any
     /// action (enqueue / play), switches to the Library tab, and pushes the
     /// podcast's detail screen. Clears the router when done. Missing podcasts /
     /// episodes are logged and skipped — never crash on a stale notification.
     private func route(_ intent: NotificationIntent) {
-        defer { notificationRouter.clear() }
-
         guard let podcast = try? PodcastIdentityService(context: modelContext)
             .existingFollowed(feedURL: intent.feedURL) else {
             AppLog.notifications.error("Notification routing: podcast not found for feed")
