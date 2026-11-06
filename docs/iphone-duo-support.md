@@ -384,6 +384,18 @@ Testers both have access and report `IN_BETA_TESTING`; public Beta App Review
 is `APPROVED`. Automatic tester notifications are enabled, but individual
 delivery was not verified. No App Store release was submitted.
 
+The first full PR CI run after the VoiceOver tests failed on three UI-test
+expectations: a 64-point control measured as 63.99999999999997, a transport
+row was compared with the whole window center rather than its adaptive
+control pane, and a native Queue menu did not appear on the first simulator
+tap. The runner later reported a Mach server termination while retrying UI
+tests. The test harness now resets portrait orientation before each test,
+uses a small floating-point tolerance for hit targets, centers the transport
+row relative to its control pane, and retries Queue menu presentation once
+before failing. Four focused iOS 26.5 UI tests, including the landscape test
+followed by Queue clear, passed after these test-only changes. A full CI rerun
+is required before calling the broader suite green.
+
 ## Apple references
 
 - [Preparation guide](https://developer.apple.com/iphone-duo/prepare/)

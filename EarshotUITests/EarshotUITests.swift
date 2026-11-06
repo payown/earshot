@@ -4,6 +4,10 @@ import XCTest
 final class EarshotUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
+        // A landscape-specific test can leave CoreSimulator mid-rotation when
+        // XCTest launches the next app instance. Most UI tests exercise the
+        // conventional portrait baseline.
+        XCUIDevice.shared.orientation = .portrait
     }
 
     func testEpisodeSelectionAndPlayAreSeparate() {
@@ -633,7 +637,8 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(position.exists)
         XCTAssertTrue(back.isHittable)
         XCTAssertTrue(forward.isHittable)
-        XCTAssertEqual((back.frame.midX + forward.frame.midX) / 2, app.frame.midX, accuracy: 2)
+        XCTAssertEqual((back.frame.midX + forward.frame.midX) / 2, position.frame.midX, accuracy: 2,
+                       "The action row should center within the available player controls")
         XCTAssertEqual(back.frame.minX, position.frame.minX, accuracy: 4,
                        "The first action should align with the leading edge of the player controls")
         XCTAssertEqual(forward.frame.maxX, position.frame.maxX, accuracy: 4,
@@ -808,8 +813,8 @@ final class EarshotUITests: XCTestCase {
         let forward = app.buttons["player.goforward"]
         let play = app.buttons["player.playPause"]
         for (control, minimum) in [(more, 44.0), (back, 64.0), (play, 80.0), (forward, 64.0)] {
-            XCTAssertGreaterThanOrEqual(control.frame.width, minimum)
-            XCTAssertGreaterThanOrEqual(control.frame.height, minimum)
+            XCTAssertGreaterThanOrEqual(control.frame.width + 0.01, minimum)
+            XCTAssertGreaterThanOrEqual(control.frame.height + 0.01, minimum)
             XCTAssertGreaterThanOrEqual(control.frame.minX, 0)
             XCTAssertLessThanOrEqual(control.frame.maxX, app.frame.width)
         }
@@ -871,15 +876,23 @@ final class EarshotUITests: XCTestCase {
         library.tap()
         app.buttons["Queue"].firstMatch.tap()
         XCTAssertTrue(options.waitForExistence(timeout: 5))
-        options.tap()
-        app.buttons["Clear queue"].firstMatch.tap()
+        let clearQueue = app.buttons["Clear queue"].firstMatch
+        func openClearConfirmation() {
+            options.tap()
+            if !clearQueue.waitForExistence(timeout: 5) {
+                // System menus occasionally dismiss during a tab transition
+                // on the CI simulator; retry the actual menu presentation once.
+                options.tap()
+            }
+            XCTAssertTrue(clearQueue.waitForExistence(timeout: 5), app.debugDescription)
+            clearQueue.tap()
+        }
+        openClearConfirmation()
         let clear = app.buttons["Clear entire Queue"].firstMatch
         XCTAssertTrue(clear.waitForExistence(timeout: 5))
         app.buttons["Cancel"].firstMatch.tap()
         XCTAssertFalse(clear.exists)
-        options.tap()
-        XCTAssertTrue(app.buttons["Clear queue"].firstMatch.exists)
-        app.buttons["Clear queue"].firstMatch.tap()
+        openClearConfirmation()
         clear.tap()
         XCTAssertTrue(app.staticTexts["Queue is empty"].firstMatch.waitForExistence(timeout: 5))
     }
