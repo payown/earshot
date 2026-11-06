@@ -31,6 +31,6 @@ Reviewed 2026-11-06 against `/Users/michaelbabcock/.claude/agents/earshot-access
 1. VoiceOver rotor ordering, focus landing after navigation, slider adjustment, background announcements and Bluetooth route feedback require Michael's physical watch test. Simulator UI tests cannot certify them.
 2. A live two-device run must verify that quick-action order arrives when the phone reconnects, and that an offline watch keeps its cached order.
 3. The new iPhone Settings rows add new focus stops but do not alter existing row labels or rotor actions. Michael should confirm their placement and wording during the integrated test.
-4. The merged iPad panes use a selected episode and a separate, labeled Play control. The 1.2.6 iPad UI checks and physical VoiceOver reading order remain required; simulator assertions cannot certify spoken order across multiple windows.
+4. The merged iPad panes use a selected episode and a separate, labeled Play control. The iPadOS 27.2 selected-sidebar VoiceOver assertion and iPad mini large-text navigation test passed. Physical VoiceOver reading order remains required; simulator assertions cannot certify spoken order across multiple windows.
 
 **Gate:** Code review complete. Physical VoiceOver review **pending**; do not merge or release on this report alone.
