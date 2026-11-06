@@ -285,13 +285,13 @@ struct RootView: View {
     @SceneStorage("earshot.selectedTab") private var restoredTab = ""
     @SceneStorage("earshot.libraryPodcastFeedURL") private var restoredLibraryPodcastFeedURL = ""
     @State private var launchPreferences = RootLaunchPreferences()
-    /// Navigation path for the Library tab, so a notification can push a podcast
-    /// detail screen onto it (#72).
-    @State private var libraryPath: [Podcast] = []
+    /// A selection in this window's Library sidebar. The feed URL in
+    /// SceneStorage restores it without sharing navigation between windows.
+    @State private var selectedLibraryPodcast: Podcast?
     @State private var searchNotesEpisode: Episode?
     /// Item-driven folder destination used by Now Playing's "Playing from"
-    /// route. Kept beside (not inside) the podcast-typed path so existing
-    /// notification and screenshot podcast routing stays unchanged.
+    /// route. It presents in the Library detail stack independently of the
+    /// selected podcast.
     @State private var libraryFolderDestination: PodcastFolder?
 
     /// Drives the app-background durability anchor for playback position/stats
@@ -356,12 +356,11 @@ struct RootView: View {
             .tabItem { Label("Queue", systemImage: "list.bullet") }
             .tag(RootTab.queue)
 
-            NavigationStack(path: $libraryPath) {
-                SubscriptionsView()
-                    .navigationDestination(item: $libraryFolderDestination) { folder in
-                        FolderDetailScreen(folder: folder)
-                    }
-            }
+            SubscriptionsView(
+                selectedPodcast: $selectedLibraryPodcast,
+                folderDestination: $libraryFolderDestination,
+                isReady: rootServicesActivated
+            )
             .modifier(TabChrome())
             .tabItem { Label("Library", systemImage: "books.vertical") }
             .tag(RootTab.library)
@@ -443,8 +442,8 @@ struct RootView: View {
         .onChange(of: selectedTab) { _, tab in
             if let tab { restoredTab = tab.rawValue }
         }
-        .onChange(of: libraryPath) { _, path in
-            restoredLibraryPodcastFeedURL = path.last.flatMap { $0.isDeleted ? nil : $0.feedURL } ?? ""
+        .onChange(of: selectedLibraryPodcast) { _, podcast in
+            restoredLibraryPodcastFeedURL = podcast.flatMap { $0.isDeleted ? nil : $0.feedURL } ?? ""
         }
         // Route a notification tap / action into the Library tab + podcast detail
         // (#72). Reacting on the published intent keeps the delegate decoupled
@@ -650,13 +649,13 @@ struct RootView: View {
             deferNoncriticalMaintenance: true
         )
         guard activationCompleted else { return }
-        if libraryPath.isEmpty, !restoredLibraryPodcastFeedURL.isEmpty {
+        if selectedLibraryPodcast == nil, !restoredLibraryPodcastFeedURL.isEmpty {
             let feedURL = restoredLibraryPodcastFeedURL
             let descriptor = FetchDescriptor<Podcast>(
                 predicate: #Predicate { $0.feedURL == feedURL }
             )
             if let podcast = try? modelContext.fetch(descriptor).first {
-                libraryPath = [podcast]
+                selectedLibraryPodcast = podcast
             }
         }
         showOnboarding = !settings.onboardingComplete
@@ -667,7 +666,7 @@ struct RootView: View {
                 in: modelContext,
                 player: player,
                 selectTab: { selectedTab = $0 },
-                pushLibrary: { libraryPath = $0 }
+                pushLibrary: { selectedLibraryPodcast = $0.last }
             )
         }
         #endif
@@ -714,7 +713,7 @@ struct RootView: View {
         }) else { return }
 
         selectedTab = .library
-        libraryPath = []
+        selectedLibraryPodcast = nil
         libraryFolderDestination = nil
         DispatchQueue.main.async {
             libraryFolderDestination = folder
@@ -824,7 +823,7 @@ struct RootView: View {
         } else {
             selectedTab = .library
             libraryFolderDestination = nil
-            libraryPath = [podcast]
+            selectedLibraryPodcast = podcast
         }
     }
 
@@ -867,10 +866,9 @@ struct RootView: View {
             }
         }
 
-        // Switch to Library and push the podcast detail. Reset the path first so
-        // we always land on the show's detail, not stacked atop a prior push.
+        // Select the show in this window's Library sidebar.
         selectedTab = .library
-        libraryPath = [podcast]
+        selectedLibraryPodcast = podcast
     }
 
     /// Finds an episode by guid within a podcast's loaded episodes.
