@@ -92,6 +92,8 @@ final class WatchCloudSync {
         ])
         let store = URL.applicationSupportDirectory.appending(path: "WatchCloudProjection.sqlite")
         #if targetEnvironment(simulator)
+        // Unsigned simulator builds have no iCloud entitlement. Core Data's
+        // CloudKit setup traps instead of reporting a recoverable error.
         let database: ModelConfiguration.CloudKitDatabase = .none
         #else
         let database = CloudKitLaunchPolicy.projectionDatabase()
