@@ -121,6 +121,7 @@ targets:
       - path: Earshot/Features/Transcripts/Domain/TranscriptFormat.swift
       - path: Earshot/Core/Logging/Logger+Earshot.swift
       - path: Earshot/Core/WatchFeedSnapshot.swift
+      - path: Earshot/Core/PairedPlaybackState.swift
       - path: Earshot/Core/EpisodeSummary.swift
       - path: Earshot/Data/Persistence/CloudProjectionModels.swift
       - path: Earshot/Data/Persistence/FeedURLIdentity.swift

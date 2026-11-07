@@ -98,11 +98,11 @@ final class WatchPlayer {
         }
     }
 
-    func play(_ item: WatchEpisode, at requestedPosition: Double? = nil) async {
+    func play(_ item: WatchEpisode, at requestedPosition: Double? = nil, announce: Bool = true) async {
         let local = item.downloadFilename.map { WatchDownloadManager.destination(for: $0) }
         guard let url = WatchPlaybackSource.choose(local: local, remoteAddress: item.audioURL) else {
             status = "This episode has no playable audio address"
-            AccessibilityNotification.Announcement(status).post()
+            if announce { AccessibilityNotification.Announcement(status).post() }
             return
         }
         do {
@@ -140,7 +140,7 @@ final class WatchPlayer {
                 isPlaying = false
                 isBuffering = false
                 status = "Apple Watch could not start audio. Check the playback route or network."
-                AccessibilityNotification.Announcement(status).post()
+                if announce { AccessibilityNotification.Announcement(status).post() }
                 return
             }
             isPlaying = true
@@ -148,13 +148,13 @@ final class WatchPlayer {
             positionSeconds = resume
             savePosition()
             status = "Playing on Apple Watch"
-            AccessibilityNotification.Announcement(status).post()
+            if announce { AccessibilityNotification.Announcement(status).post() }
             publishNowPlaying()
             WatchWidgetSnapshot.save(title: item.title, playing: true)
         } catch {
             isPlaying = false
             status = "Could not start watch playback: \(error.localizedDescription)"
-            AccessibilityNotification.Announcement(status).post()
+            if announce { AccessibilityNotification.Announcement(status).post() }
             AppLog.player.error("Watch playback failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -186,12 +186,12 @@ final class WatchPlayer {
     func skipBackward() async { await seek(to: positionSeconds - Double(library.skipBackward)) }
     func skipForward() async { await seek(to: positionSeconds + Double(library.skipForward)) }
 
-    func setRate(_ newRate: Float) {
+    func setRate(_ newRate: Float, announce: Bool = true, persist: Bool = true) {
         rate = min(3, max(0.5, newRate))
-        UserDefaults.standard.set(rate, forKey: "watchPlaybackRate")
+        if persist { UserDefaults.standard.set(rate, forKey: "watchPlaybackRate") }
         if isPlaying { player.rate = rate }
         publishNowPlaying()
-        AccessibilityNotification.Announcement("Speed set to \(rate.formatted()) times").post()
+        if announce { AccessibilityNotification.Announcement("Speed set to \(rate.formatted()) times").post() }
     }
 
     func nextChapter() async {
