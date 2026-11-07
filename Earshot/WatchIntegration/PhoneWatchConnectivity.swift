@@ -348,7 +348,7 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
                             self.finishQueueRefresh("Queue projection unavailable. iPhone Queue remains available.")
                             return
                         }
-                        self.finishQueueRefresh("Queue synchronized with Apple Watch", success: true)
+                        self.finishQueueRefresh("Queue updated from Apple Watch", success: true)
                     } catch {
                         self.finishQueueRefresh("Watch Queue synchronization failed. iPhone Queue remains available.")
                     }
