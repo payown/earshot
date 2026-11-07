@@ -50,3 +50,13 @@ App Store Connect build `45f0ac2e-997e-4a98-9831-8ae65f1bd8f8` is **VALID**, and
 The source is `test/watchos-126-311`, integrating PR #1047 from `fix/watch-queue-sync-311` on top of build 310. `project.yml` was regenerated with XcodeGen 2.46.0. The signed archive at `/tmp/EarshotWatch311Ready.xcarchive` was produced with Xcode 27.2 and command-line automatic-signing overrides only. Export used the unchanged App Store profile mapping in `/tmp/EarshotWatch311ExportOptions.plist` and produced `/tmp/EarshotWatch311Export/Earshot.ipa`. Its phone, independent watch and widget bundles all report **1.2.6 (311)**, reside in the correct `Watch` and `PlugIns` directories, and pass strict signature verification. The watch's distributed signature has the approved App Group and existing CloudKit container with `get-task-allow = false`. Its Info.plist declares independent installation and background audio. No signing project settings or entitlements were edited.
 
 Apple's export created an `AWAITING_UPLOAD` placeholder for 311, so `next-build-number` reported 312 before the actual publish command. That placeholder alone was not a processed build. The actual upload `79a1d1c1-c5eb-4c93-8a3c-aef97affc36d` is now **COMPLETE** and the processed build is **VALID**. App Store Connect reports **IN_BETA_TESTING** with the existing Internal Testing Group assigned; Chapter 116 English notes match `docs/testflight/build-311-notes.txt`. `autoNotifyEnabled` is true, but the publisher returned `notified: false` because the all-builds group already had access. Individual notification delivery is unverified. This is an internal physical-evaluation build only, with no `main` merge or public release.
+
+Exact local build commands, run from `test/watchos-126-311` in its linked worktree:
+
+```bash
+xcodegen generate
+xcodebuild archive -project Earshot.xcodeproj -scheme Earshot -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/EarshotWatch311Ready.xcarchive -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=72PH974742
+xcodebuild -exportArchive -archivePath /tmp/EarshotWatch311Ready.xcarchive -exportPath /tmp/EarshotWatch311Export -exportOptionsPlist /tmp/EarshotWatch311ExportOptions.plist -allowProvisioningUpdates
+```
+
+`Earshot` builds the iPhone/iPad app with the embedded watch app and widget; `EarshotWatch` runs the watchOS unit and UI targets. The export options reuse the approved three-profile mapping described above. The build was uploaded only to Internal Testing Group with `asc publish testflight --app 6770760602 --ipa /tmp/EarshotWatch311Export/Earshot.ipa --group 0d4027e4-f63b-4798-a882-5c8c29b16d89 --test-notes "$(cat docs/testflight/build-311-notes.txt)" --locale en-US --wait --notify --timeout 30m`.
