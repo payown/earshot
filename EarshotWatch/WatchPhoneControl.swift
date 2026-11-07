@@ -241,7 +241,10 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         WCSession.default.sendMessage(["version": PairedQueuePage.version, "id": UUID().uuidString,
                                        "command": "queueSnapshot", "offset": offset]) {
             @Sendable [weak self] response in
-            let page = (response["data"] as? Data).flatMap { try? JSONDecoder().decode(PairedQueuePage.self, from: $0) }
+            let page = (response["data"] as? Data).flatMap { data -> PairedQueuePage? in
+                guard data.count <= 65_000 else { return nil }
+                return try? JSONDecoder().decode(PairedQueuePage.self, from: data)
+            }
             let accepted = response["accepted"] as? Bool == true
             Task { @MainActor [weak self] in
                 guard let self else { return }

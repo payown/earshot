@@ -51,17 +51,18 @@ struct PairedQueueContribution: Codable, Sendable, Equatable {
 
     var key: String { feedURL + "\u{001f}" + guid + "\u{001f}" + sourceDeviceID }
     var isValid: Bool {
-        !feedURL.isEmpty && !guid.isEmpty && !sourceDeviceID.isEmpty &&
-        feedURL.count <= 4096 && guid.count <= 2048 && sourceDeviceID.count <= 128 &&
-        position >= 0 && position <= 100_000 &&
-        (title?.count ?? 0) <= 4096 && (audioURL?.count ?? 0) <= 8192 &&
-        (podcastTitle?.count ?? 0) <= 4096 &&
-        (summary?.count ?? 0) <= 2_000 &&
-        (artworkURL?.count ?? 0) <= 8_192 &&
-        (chapterURL?.count ?? 0) <= 8_192 &&
-        (transcriptURL?.count ?? 0) <= 8_192 &&
-        modifiedAt <= .now.addingTimeInterval(300) &&
-        membershipUpdatedAt <= .now.addingTimeInterval(300)
+        guard !feedURL.isEmpty, !guid.isEmpty, !sourceDeviceID.isEmpty,
+              feedURL.count <= 4_096, guid.count <= 2_048,
+              sourceDeviceID.count <= 128, (0...100_000).contains(position) else { return false }
+        guard (title?.count ?? 0) <= 4_096,
+              (audioURL?.count ?? 0) <= 8_192,
+              (podcastTitle?.count ?? 0) <= 4_096,
+              (summary?.count ?? 0) <= 2_000,
+              (artworkURL?.count ?? 0) <= 8_192,
+              (chapterURL?.count ?? 0) <= 8_192,
+              (transcriptURL?.count ?? 0) <= 8_192 else { return false }
+        let latestAllowedUpdate = Date.now.addingTimeInterval(300)
+        return modifiedAt <= latestAllowedUpdate && membershipUpdatedAt <= latestAllowedUpdate
     }
 
     /// Merge clocks independently. A delayed order update cannot revive a

@@ -1,0 +1,16 @@
+# iPhone crash when Apple Watch opens, build 311
+
+Michael reported that opening the watch app repeatedly crashed Earshot on his iPhone. Eleven crash reports were copied directly from his iPhone 17 Pro Max running iOS 27.2, all from Earshot 1.2.6 (311), between 23:05 and 23:09 Pacific on 2026-11-06. The reports remain outside the repository because they contain device information.
+
+All eleven reports have `Termination Reason: CODESIGNING, Code 2, Invalid Page` and `SIGKILL / EXC_BAD_ACCESS`. The faulting app frame resolves with the matching build 311 dSYM (UUID `DA68E5F7-D51C-3496-BD47-4877B8108F7B`) to `PairedQueueContribution.isValid` in `PairedQueueProjection.swift`. Ten reports reached it while validating a page received by `PhoneWatchConnectivity.requestQueuePage`; one reached it while producing the phone's queue contributions. The first snapshot exchange is triggered by watch opening or reconnection. The matching exported IPA verifies locally with `codesign --verify --strict --deep` and an Apple Distribution signature. The reports therefore establish an invalid installed code page in the queue validation path, not a Swift exception or a demonstrated data-store failure. The underlying cause of the installed page mismatch is unconfirmed.
+
+Build 311 was removed from the Public Testers group while this is investigated. The internal assignment remains for diagnosis. No store, CloudKit schema, entitlement, or signing configuration was changed.
+
+The replacement recompiles the shared queue validator and adds a 65 KB transport bound before either side decodes a queue page. The bound matches the existing `PairedQueuePage.isValid` limit and prevents an oversized response from reaching the decoder. This is defensive hardening; it does not by itself explain or prove repair of the code-signing fault. A newly archived and distributed binary, followed by a physical paired-device test, is required. If the same invalid-page termination recurs in the new build, investigate TestFlight installation and the iOS 27.2 beta's code-signing behavior with Apple using the new build's matching dSYM.
+
+## Verification and acceptance
+
+- Run the iPhone queue projection and CloudKit coordinator tests, then the full iPhone and watch simulator suites.
+- Archive and export the replacement IPA. Verify every embedded bundle's build version, UUID, and distribution signature.
+- On physical devices, update through TestFlight without deleting app data. Open the watch app ten times, including while the iPhone app is backgrounded and foregrounded. Confirm the iPhone stays running, the queue updates in both directions, and no new `Earshot` crash report appears.
+- If a crash recurs, record the approximate time and build number; obtain the iPhone `.ips` report and symbolicate against that build's dSYM. Keep the StartTesting issue open until paired hardware acceptance.
