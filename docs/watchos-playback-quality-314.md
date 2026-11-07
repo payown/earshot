@@ -18,4 +18,8 @@ The required repository accessibility code review found and corrected wrong-devi
 
 ## Verification and release gate
 
-The integrated watchOS 27.0 simulator run passed 26 unit and 4 UI tests with zero failures. A deterministic handoff test covers the source advancing 31.75 seconds after the first snapshot. The iPhone regression and signed build are in progress. Neither simulator tests nor a successful upload prove audio position or VoiceOver gestures on physical devices. Test the completed 314 internal build in place on both devices before external distribution or merge.
+The final integrated watchOS 27.0 simulator run passed 26 unit and 4 UI tests with zero failures. A deterministic handoff test covers the source advancing 31.75 seconds after the first snapshot. The final iPhone unit regression passed 2,745 tests with 34 skips and zero failures, using the exclusions below. The iPhone UI regression and signed build are in progress.
+
+The first broad iPhone unit run reported six assertions in two tests: `CloudProjectionCoordinatorTests.testBurstOfRemoteImportNotificationsCoalescesAndStopsCleanly` and `InterruptedLibraryResetRuntimeTests.testSameAccountRecoveryCompletesBeforeNormalLaunch`. Both tests also failed when isolated on the unchanged build 313 branch, so they are pre-existing baseline failures, not caused by this patch. They touch Cloud projection and protected library reset behavior; this watch fix does not change those paths. The passing final regression run excluded those two tests and the two already documented StoreKit simulator failures.
+
+Neither simulator tests nor a successful upload prove audio position or VoiceOver gestures on physical devices. Test the completed 314 internal build in place on both devices before external distribution or merge.
