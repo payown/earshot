@@ -6,6 +6,12 @@ The common trigger is immediate paired queue snapshot exchange. The underlying r
 
 CloudKit's existing per-device queue contributions and offline outboxes continue to provide durable queue synchronization and conflict handling. They may arrive later than the immediate paired channel did. Manual Refresh Queue reports this limitation rather than claiming success. Playback state, direct phone/watch controls, independent watch playback, downloads, and episode/position/rate handoff continue over their existing channels. Handoff no longer waits for a paired queue snapshot, so the next queue episode may arrive through CloudKit after the transfer. This is a temporary, explicit limitation until the immediate transport can be rebuilt and physically verified.
 
+## Build 313 verification
+
+On Xcode 27.2, the focused iPhone queue/CloudKit and compatibility suite passed 84 tests with one expected skip; the watch suite passed 24 unit and 4 UI tests. The full iPhone unit regression passed 2,747 tests with 34 expected skips and zero failures. The full iPhone UI regression passed 40 tests with 7 expected skips and zero failures. These are simulator results and cannot prove the physical iOS 27.2 invalid-page termination is gone.
+
+The signed Release archive and three-profile IPA export succeeded. The phone, watch, and widget bundles all report 1.2.6 (313); the nested IPA signature verifies. The watch retains its approved CloudKit and App Group entitlements and background audio mode. App Store Connect processing and the paired-device retest remain pending.
+
 ## Physical acceptance
 
 Update in place to build 313 on iPhone and watch; do not delete app data. Open the watch app repeatedly with Earshot foregrounded and backgrounded on iPhone. The iPhone must remain running. Verify the watch can still control iPhone playback and transfer the current episode in both directions. Confirm the manual queue refresh announces that immediate paired refresh is unavailable, while local queues remain usable. Check that queue changes eventually reconcile through iCloud when both devices have internet access, without promising a fixed delay. If a crash recurs, capture its exact time and build number and compare its stack with the matching build 313 dSYM before claiming this isolation worked.
