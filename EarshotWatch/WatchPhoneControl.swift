@@ -488,7 +488,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             watchPlayer.setRate(Float(state.rate), announce: false, persist: false)
-            await watchPlayer.play(episode, at: state.position, announce: false)
+            await watchPlayer.play(episode, at: state.position, announce: false, preciseStart: true)
             guard watchPlayer.isPlaying else {
                 self.pending = false
                 self.status = "Apple Watch could not start audio. iPhone continues."
@@ -506,18 +506,21 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString,
                                            "command": "pauseIfEpisode",
                                            "feedURL": expectedFeed, "guid": expectedGUID]) { @Sendable [weak self] response in
-                let paused = PairedPlaybackHandoffDecision.sourcePaused(response, owner: .phone,
-                                                                         feedURL: expectedFeed,
-                                                                         guid: expectedGUID)
+                let pausedPosition = PairedPlaybackHandoffDecision.pausedSourcePosition(
+                    response, owner: .phone, feedURL: expectedFeed, guid: expectedGUID)
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.pending = false
-                    if paused {
+                    if let pausedPosition,
+                       await watchPlayer.alignToPausedSource(pausedPosition) {
+                        self.pending = false
                         self.phonePlaying = false
                         self.status = "Playback transferred to Apple Watch"
                     } else {
                         watchPlayer.pause(announce: false)
-                        self.status = "iPhone did not confirm pause. Watch playback stopped."
+                        self.pending = false
+                        self.status = pausedPosition == nil
+                            ? "iPhone did not confirm its final position. Watch playback stopped."
+                            : "Watch could not align to iPhone position. Watch playback stopped."
                     }
                     AccessibilityNotification.Announcement(self.status).post()
                 }
