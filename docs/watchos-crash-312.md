@@ -12,7 +12,7 @@ Build 312 was generated from `project.yml` with XcodeGen 2.46.0. The Release arc
 
 App Store Connect build `caa1e501-e0d0-41cc-9ebc-636ca4bc4016` is `VALID` and `IN_BETA_TESTING` internally, with the focused English test notes present. The Internal Testing Group has access to all builds. The publisher reported `notified: false`; individual TestFlight notification delivery is not verified. Public Testers does not have build 312 while the crash fix awaits physical paired-device confirmation.
 
-Simulator verification: 23 watch unit tests and 4 watch UI tests passed; 83 focused iPhone queue and CloudKit tests passed with one expected skip. The full iPhone unit rerun passed 2,746 tests with 34 expected skips and zero failures. An earlier full run was interrupted during a slow SwiftData test-store setup after 1,949 passes; the 47-test podcast-settings suite passed in isolation, and the uninterrupted full rerun then passed. iPhone UI regression is running. None of these simulator runs can verify the iPhone's installed TestFlight code page or physical paired Watch Connectivity.
+Simulator verification: 23 watch unit tests and 4 watch UI tests passed; 83 focused iPhone queue and CloudKit tests passed with one expected skip. The full iPhone unit rerun passed 2,746 tests with 34 expected skips and zero failures. An earlier full run was interrupted during a slow SwiftData test-store setup after 1,949 passes; the 47-test podcast-settings suite passed in isolation, and the uninterrupted full rerun then passed. The iPhone UI regression passed 40 tests with 7 expected skips and zero failures. None of these simulator runs can verify the iPhone's installed TestFlight code page or physical paired Watch Connectivity.
 
 ## Verification and acceptance
 
