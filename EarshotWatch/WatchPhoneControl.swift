@@ -185,12 +185,18 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
     }
 
     func publishQueueChanged() {
+        guard PairedQueueTransportPolicy.immediateSnapshotsEnabled else { return }
         guard WCSession.isSupported(), WCSession.default.isReachable else { return }
         WCSession.default.sendMessage(["version": PairedQueuePage.version, "kind": "queueChanged"],
                                       replyHandler: nil, errorHandler: nil)
     }
 
     func refreshQueue(announce: Bool = false) {
+        guard PairedQueueTransportPolicy.immediateSnapshotsEnabled else {
+            queueSyncStatus = PairedQueueTransportPolicy.unavailableStatus
+            if announce { AccessibilityNotification.Announcement(queueSyncStatus).post() }
+            return
+        }
         announceQueueRefresh = announceQueueRefresh || announce
         guard WCSession.isSupported(), WCSession.default.isReachable else {
             queueGeneration = UUID()
@@ -229,6 +235,9 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
     }
 
     func refreshQueueForHandoff() async -> Bool {
+        if !PairedQueueTransportPolicy.immediateSnapshotsEnabled {
+            return WCSession.isSupported() && WCSession.default.isReachable
+        }
         guard WCSession.isSupported(), WCSession.default.isReachable else { return false }
         let waiterID = UUID()
         return await withCheckedContinuation { continuation in
@@ -307,6 +316,10 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                 return
             }
             if command == "queueSnapshot" {
+                guard PairedQueueTransportPolicy.immediateSnapshotsEnabled else {
+                    reply.send(["accepted": false, "reason": "Paired Queue refresh is unavailable"])
+                    return
+                }
                 guard let cloud = runtime.cloud,
                       let offset = queueOffset, offset >= 0, offset <= 10_000 else {
                     reply.send(["accepted": false, "reason": "Watch queue projection unavailable"])
@@ -414,12 +427,14 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             return
         }
         pending = true
-        status = "Synchronizing Queue before transfer"
+        status = PairedQueueTransportPolicy.immediateSnapshotsEnabled
+            ? "Synchronizing Queue before transfer"
+            : "Checking iPhone playback before transfer. Queue changes sync through iCloud when available."
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard await self.refreshQueueForHandoff(), WCSession.default.isReachable else {
                 self.pending = false
-                self.status = "Queue could not be synchronized. iPhone playback continues."
+                self.status = "iPhone is unavailable. iPhone playback continues."
                 AccessibilityNotification.Announcement(self.status).post()
                 return
             }

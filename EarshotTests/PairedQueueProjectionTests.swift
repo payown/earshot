@@ -63,6 +63,9 @@ final class PairedQueueProjectionTests: XCTestCase {
         row.membershipUpdatedAt = row.modifiedAt
         var cache = PairedQueueOverlay(url: url)
         try cache.accept([PairedQueueContribution(row)], excluding: "phone")
+        let dormant = PairedQueueOverlay(url: url, loadCachedRows: false)
+        XCTAssertTrue(dormant.mergedRows(with: []).isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
         let reopened = PairedQueueOverlay(url: url)
         XCTAssertEqual(reopened.mergedRows(with: []).map(\.episodeGUID), ["one"])
         XCTAssertTrue(reopened.mergedRows(with: []).first?.isQueued == true)
