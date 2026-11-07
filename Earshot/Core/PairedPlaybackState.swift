@@ -89,4 +89,14 @@ enum PairedPlaybackHandoffDecision {
         reply["guid"] as? String == guid &&
         (reply["feedURL"] as? String).map { FeedURLIdentity.matches($0, feedURL) } == true
     }
+
+    /// The source's position at its confirmed pause is the handoff position.
+    /// The earlier state snapshot can be many seconds old while the receiver buffers.
+    static func pausedSourcePosition(_ reply: [String: Any], owner: PairedPlaybackState.Owner,
+                                     feedURL: String, guid: String) -> Double? {
+        guard sourcePaused(reply, owner: owner, feedURL: feedURL, guid: guid),
+              let position = reply["position"] as? Double,
+              position.isFinite, position >= 0 else { return nil }
+        return position
+    }
 }
