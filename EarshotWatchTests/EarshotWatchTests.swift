@@ -13,6 +13,12 @@ final class EarshotWatchTests: XCTestCase {
                                                    phoneIsLive: false, phoneHasEpisode: true), .watch)
         XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: false, watchHasEpisode: false,
                                                    phoneIsLive: false, phoneHasEpisode: false), .none)
+        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: true, watchHasEpisode: true,
+                                                   phoneIsLive: true, phoneHasEpisode: true,
+                                                   phoneControlScreen: true), .phone)
+        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: true, watchHasEpisode: true,
+                                                   phoneIsLive: false, phoneHasEpisode: true,
+                                                   phoneControlScreen: true), .none)
     }
 
     @MainActor
