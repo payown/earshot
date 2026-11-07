@@ -361,7 +361,10 @@ actor CloudProjectionCoordinator: ModelActor {
         self.pendingIntentSave = pendingIntentSave
         self.remoteSubscriptionSave = remoteSubscriptionSave
         self.queueApplicationCheckpoint = queueApplicationCheckpoint
-        pairedQueueOverlay = PairedQueueOverlay(url: pairedQueueOverlayURL)
+        pairedQueueOverlay = PairedQueueOverlay(
+            url: pairedQueueOverlayURL,
+            loadCachedRows: PairedQueueTransportPolicy.immediateSnapshotsEnabled
+        )
     }
 
     nonisolated static func make(

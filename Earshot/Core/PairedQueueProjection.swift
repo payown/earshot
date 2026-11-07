@@ -2,6 +2,14 @@ import Foundation
 
 enum PairedQueueTransportError: Error { case invalidContribution, unreadableCache }
 
+/// Build 311 and 312 were killed by iOS code-signing validation when their
+/// immediate paired queue snapshot path ran on physical hardware. Keep the
+/// durable CloudKit queue projection active while this transport is isolated.
+enum PairedQueueTransportPolicy {
+    static let immediateSnapshotsEnabled = false
+    static let unavailableStatus = "Immediate paired Queue refresh is unavailable. Queue changes sync through iCloud when available."
+}
+
 /// The existing compact CloudKit queue contribution, encoded for a prompt
 /// paired-device exchange. Each device still writes only its own contribution.
 struct PairedQueueContribution: Codable, Sendable, Equatable {
@@ -127,8 +135,14 @@ struct PairedQueueOverlay {
     private var byKey: [String: PairedQueueContribution] = [:]
     private let unreadable: Bool
 
-    init(url: URL?) {
+    init(url: URL?, loadCachedRows: Bool = true) {
         self.url = url
+        // Keep the on-disk cache untouched for a later repaired transport.
+        // CloudKit's owned rows continue to drive the visible queue meanwhile.
+        guard loadCachedRows else {
+            unreadable = false
+            return
+        }
         guard let url, FileManager.default.fileExists(atPath: url.path) else {
             unreadable = false
             return

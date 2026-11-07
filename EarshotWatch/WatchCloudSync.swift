@@ -68,8 +68,10 @@ final class WatchCloudSync {
 
     init(library: WatchLibrary, inMemory: Bool = false, deviceID: String? = nil) throws {
         self.library = library
-        pairedQueueOverlay = PairedQueueOverlay(url: inMemory ? nil :
-            URL.applicationSupportDirectory.appending(path: "WatchPairedQueueOverlay.json"))
+        pairedQueueOverlay = PairedQueueOverlay(
+            url: inMemory ? nil : URL.applicationSupportDirectory.appending(path: "WatchPairedQueueOverlay.json"),
+            loadCachedRows: PairedQueueTransportPolicy.immediateSnapshotsEnabled
+        )
         let schema = Schema([
             CloudPodcastProjection.self, CloudEpisodeStateProjection.self,
             CloudQueueItemProjection.self, CloudSettingProjection.self,
