@@ -4,6 +4,23 @@ import WatchConnectivity
 @testable import EarshotWatch
 
 final class EarshotWatchTests: XCTestCase {
+    func testVoiceOverMagicTapControlsTheVisiblePlaybackDevice() {
+        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: true, watchHasEpisode: true,
+                                                   phoneIsLive: true, phoneHasEpisode: true), .watch)
+        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: false, watchHasEpisode: true,
+                                                   phoneIsLive: true, phoneHasEpisode: true), .phone)
+        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: false, watchHasEpisode: true,
+                                                   phoneIsLive: false, phoneHasEpisode: true), .watch)
+        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: false, watchHasEpisode: false,
+                                                   phoneIsLive: false, phoneHasEpisode: false), .none)
+        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: true, watchHasEpisode: true,
+                                                   phoneIsLive: true, phoneHasEpisode: true,
+                                                   phoneControlScreen: true), .phone)
+        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: true, watchHasEpisode: true,
+                                                   phoneIsLive: false, phoneHasEpisode: true,
+                                                   phoneControlScreen: true), .none)
+    }
+
     @MainActor
     func testOlderPhoneSnapshotRequestIsRejectedBeforeOpeningWatchLibrary() async {
         let answered = expectation(description: "Older phone receives a queue snapshot rejection")

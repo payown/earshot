@@ -1,4 +1,18 @@
+import Accessibility
 import SwiftUI
+
+enum WatchMagicTapTarget: Equatable {
+    case watch, phone, none
+
+    static func choose(watchIsPlaying: Bool, watchHasEpisode: Bool,
+                       phoneIsLive: Bool, phoneHasEpisode: Bool,
+                       phoneControlScreen: Bool = false) -> Self {
+        if phoneControlScreen { return phoneIsLive && phoneHasEpisode ? .phone : .none }
+        if phoneIsLive && phoneHasEpisode && !watchIsPlaying { return .phone }
+        if watchHasEpisode { return .watch }
+        return .none
+    }
+}
 
 @MainActor
 @Observable
@@ -45,6 +59,25 @@ final class WatchRuntime {
     }
 
     func syncNow() { cloud?.reconcile() }
+
+    /// VoiceOver Magic Tap follows the playback device shown in Now Playing.
+    /// The phone command still waits for an acknowledgment before reporting success.
+    func performMagicTap(phoneControlScreen: Bool = false) {
+        switch WatchMagicTapTarget.choose(watchIsPlaying: player.isPlaying,
+                                          watchHasEpisode: player.episode != nil,
+                                          phoneIsLive: phone.phoneSessionIsLive,
+                                          phoneHasEpisode: phone.hasPhoneEpisode,
+                                          phoneControlScreen: phoneControlScreen) {
+        case .phone:
+            phone.toggle()
+        case .watch:
+            Task { await player.toggle() }
+        case .none:
+            AccessibilityNotification.Announcement(phoneControlScreen
+                ? "iPhone playback is unavailable"
+                : "Choose an episode to play").post()
+        }
+    }
 
     private func scheduleQueueSync() {
         queueSyncTask?.cancel()
@@ -222,6 +255,7 @@ struct WatchHomeView: View {
                 }
                 if let message = runtime.library.message { Text(message) }
             }
+            .accessibilityAction(.magicTap) { runtime.performMagicTap() }
             .navigationTitle("Earshot")
             .navigationDestination(for: String.self) { destination in
                 if destination == "now-playing" { WatchNowPlayingView(runtime: runtime) }
