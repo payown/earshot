@@ -60,4 +60,22 @@ final class PairedPlaybackStateTests: XCTestCase {
         XCTAssertFalse(PairedPlaybackHandoffDecision.sourcePaused(failed, owner: .phone,
                                                                    feedURL: "https://example.com/feed", guid: "episode"))
     }
+
+    func testHandoffUsesPositionAtConfirmedPauseAfterReceiverStartup() {
+        let reply: [String: Any] = ["accepted": true, "owner": "phone", "playing": false,
+                                     "feedURL": "https://example.com/feed", "guid": "episode",
+                                     "position": 151.75]
+        // The earlier snapshot was at 120 seconds; the phone kept playing
+        // while the watch opened its stream.
+        XCTAssertEqual(PairedPlaybackHandoffDecision.pausedSourcePosition(
+            reply, owner: .phone, feedURL: "https://example.com/feed", guid: "episode"), 151.75)
+        var invalid = reply
+        invalid["position"] = Double.infinity
+        XCTAssertNil(PairedPlaybackHandoffDecision.pausedSourcePosition(
+            invalid, owner: .phone, feedURL: "https://example.com/feed", guid: "episode"))
+        invalid = reply
+        invalid["guid"] = "different"
+        XCTAssertNil(PairedPlaybackHandoffDecision.pausedSourcePosition(
+            invalid, owner: .phone, feedURL: "https://example.com/feed", guid: "episode"))
+    }
 }
