@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import CoreData
 import Observation
 import Accessibility
 
@@ -59,12 +60,16 @@ final class WatchCloudSync {
     private let container: ModelContainer
     private let context: ModelContext
     private let deviceID: String
+    private var pairedQueueOverlay: PairedQueueOverlay
+    private var importObserver: NSObjectProtocol?
     private(set) var lastError: String?
     private(set) var folders: [WatchFolderSnapshot] = []
     private(set) var conflicts: [String] = []
 
-    init(library: WatchLibrary, inMemory: Bool = false) throws {
+    init(library: WatchLibrary, inMemory: Bool = false, deviceID: String? = nil) throws {
         self.library = library
+        pairedQueueOverlay = PairedQueueOverlay(url: inMemory ? nil :
+            URL.applicationSupportDirectory.appending(path: "WatchPairedQueueOverlay.json"))
         let schema = Schema([
             CloudPodcastProjection.self, CloudEpisodeStateProjection.self,
             CloudQueueItemProjection.self, CloudSettingProjection.self,
@@ -86,14 +91,34 @@ final class WatchCloudSync {
                                  url: store, cloudKitDatabase: database)
         container = try ModelContainer(for: schema, configurations: config)
         context = container.mainContext
-        if let saved = UserDefaults.standard.string(forKey: "watchProjectionDeviceID") {
-            deviceID = saved
+        if let deviceID {
+            self.deviceID = deviceID
+        } else if let saved = UserDefaults.standard.string(forKey: "watchProjectionDeviceID") {
+            self.deviceID = saved
         } else {
             let generated = UUID().uuidString
             UserDefaults.standard.set(generated, forKey: "watchProjectionDeviceID")
-            deviceID = generated
+            self.deviceID = generated
         }
         conflicts = UserDefaults.standard.stringArray(forKey: "watchSyncConflicts") ?? []
+        #if !targetEnvironment(simulator)
+        if !inMemory && CloudKitLaunchPolicy.isMirroringEnabled() {
+            importObserver = NotificationCenter.default.addObserver(
+                forName: NSPersistentCloudKitContainer.eventChangedNotification,
+                object: nil, queue: .main
+            ) { [weak self] notification in
+                guard let event = notification.userInfo?[
+                    NSPersistentCloudKitContainer.eventNotificationUserInfoKey
+                ] as? NSPersistentCloudKitContainer.Event,
+                    event.type == .import, event.endDate != nil, event.succeeded else { return }
+                Task { @MainActor [weak self] in self?.reconcile() }
+            }
+        }
+        #endif
+    }
+
+    isolated deinit {
+        if let importObserver { NotificationCenter.default.removeObserver(importObserver) }
     }
 
     func reconcile() {
@@ -104,6 +129,7 @@ final class WatchCloudSync {
             try pullSubscriptions()
             try pullEpisodeStates()
             try pullQueue()
+            applyPairedQueueTitles()
             try pullBookmarks()
             try pullSettings()
             try loadFolders()
@@ -116,6 +142,42 @@ final class WatchCloudSync {
             }
             lastError = description
             AppLog.data.error("Watch projection sync failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Exchange the same per-device rows used by CloudKit. The paired channel
+    /// accelerates arrival but does not replace the durable projection/outbox.
+    func queueContributions() throws -> [PairedQueueContribution] {
+        try flushPending()
+        let cloudRows = try context.fetch(FetchDescriptor<CloudQueueItemProjection>())
+        let rows = pairedQueueOverlay.mergedRows(with: cloudRows)
+            .filter { !$0.feedURL.isEmpty && !$0.episodeGUID.isEmpty && !$0.sourceDeviceID.isEmpty }
+            .map { row in
+                let title = library.podcasts.first { FeedURLIdentity.matches($0.feedURL, row.feedURL) }?.title
+                    ?? library.episodes.first { $0.identity == WatchEpisode.key(feedURL: row.feedURL, guid: row.episodeGUID) }?.podcastTitle
+                return PairedQueueContribution(row, podcastTitle: title)
+            }
+        guard rows.allSatisfy(\.isValid) else { throw PairedQueueTransportError.invalidContribution }
+        return rows.sorted { $0.key < $1.key }
+    }
+
+    func acceptQueueContributions(_ incoming: [PairedQueueContribution]) throws {
+        try flushPending()
+        try pairedQueueOverlay.accept(incoming, excluding: deviceID)
+        reconcile()
+    }
+
+    private func applyPairedQueueTitles() {
+        let titles = Dictionary(pairedQueueOverlay.rows.compactMap { contribution -> (String, String)? in
+            guard contribution.isQueued, let title = contribution.podcastTitle, !title.isEmpty else { return nil }
+            return (WatchEpisode.key(feedURL: contribution.feedURL, guid: contribution.guid), title)
+        }, uniquingKeysWith: { first, _ in first })
+        for episode in library.episodes {
+            let title = library.podcasts.first { FeedURLIdentity.matches($0.feedURL, episode.feedURL) }?.title
+                ?? titles[episode.identity]
+            if let title, episode.podcastTitle != title {
+                episode.podcastTitle = title
+            }
         }
     }
 
@@ -271,6 +333,12 @@ final class WatchCloudSync {
                 podcast.modifiedAt = row.modifiedAt
                 library.context.insert(podcast)
             }
+            if row.deletedAt == nil {
+                for episode in library.episodes where FeedURLIdentity.matches(episode.feedURL, feed)
+                    && episode.podcastTitle != row.title {
+                    episode.podcastTitle = row.title
+                }
+            }
         }
         library.reload()
     }
@@ -314,7 +382,8 @@ final class WatchCloudSync {
     }
 
     private func pullQueue() throws {
-        let rows = try context.fetch(FetchDescriptor<CloudQueueItemProjection>())
+        let rows = pairedQueueOverlay.mergedRows(with:
+            try context.fetch(FetchDescriptor<CloudQueueItemProjection>()))
             .filter { $0.deletedAt == nil && !$0.episodeGUID.isEmpty }
         let grouped = Dictionary(grouping: rows, by: { WatchEpisode.key(feedURL: $0.feedURL, guid: $0.episodeGUID) })
         for (key, contributions) in grouped {
@@ -324,7 +393,9 @@ final class WatchCloudSync {
             let existing = library.episodes.first { $0.identity == key }
             guard membership.isQueued || existing != nil else { continue }
             let episode = existing ?? {
-                guard let title = order.episodeTitle, let audio = order.episodeAudioURL else { return nil }
+                guard let metadata = contributions.sorted(by: { $0.modifiedAt > $1.modifiedAt })
+                    .first(where: { $0.episodeTitle?.isEmpty == false && $0.episodeAudioURL?.isEmpty == false }),
+                    let title = metadata.episodeTitle, let audio = metadata.episodeAudioURL else { return nil }
                 let podcastTitle = library.podcasts.first { $0.feedURL == order.feedURL }?.title ?? "Podcast"
                 return library.playablePhoneEpisode(feedURL: order.feedURL, guid: order.episodeGUID,
                                                     title: title, podcastTitle: podcastTitle, audioURL: audio)
