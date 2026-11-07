@@ -1,8 +1,25 @@
 import XCTest
 import SwiftData
+import WatchConnectivity
 @testable import EarshotWatch
 
 final class EarshotWatchTests: XCTestCase {
+    @MainActor
+    func testOlderPhoneSnapshotRequestIsRejectedBeforeOpeningWatchLibrary() async {
+        let answered = expectation(description: "Older phone receives a queue snapshot rejection")
+        let control = WatchPhoneControl()
+        control.session(
+            WCSession.default,
+            didReceiveMessage: ["version": 1, "id": UUID().uuidString,
+                                "command": "queueSnapshot", "offset": 0]
+        ) { response in
+            XCTAssertEqual(response["accepted"] as? Bool, false)
+            XCTAssertEqual(response["reason"] as? String, "Paired Queue refresh is unavailable")
+            answered.fulfill()
+        }
+        await fulfillment(of: [answered], timeout: 2)
+    }
+
     func testSharedRSSParserProvidesWatchPlaybackIdentity() {
         let xml = """
         <rss><channel><title>Sample</title><item><guid>episode-1</guid><title>First</title>

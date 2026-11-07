@@ -1,7 +1,23 @@
 import XCTest
+import WatchConnectivity
 @testable import Earshot
 
 final class PairedQueueProjectionTests: XCTestCase {
+    @MainActor
+    func testOlderWatchSnapshotRequestIsRejectedBeforeReadingPhoneQueue() async {
+        let answered = expectation(description: "Older watch receives a queue snapshot rejection")
+        PhoneWatchConnectivity.shared.session(
+            WCSession.default,
+            didReceiveMessage: ["version": 1, "id": UUID().uuidString,
+                                "command": "queueSnapshot", "offset": 0]
+        ) { response in
+            XCTAssertEqual(response["accepted"] as? Bool, false)
+            XCTAssertEqual(response["reason"] as? String, "Paired Queue refresh is unavailable")
+            answered.fulfill()
+        }
+        await fulfillment(of: [answered], timeout: 2)
+    }
+
     func testDelayedOrderingCannotReviveNewerRemoval() {
         let current = CloudQueueItemProjection()
         current.feedURL = "https://example.com/feed"

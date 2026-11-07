@@ -311,15 +311,15 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                 return
             }
             if let prior = self.seenRemoteCommands[id] { reply.send(prior); return }
+            if command == "queueSnapshot", !PairedQueueTransportPolicy.immediateSnapshotsEnabled {
+                reply.send(["accepted": false, "reason": "Paired Queue refresh is unavailable"])
+                return
+            }
             guard let runtime = WatchRuntimeRegistry.currentOrCreate() else {
                 reply.send(["accepted": false, "reason": "Watch player unavailable"])
                 return
             }
             if command == "queueSnapshot" {
-                guard PairedQueueTransportPolicy.immediateSnapshotsEnabled else {
-                    reply.send(["accepted": false, "reason": "Paired Queue refresh is unavailable"])
-                    return
-                }
                 guard let cloud = runtime.cloud,
                       let offset = queueOffset, offset >= 0, offset <= 10_000 else {
                     reply.send(["accepted": false, "reason": "Watch queue projection unavailable"])
