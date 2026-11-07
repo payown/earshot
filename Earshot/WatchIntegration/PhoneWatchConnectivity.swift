@@ -505,7 +505,8 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
             }
             var result = self.perform(id: id, command: command, feedURL: feed, guid: guid,
                                       position: position, rate: rate, offset: offset)
-            if command == "play", result["accepted"] as? Bool == true,
+            if (command == "play" || command == "resumeIfEpisode"),
+               result["accepted"] as? Bool == true,
                let player = self.runtime?.player {
                 for _ in 0..<20 {
                     if player.isAudiblyPlayingForWatchHandoff,
@@ -571,6 +572,18 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
             } else {
                 accepted = false
                 reason = "Phone playback changed before handoff"
+            }
+        case "resumeIfEpisode":
+            if let feedURL, let guid, let episode = player.nowPlayingEpisode,
+               episode.guid == guid,
+               FeedURLIdentity.matches(episode.podcast?.feedURL ?? "", feedURL) {
+                if !player.isPlaying {
+                    player.play(episode, at: max(0, position ?? player.currentPositionSeconds),
+                                handoffRate: rate ?? player.effectiveRate)
+                }
+            } else {
+                accepted = false
+                reason = "Phone playback changed before recovery"
             }
         case "back":
             if player.nowPlayingEpisode == nil { accepted = false; reason = "Start an episode on iPhone first" }
