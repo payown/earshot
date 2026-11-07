@@ -177,6 +177,7 @@ final class WatchLibrary {
     private(set) var episodeActionOrder = ["playNow", "addToQueueBottom", "addToQueueTop", "download", "markPlayed"]
     var isApplyingCloud = false
     var onLocalChange: (() -> Void)?
+    var onQueueChange: (() -> Void)?
     func report(_ text: String) {
         message = text
         AccessibilityNotification.Announcement(text).post()
@@ -200,10 +201,12 @@ final class WatchLibrary {
         }
     }
 
-    init(inMemory: Bool = false) throws {
+    init(inMemory: Bool = false, storeURL: URL? = nil) throws {
         let schema = Schema([WatchPodcast.self, WatchEpisode.self, WatchBookmark.self, WatchPendingSyncEvent.self])
-        let configuration = ModelConfiguration("WatchLocal", schema: schema,
-                                               isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
+        let configuration = storeURL.map {
+            ModelConfiguration("WatchLocal", schema: schema, url: $0, cloudKitDatabase: .none)
+        } ?? ModelConfiguration("WatchLocal", schema: schema,
+                                isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
         container = try ModelContainer(for: schema, configurations: configuration)
         context = container.mainContext
         let savedBack = UserDefaults.standard.integer(forKey: "watchSkipBackward")
@@ -376,6 +379,7 @@ final class WatchLibrary {
         episode.queueMembershipUpdatedAt = episode.updatedAt
         for item in reordered { item.queueOrderUpdatedAt = .now; stageQueue(item) }
         persist()
+        onQueueChange?()
         AccessibilityNotification.Announcement("Added \(episode.title) to \(next ? "Play Next" : "Play Later")").post()
     }
 
@@ -389,6 +393,7 @@ final class WatchLibrary {
             stageQueue(item)
         }
         persist()
+        onQueueChange?()
         if announce { announceAfterCollapse("Removed \(episode.title) from Queue") }
     }
 
@@ -399,6 +404,7 @@ final class WatchLibrary {
         for (index, item) in list.enumerated() { item.queuePosition = index }
         for item in list { item.queueOrderUpdatedAt = .now; stageQueue(item) }
         persist()
+        onQueueChange?()
         announceAfterCollapse("Moved \(episode.title) \(offset < 0 ? "up" : "down") in Queue")
     }
 
@@ -420,7 +426,12 @@ final class WatchLibrary {
     }
 
     var queue: [WatchEpisode] {
-        episodes.filter { $0.queuePosition != nil }.sorted { ($0.queuePosition ?? 0) < ($1.queuePosition ?? 0) }
+        episodes.filter { $0.queuePosition != nil }.sorted {
+            if $0.queuePosition != $1.queuePosition {
+                return ($0.queuePosition ?? 0) < ($1.queuePosition ?? 0)
+            }
+            return $0.identity < $1.identity
+        }
     }
 
     var inbox: [WatchEpisode] {
