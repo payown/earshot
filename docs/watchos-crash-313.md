@@ -10,7 +10,7 @@ CloudKit's existing per-device queue contributions and offline outboxes continue
 
 On Xcode 27.2, the focused iPhone queue/CloudKit and compatibility suite passed 84 tests with one expected skip; the watch suite passed 24 unit and 4 UI tests. The full iPhone unit regression passed 2,747 tests with 34 expected skips and zero failures. The full iPhone UI regression passed 40 tests with 7 expected skips and zero failures. These are simulator results and cannot prove the physical iOS 27.2 invalid-page termination is gone.
 
-The signed Release archive and three-profile IPA export succeeded. The phone, watch, and widget bundles all report 1.2.6 (313); the nested IPA signature verifies. The watch retains its approved CloudKit and App Group entitlements and background audio mode. App Store Connect processing and the paired-device retest remain pending.
+The signed Release archive and three-profile IPA export succeeded. The phone, watch, and widget bundles all report 1.2.6 (313); the nested IPA signature verifies. The watch retains its approved CloudKit and App Group entitlements and background audio mode. App Store Connect build `153f1ec0-41c2-4ba2-a62f-0ed3eb5ffd84` is VALID and IN_BETA_TESTING in the existing all-builds Internal Testing Group. `autoNotifyEnabled` is true, but individual notification delivery was not confirmed. The paired-device retest remains pending; 313 was not assigned to Public Testers.
 
 ## Physical acceptance
 
