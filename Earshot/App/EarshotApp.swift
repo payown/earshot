@@ -1275,10 +1275,22 @@ final class AppRuntime {
             cloudProjectionCoordinator = coordinator
             cloudSyncAvailability = .available
             await coordinator.scheduleInitialReconciliationInBackground()
+            PhoneWatchConnectivity.shared.refreshQueue()
         }
         cloudProjectionActivationTask = task
         defer { cloudProjectionActivationTask = nil }
         try await task.value
+    }
+
+    func pairedQueueContributions() async throws -> [PairedQueueContribution]? {
+        guard let cloudProjectionCoordinator else { return nil }
+        return try await cloudProjectionCoordinator.pairedQueueContributions()
+    }
+
+    func acceptPairedQueueContributions(_ rows: [PairedQueueContribution]) async throws -> Bool {
+        guard let cloudProjectionCoordinator else { return false }
+        try await cloudProjectionCoordinator.acceptPairedQueueContributions(rows)
+        return true
     }
 
     /// Retries a previously unavailable account when the app next becomes
@@ -1732,6 +1744,7 @@ struct EarshotApp: App {
             runtime.updateLaunchScenePhase(phase)
             if phase == .active || phase == .background {
                 PhoneWatchConnectivity.shared.publishLifecycleState()
+                if phase == .active { PhoneWatchConnectivity.shared.refreshQueue() }
             }
             if phase == .active { LibrarySearchIndex.shared.requestRefresh() }
             if phase != .active {

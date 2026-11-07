@@ -311,6 +311,7 @@ actor CloudProjectionCoordinator: ModelActor {
     private let pendingIntentSave: @Sendable (ModelContext) throws -> Void
     private let remoteSubscriptionSave: @Sendable (ModelContext) throws -> Void
     private let queueApplicationCheckpoint: (@Sendable (String) async throws -> Void)?
+    private var pairedQueueOverlay: PairedQueueOverlay
     private var isApplyingRemote = false
     #if DEBUG
     private var resetSaveCheckpointForTesting: (@Sendable () -> Void)?
@@ -338,7 +339,8 @@ actor CloudProjectionCoordinator: ModelActor {
         remoteSubscriptionSave: @escaping @Sendable (ModelContext) throws -> Void = {
             try $0.save()
         },
-        queueApplicationCheckpoint: (@Sendable (String) async throws -> Void)? = nil
+        queueApplicationCheckpoint: (@Sendable (String) async throws -> Void)? = nil,
+        pairedQueueOverlayURL: URL? = URL.applicationSupportDirectory.appending(path: "PhonePairedQueueOverlay.json")
     ) {
         executionQueue = DispatchSerialQueue(
             label: "media.payown.earshot.cloud-projection",
@@ -359,6 +361,7 @@ actor CloudProjectionCoordinator: ModelActor {
         self.pendingIntentSave = pendingIntentSave
         self.remoteSubscriptionSave = remoteSubscriptionSave
         self.queueApplicationCheckpoint = queueApplicationCheckpoint
+        pairedQueueOverlay = PairedQueueOverlay(url: pairedQueueOverlayURL)
     }
 
     nonisolated static func make(
@@ -506,7 +509,8 @@ actor CloudProjectionCoordinator: ModelActor {
                     followActivationCheckpoint: followActivationCheckpoint,
                     pendingIntentSave: pendingIntentSave,
                     remoteSubscriptionSave: remoteSubscriptionSave,
-                    queueApplicationCheckpoint: queueApplicationCheckpoint
+                    queueApplicationCheckpoint: queueApplicationCheckpoint,
+                    pairedQueueOverlayURL: nil
                 ))
             }
         }
@@ -688,6 +692,29 @@ actor CloudProjectionCoordinator: ModelActor {
                 "Cloud queue projection failed: \(error.localizedDescription, privacy: .public)"
             )
         }
+    }
+
+    /// A paired device may request current contributions before CloudKit has
+    /// delivered its import. Publication of pending local intents comes first.
+    func pairedQueueContributions() throws -> [PairedQueueContribution] {
+        try publishLocalQueueChanges(now: .now, onlyIfCloudEmpty: true)
+        let podcastTitles = Dictionary(
+            try PodcastIdentityService(context: modelContext).allScalarPodcasts().map {
+                (FeedURLIdentity.canonical($0.feedURL), $0.title)
+            }, uniquingKeysWith: { first, _ in first }
+        )
+        let cloudRows = try projectionContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
+        let rows = pairedQueueOverlay.mergedRows(with: cloudRows)
+            .filter { !$0.feedURL.isEmpty && !$0.episodeGUID.isEmpty && !$0.sourceDeviceID.isEmpty }
+            .map { PairedQueueContribution($0, podcastTitle: podcastTitles[FeedURLIdentity.canonical($0.feedURL)]) }
+        guard rows.allSatisfy(\.isValid) else { throw PairedQueueTransportError.invalidContribution }
+        return rows.sorted { $0.key < $1.key }
+    }
+
+    func acceptPairedQueueContributions(_ incoming: [PairedQueueContribution]) async throws {
+        try publishLocalQueueChanges(now: .now, onlyIfCloudEmpty: true)
+        try pairedQueueOverlay.accept(incoming, excluding: deviceID)
+        try await reconcile()
     }
 
     private func handleLocalSettingChange(_ key: String) {
@@ -1430,7 +1457,9 @@ actor CloudProjectionCoordinator: ModelActor {
         guard try !PendingCloudQueueMutation.bootstrapCompleted(in: appContext) else { return }
 
         let activeRows = cloudRows.filter { $0.deletedAt == nil && !$0.episodeGUID.isEmpty }
-        let projectedKeys = Set(activeRows.map(Self.episodeKey))
+        let projectedKeys = Set(activeRows.map(Self.episodeKey)).union(
+            pairedQueueOverlay.rows.map { EpisodeKey(feedURL: $0.feedURL, guid: $0.guid) }
+        )
         let pendingMembershipKeys = Set(
             try PendingCloudQueueMutation.memberships(in: appContext).map {
                 EpisodeKey(feedURL: $0.feedURL, guid: $0.guid)
@@ -1461,7 +1490,7 @@ actor CloudProjectionCoordinator: ModelActor {
             PendingCloudQueueMutation.stageOrdering(eventDate: now, in: appContext)
         }
         // Keep bootstrap open until the first projection import/seed exists.
-        if !cloudRows.isEmpty {
+        if !cloudRows.isEmpty || !pairedQueueOverlay.rows.isEmpty {
             try PendingCloudQueueMutation.markBootstrapCompleted(in: appContext)
         }
         do {
@@ -1563,6 +1592,7 @@ actor CloudProjectionCoordinator: ModelActor {
         }
 
         let cloudWasEmptySeed = onlyIfCloudEmpty && rows.isEmpty
+            && pairedQueueOverlay.rows.isEmpty
         var keys: Set<EpisodeKey>
         if activationFeed != nil || cloudWasEmptySeed {
             keys = Set(ownByKey.keys).union(current.keys)
@@ -2857,18 +2887,24 @@ actor CloudProjectionCoordinator: ModelActor {
         appContext: ModelContext,
         cloudContext: ModelContext
     ) async throws -> Bool {
-        let rows = try cloudContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
-            .filter { $0.deletedAt == nil && !$0.episodeGUID.isEmpty }
-        var contributionByDevice: [String: CloudQueueItemProjection] = [:]
-        for row in rows.sorted(by: Self.queueProjectionOrder) {
+        let cloudRows = try cloudContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
+            .filter { !$0.episodeGUID.isEmpty }
+        var uniqueCloudRows: [String: CloudQueueItemProjection] = [:]
+        for row in cloudRows.sorted(by: Self.queueProjectionOrder) {
             let key = Self.episodeKey(for: row)
             let contributionKey = "\(key.feedURL)\u{1f}\(key.guid)\u{1f}\(row.sourceDeviceID)"
-            if contributionByDevice[contributionKey] == nil {
-                contributionByDevice[contributionKey] = row
+            if uniqueCloudRows[contributionKey] == nil {
+                uniqueCloudRows[contributionKey] = row
             } else {
                 cloudContext.delete(row)
             }
         }
+        let rows = pairedQueueOverlay.mergedRows(with: Array(uniqueCloudRows.values))
+            .filter { $0.deletedAt == nil && !$0.episodeGUID.isEmpty }
+        let contributionByDevice = Dictionary(rows.map {
+            let key = Self.episodeKey(for: $0)
+            return ("\(key.feedURL)\u{1f}\(key.guid)\u{1f}\($0.sourceDeviceID)", $0)
+        }, uniquingKeysWith: { first, _ in first })
         let grouped = Dictionary(
             grouping: contributionByDevice.values,
             by: Self.episodeKey

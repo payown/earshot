@@ -15,7 +15,7 @@ fileGroups:
 settings:
   base:
     MARKETING_VERSION: "1.2.6"
-    CURRENT_PROJECT_VERSION: "310"
+    CURRENT_PROJECT_VERSION: "311"
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
 targets:
@@ -122,6 +122,7 @@ targets:
       - path: Earshot/Core/Logging/Logger+Earshot.swift
       - path: Earshot/Core/WatchFeedSnapshot.swift
       - path: Earshot/Core/PairedPlaybackState.swift
+      - path: Earshot/Core/PairedQueueProjection.swift
       - path: Earshot/Core/EpisodeSummary.swift
       - path: Earshot/Data/Persistence/CloudProjectionModels.swift
       - path: Earshot/Data/Persistence/FeedURLIdentity.swift

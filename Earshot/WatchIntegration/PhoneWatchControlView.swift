@@ -30,9 +30,18 @@ struct PhoneWatchControlView: View {
                     .disabled(!control.watchSessionIsLive || !control.watchPlaying)
                     .accessibilityHint("Starts the same episode on iPhone, then asks Apple Watch to stop")
             }
+            Section("Queue synchronization") {
+                Text(control.watchQueueSyncStatus)
+                    .accessibilityLabel("Watch Queue synchronization")
+                    .accessibilityValue(control.watchQueueSyncStatus)
+                Button("Refresh Watch Queue") { control.refreshQueue(announce: true) }
+            }
         }
         .navigationTitle("Apple Watch Playback")
-        .task { control.sendWatchControl("state", announce: false) }
+        .task {
+            control.sendWatchControl("state", announce: false)
+            control.refreshQueue()
+        }
     }
 
     private func perform(_ command: String) {

@@ -150,6 +150,81 @@ final class EarshotWatchTests: XCTestCase {
     }
 
     @MainActor
+    func testPairedQueueExchangeAddsReordersAndRemovesBothWays() throws {
+        let phone = try WatchLibrary(inMemory: true)
+        let watch = try WatchLibrary(inMemory: true)
+        let phoneSync = try WatchCloudSync(library: phone, inMemory: true, deviceID: "phone")
+        let watchSync = try WatchCloudSync(library: watch, inMemory: true, deviceID: "watch")
+        let one = try XCTUnwrap(phone.playablePhoneEpisode(feedURL: "https://example.com/feed", guid: "one",
+                                                             title: "One", podcastTitle: "Example Show",
+                                                             audioURL: "https://example.com/one.mp3"))
+        let two = try XCTUnwrap(phone.playablePhoneEpisode(feedURL: "https://example.com/feed", guid: "two",
+                                                             title: "Two", podcastTitle: "Example Show",
+                                                             audioURL: "https://example.com/two.mp3"))
+        phone.enqueue(one, next: false)
+        phone.enqueue(two, next: false)
+        let original = try phoneSync.queueContributions()
+        try watchSync.acceptQueueContributions(original)
+        XCTAssertEqual(watch.queue.map(\.guid), ["one", "two"])
+        XCTAssertEqual(watch.queue.map(\.podcastTitle), ["Example Show", "Example Show"])
+
+        let watchTwo = try XCTUnwrap(watch.queue.first { $0.guid == "two" })
+        let watchOne = try XCTUnwrap(watch.queue.first { $0.guid == "one" })
+        watch.moveQueue(watchTwo, offset: -1)
+        watch.removeFromQueue(watchOne, announce: false)
+        let changed = try watchSync.queueContributions()
+        try phoneSync.acceptQueueContributions(changed)
+        XCTAssertEqual(phone.queue.map(\.guid), ["two"])
+        try watchSync.acceptQueueContributions(original) // Delayed duplicate cannot revive One.
+        XCTAssertEqual(watch.queue.map(\.guid), ["two"])
+    }
+
+    @MainActor
+    func testPairedQueueExchangeMergesSimultaneousOfflineAddsDeterministically() throws {
+        let first = try WatchLibrary(inMemory: true)
+        let second = try WatchLibrary(inMemory: true)
+        let firstSync = try WatchCloudSync(library: first, inMemory: true, deviceID: "first")
+        let secondSync = try WatchCloudSync(library: second, inMemory: true, deviceID: "second")
+        let a = try XCTUnwrap(first.playablePhoneEpisode(feedURL: "https://example.com/feed", guid: "a",
+                                                          title: "A", podcastTitle: "Show",
+                                                          audioURL: "https://example.com/a.mp3"))
+        let b = try XCTUnwrap(second.playablePhoneEpisode(feedURL: "https://example.com/feed", guid: "b",
+                                                           title: "B", podcastTitle: "Show",
+                                                           audioURL: "https://example.com/b.mp3"))
+        first.enqueue(a, next: false)
+        second.enqueue(b, next: false)
+        let firstRows = try firstSync.queueContributions()
+        let secondRows = try secondSync.queueContributions()
+        try firstSync.acceptQueueContributions(secondRows)
+        try secondSync.acceptQueueContributions(firstRows)
+        XCTAssertEqual(first.queue.map(\.guid), ["a", "b"])
+        XCTAssertEqual(second.queue.map(\.guid), ["a", "b"])
+        try firstSync.acceptQueueContributions(secondRows)
+        XCTAssertEqual(first.queue.map(\.guid), ["a", "b"])
+    }
+
+    @MainActor
+    func testOfflineQueueAndOutboxSurviveWatchLibraryReopen() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "watch-queue-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = directory.appending(path: "WatchLocal.sqlite")
+        do {
+            let library = try WatchLibrary(storeURL: store)
+            let episode = try XCTUnwrap(library.playablePhoneEpisode(feedURL: "https://example.com/feed",
+                                                                      guid: "offline", title: "Offline",
+                                                                      podcastTitle: "Show",
+                                                                      audioURL: "https://example.com/offline.mp3"))
+            library.enqueue(episode, next: false)
+            XCTAssertEqual(library.queue.map(\.guid), ["offline"])
+        }
+        let reopened = try WatchLibrary(storeURL: store)
+        XCTAssertEqual(reopened.queue.map(\.guid), ["offline"])
+        XCTAssertEqual(try reopened.context.fetch(FetchDescriptor<WatchPendingSyncEvent>())
+            .filter { $0.kind == "queue" }.count, 1)
+    }
+
+    @MainActor
     func testLocalPlayedAndInboxEditsAreDurableUntilSync() throws {
         let library = try WatchLibrary(inMemory: true)
         let episode = try XCTUnwrap(library.playablePhoneEpisode(feedURL: "https://example.com/feed", guid: "one",
