@@ -3870,3 +3870,19 @@ Kashe's story:
 Kashe moved through her Inbox on the bus. VoiceOver said an episode title, then made her flick again just to pass a Play button before reaching the next title. The Queue did the same.
 
 After updating, she heard one episode per flick. A double tap opened its notes; Play waited in the row's Actions rotor when she wanted to listen. Renata could still tap the visible Play button beside an episode without opening the notes first.
+
+---
+
+Chapter 115 - Build 310
+
+What to try first:
+
+Start an episode on iPhone, then open Earshot on Apple Watch. Home should name the iPhone, podcast, episode, playback state and position. Open iPhone Control and pause, play, and skip the iPhone. Transfer to Apple Watch; the same episode should start near the same position and speed, and the iPhone should stop after confirmation. Then start an episode directly on the watch. On iPhone, open Settings > Apple Watch Playback and transfer it back. Repeat after pausing, seeking, closing an app, or taking the devices out of range. A stale session should say last reported; a failed control or transfer should say so and avoid two devices playing. With VoiceOver, note exact speech, focus, both devices' audio and positions, watchOS/iOS versions, and which connections were available.
+
+Kashe's story:
+
+Kashe left her phone in her work bag and opened Earshot on her watch. The interview she'd started in the car was missing. She could hear it from the phone, but the watch had no idea what was playing.
+
+She told Renata, then tried the next build. This time the watch named the interview and said it was playing on iPhone. Kashe pressed Transfer and waited for the sound to move before putting the phone away.
+
+“Tell me which one has it,” she said. “Then let me choose.”
