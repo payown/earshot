@@ -4,7 +4,9 @@ struct WatchNowPlayingView: View {
     let runtime: WatchRuntime
     var body: some View {
         List {
-            if let episode = runtime.player.episode {
+            if runtime.phone.phoneSessionIsLive && runtime.phone.hasPhoneEpisode && !runtime.player.isPlaying {
+                WatchPhoneSessionSection(runtime: runtime)
+            } else if let episode = runtime.player.episode {
                 Section("Playing on Apple Watch") {
                     Text(episode.title).font(.headline)
                     Text(episode.podcastTitle)
@@ -60,6 +62,8 @@ struct WatchNowPlayingView: View {
                     .disabled(!runtime.player.isPlaying)
                     Text(runtime.phone.status)
                 }
+            } else if runtime.phone.hasPhoneEpisode {
+                WatchPhoneSessionSection(runtime: runtime)
             } else { Text("Nothing playing. Choose an episode from Library or Inbox.") }
         }
         .navigationTitle("Now Playing")

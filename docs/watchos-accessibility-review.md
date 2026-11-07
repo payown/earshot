@@ -34,3 +34,7 @@ Reviewed 2026-11-06 against `/Users/michaelbabcock/.claude/agents/earshot-access
 4. The merged iPad panes use a selected episode and a separate, labeled Play control. The iPadOS 27.2 selected-sidebar VoiceOver assertion and iPad mini large-text navigation test passed. Physical VoiceOver reading order remains required; simulator assertions cannot certify spoken order across multiple windows.
 
 **Gate:** Code review complete. Physical VoiceOver review **pending**; do not merge or release on this report alone.
+
+## Build 310 live playback follow-up
+
+The repository earshot-accessibility review of the new phone/watch status screens found three actionable issues before distribution: the Home iPhone row omitted position from its spoken value, inserting the row could shift Home focus, and handoff announced watch playback and speed before the iPhone confirmed it had paused. The row now stays at a stable Home position and speaks source state with minutes and seconds; the transfer uses silent intermediate player actions and announces the final confirmed result or failure. Playback controls now say “Skip back” and “Skip forward.” The new control screens use native buttons, semantic fonts and text state; automatic position updates do not announce. Simulator UI tests check the stable row and control access. Michael's physical VoiceOver check of focus, action reachability and handoff announcement order remains required.
