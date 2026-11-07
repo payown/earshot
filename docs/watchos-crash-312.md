@@ -8,6 +8,8 @@ Build 311 was removed from the Public Testers group while this is investigated. 
 
 The replacement recompiles the shared queue validator and adds a 65 KB transport bound before either side decodes a queue page. The bound matches the existing `PairedQueuePage.isValid` limit and prevents an oversized response from reaching the decoder. This is defensive hardening; it does not by itself explain or prove repair of the code-signing fault. A newly archived and distributed binary, followed by a physical paired-device test, is required. If the same invalid-page termination recurs in the new build, investigate TestFlight installation and the iOS 27.2 beta's code-signing behavior with Apple using the new build's matching dSYM.
 
+Build 312 was generated from `project.yml` with XcodeGen 2.46.0. The Release archive's iPhone dSYM UUID is `0D00D9EC-22A8-3A5E-946E-9FA32091FC1D`, distinct from build 311. The exported IPA has version 1.2.6 (312) in the phone, independent watch, and widget bundles. Strict code-signature verification passes for all three. The watch still declares `WKRunsIndependentlyOfCompanionApp` and background `audio`; its distribution signature retains the approved App Group and production CloudKit container. The repository TestFlight script archived successfully but could not export the watch bundle because its fallback option file supplies only the phone profile. Export succeeded using the already approved three-profile mapping from build 311 with command-line provisioning updates. No project signing or entitlement settings changed.
+
 ## Verification and acceptance
 
 - Run the iPhone queue projection and CloudKit coordinator tests, then the full iPhone and watch simulator suites.
