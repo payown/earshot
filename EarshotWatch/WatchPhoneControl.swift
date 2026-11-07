@@ -263,7 +263,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                             return
                         }
                         try cloud.acceptQueueContributions(rows)
-                        self.finishQueueRefresh("Queue synchronized with iPhone", success: true)
+                        self.finishQueueRefresh("Queue updated from iPhone", success: true)
                     } catch {
                         self.finishQueueRefresh("Queue synchronization failed. Local Queue is unchanged.")
                     }
