@@ -741,6 +741,21 @@ final class PlayerService {
         )
     }
 
+    /// Paired-device transfer uses a session-only speed. It must not rewrite the
+    /// listener's global or per-podcast speed preference.
+    func play(_ episode: Episode, at startSeconds: Double, handoffRate: Double) {
+        beginUserMediaAttempt()
+        cancelHandoffOperation()
+        play(
+            episode,
+            preparedItem: nil,
+            originEvent: .started(nil),
+            startSecondsOverride: startSeconds,
+            requestedHandoffRate: PlaybackLogic.clampedSpeed(handoffRate),
+            providesStartHaptic: true
+        )
+    }
+
     func approvePendingCleartextPlayback() {
         guard let action = pendingCleartextPlaybackAction else {
             clearPendingCleartextPlayback()
@@ -904,6 +919,7 @@ final class PlayerService {
         handoff: PlaybackHandoffSnapshot? = nil,
         resolvedURL: URL? = nil,
         startSecondsOverride: Double? = nil,
+        requestedHandoffRate: Double? = nil,
         presentsFullPlayerWhenStarted: Bool = false,
         providesStartHaptic: Bool = false,
         announcesQueueNavigation: Bool = false,
@@ -948,6 +964,7 @@ final class PlayerService {
                         handoff: handoff,
                         resolvedURL: resolved,
                         startSecondsOverride: startSecondsOverride,
+                        requestedHandoffRate: requestedHandoffRate,
                         presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted,
                         providesStartHaptic: providesStartHaptic,
                         announcesQueueNavigation: announcesQueueNavigation,
@@ -1004,7 +1021,7 @@ final class PlayerService {
 
         currentEpisodeIsTransient = transient
         setCurrentEpisode(episode)
-        handoffRateOverride = handoff?.playbackRate
+        handoffRateOverride = handoff?.playbackRate ?? requestedHandoffRate
         didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
         currentArtist = episode.podcast?.displayName ?? episode.podcast?.author
