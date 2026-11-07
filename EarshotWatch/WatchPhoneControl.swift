@@ -35,6 +35,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
     private var queueGeneration = UUID()
     private var queueWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var pending = false
+    private var pendingFeedbackAnnounced = false
     private var syncingLibrary = false
     private var seenRemoteCommands: [String: [String: Any]] = [:]
     private weak var watchPlayer: WatchPlayer?
@@ -427,6 +428,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             return
         }
         pending = true
+        pendingFeedbackAnnounced = false
         status = PairedQueueTransportPolicy.immediateSnapshotsEnabled
             ? "Synchronizing Queue before transfer"
             : "Checking iPhone playback before transfer. Queue changes sync through iCloud when available."
@@ -551,6 +553,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             return
         }
         pending = true
+        pendingFeedbackAnnounced = false
         status = "Checking iPhone playback"
         let feedURL = episode.feedURL
         let guid = episode.guid
@@ -691,7 +694,14 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
     }
 
     private func send(_ command: String, extra: [String: Any] = [:], announce: Bool = true) {
-        guard !pending else { status = "Wait for the previous iPhone request"; return }
+        guard !pending else {
+            status = "Wait for the previous iPhone request"
+            if announce && !pendingFeedbackAnnounced {
+                pendingFeedbackAnnounced = true
+                AccessibilityNotification.Announcement(status).post()
+            }
+            return
+        }
         guard WCSession.isSupported(), WCSession.default.isReachable else {
             phoneAvailable = false
             status = "iPhone is unreachable. No control was sent."
@@ -699,6 +709,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             return
         }
         pending = true
+        pendingFeedbackAnnounced = false
         status = "Contacting iPhone"
         var message = extra
         message["version"] = 1
@@ -754,6 +765,7 @@ struct WatchPhoneControlView: View {
                 Button("Import subscriptions from iPhone") { runtime.phone.importLibrary(into: runtime.library) }
             }
         }
+        .accessibilityAction(.magicTap) { runtime.performMagicTap(phoneControlScreen: true) }
         .navigationTitle("iPhone Control")
         .task { runtime.phone.refresh() }
     }
