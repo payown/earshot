@@ -47,6 +47,7 @@ final class WatchEpisode {
     var downloadError: String?
     var updatedAt: Date
     var positionUpdatedAt: Date = Date.distantPast
+    var positionResetAt: Date?
     var playedUpdatedAt: Date = Date.distantPast
     var inboxDismissedUpdatedAt: Date = Date.distantPast
     var queueMembershipUpdatedAt: Date = Date.distantPast
@@ -138,6 +139,7 @@ struct WatchSyncPayload: Codable, Sendable {
     var bookmarkID: String = ""
     var bookmarkPosition: Int = 0
     var positionUpdatedAt: Date = Date.distantPast
+    var positionResetAt: Date?
     var playedUpdatedAt: Date = Date.distantPast
     var inboxUpdatedAt: Date = Date.distantPast
     var membershipUpdatedAt: Date = Date.distantPast
@@ -212,7 +214,89 @@ final class WatchLibrary {
         if let order = UserDefaults.standard.stringArray(forKey: "watchEpisodeActionOrder"), !order.isEmpty {
             episodeActionOrder = order
         }
+        try repairLegacyIdentities()
         reload()
+    }
+
+    /// Upgrade identities written by the older rule that lowercased entire
+    /// feed URLs. Keep the canonical row on collisions and transfer local state
+    /// before deleting duplicates. No media file is removed by this repair.
+    func repairLegacyIdentities() throws {
+        let storedPodcasts = try context.fetch(FetchDescriptor<WatchPodcast>())
+        var podcastKeepers: [(WatchPodcast, String)] = []
+        for (canonical, group) in Dictionary(grouping: storedPodcasts,
+                                             by: { FeedURLIdentity.canonical($0.feedURL) }) {
+            guard let keeper = group.first(where: { $0.feedURL == canonical }) ??
+                    group.max(by: { $0.modifiedAt < $1.modifiedAt }) else { continue }
+            for other in group where other !== keeper {
+                if other.modifiedAt > keeper.modifiedAt {
+                    keeper.title = other.title
+                    keeper.author = other.author
+                    keeper.summary = other.summary
+                    keeper.artworkURL = other.artworkURL
+                    keeper.modifiedAt = other.modifiedAt
+                }
+                keeper.subscribedAt = min(keeper.subscribedAt, other.subscribedAt)
+                context.delete(other)
+            }
+            podcastKeepers.append((keeper, canonical))
+        }
+
+        let storedEpisodes = try context.fetch(FetchDescriptor<WatchEpisode>())
+        let bookmarks = try context.fetch(FetchDescriptor<WatchBookmark>())
+        var episodeKeepers: [(WatchEpisode, String, String)] = []
+        for (identity, group) in Dictionary(grouping: storedEpisodes,
+                                            by: { WatchEpisode.key(feedURL: $0.feedURL, guid: $0.guid) }) {
+            guard let keeper = group.first(where: { $0.identity == identity }) ??
+                    group.max(by: { $0.updatedAt < $1.updatedAt }) else { continue }
+            for episode in group {
+                for bookmark in bookmarks where bookmark.episodeIdentity == episode.identity {
+                    bookmark.episodeIdentity = identity
+                }
+                guard episode !== keeper else { continue }
+                if episode.positionUpdatedAt > keeper.positionUpdatedAt ||
+                    (episode.positionUpdatedAt == keeper.positionUpdatedAt &&
+                     episode.positionSeconds > keeper.positionSeconds) {
+                    keeper.positionSeconds = episode.positionSeconds
+                    keeper.positionUpdatedAt = episode.positionUpdatedAt
+                }
+                if let reset = episode.positionResetAt,
+                   reset > (keeper.positionResetAt ?? .distantPast) { keeper.positionResetAt = reset }
+                if episode.playedUpdatedAt > keeper.playedUpdatedAt {
+                    keeper.isPlayed = episode.isPlayed
+                    keeper.playedUpdatedAt = episode.playedUpdatedAt
+                }
+                if episode.inboxDismissedUpdatedAt > keeper.inboxDismissedUpdatedAt {
+                    keeper.inboxDismissed = episode.inboxDismissed
+                    keeper.inboxDismissedUpdatedAt = episode.inboxDismissedUpdatedAt
+                }
+                if episode.queueMembershipUpdatedAt > keeper.queueMembershipUpdatedAt {
+                    keeper.queuePosition = episode.queuePosition
+                    keeper.queueMembershipUpdatedAt = episode.queueMembershipUpdatedAt
+                }
+                if episode.queueOrderUpdatedAt > keeper.queueOrderUpdatedAt {
+                    keeper.queuePosition = episode.queuePosition
+                    keeper.queueOrderUpdatedAt = episode.queueOrderUpdatedAt
+                }
+                if keeper.downloadFilename == nil { keeper.downloadFilename = episode.downloadFilename }
+                keeper.updatedAt = max(keeper.updatedAt, episode.updatedAt)
+                context.delete(episode)
+            }
+            episodeKeepers.append((keeper, identity, FeedURLIdentity.canonical(keeper.feedURL)))
+        }
+        // Delete collisions before changing unique feed and episode keys.
+        if context.hasChanges { try context.save() }
+        for (podcast, canonical) in podcastKeepers where podcast.feedURL != canonical {
+            podcast.feedURL = canonical
+        }
+        for (episode, identity, canonicalFeed) in episodeKeepers {
+            if episode.identity != identity { episode.identity = identity }
+            if episode.feedURL != canonicalFeed { episode.feedURL = canonicalFeed }
+            if episode.queuePosition != nil, episode.queueMembershipUpdatedAt == .distantPast {
+                stageQueue(episode)
+            }
+        }
+        if context.hasChanges { try context.save() }
     }
 
     func updateEpisodeActionOrder(_ order: [String]) {
@@ -250,8 +334,8 @@ final class WatchLibrary {
             AccessibilityNotification.Announcement(message ?? "Invalid feed").post()
             return
         }
-        guard !podcasts.contains(where: { FeedURLIdentity.matches($0.feedURL, canonical) }) else {
-            await refresh(feedURL: url.absoluteString)
+        if let existing = podcasts.first(where: { FeedURLIdentity.matches($0.feedURL, canonical) }) {
+            await refresh(feedURL: existing.feedURL)
             return
         }
         guard isPlus || podcasts.count < 10 else {
@@ -337,6 +421,7 @@ final class WatchLibrary {
         if played {
             episode.positionSeconds = 0
             episode.positionUpdatedAt = episode.updatedAt
+            episode.positionResetAt = episode.updatedAt
         }
         episode.playedUpdatedAt = episode.updatedAt
         episode.inboxDismissedUpdatedAt = episode.updatedAt
@@ -427,7 +512,10 @@ final class WatchLibrary {
         catch { message = "Could not save this change. Please try again." }
     }
 
-    func stageListeningPosition(_ episode: WatchEpisode) {
+    func stageListeningPosition(_ episode: WatchEpisode, previousPosition: Double? = nil) {
+        if let previousPosition, previousPosition > episode.positionSeconds + 2 {
+            episode.positionResetAt = .now
+        }
         episode.positionUpdatedAt = .now
         stageEpisode(episode)
     }
@@ -445,11 +533,15 @@ final class WatchLibrary {
                                         position: Int(episode.positionSeconds), isPlayed: episode.isPlayed,
                                         inboxDismissed: episode.inboxDismissed,
                                         positionUpdatedAt: episode.positionUpdatedAt,
+                                        positionResetAt: episode.positionResetAt,
                                         playedUpdatedAt: episode.playedUpdatedAt,
                                         inboxUpdatedAt: episode.inboxDismissedUpdatedAt))
     }
 
     private func stageQueue(_ episode: WatchEpisode) {
+        if episode.queuePosition != nil, episode.queueMembershipUpdatedAt == .distantPast {
+            episode.queueMembershipUpdatedAt = WatchQueueResolution.legacyMembershipDate
+        }
         stage(key: "queue:\(episode.identity)", kind: "queue",
               payload: WatchSyncPayload(feedURL: episode.feedURL, guid: episode.guid,
                                         title: episode.title, summary: episode.summary,

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import CoreData
 import Observation
 import Accessibility
 
@@ -20,12 +21,16 @@ enum WatchProgressResolution {
         let eligible = rows.filter { reset == nil || $0.positionUpdatedAt > reset!.0 }
         let newest = eligible.map(\.positionUpdatedAt).max() ?? reset?.0 ?? .distantPast
         let merged = max(0, eligible.map(\.positionSeconds).max() ?? reset?.1 ?? 0)
-        if let reset, reset.0 > localUpdatedAt { return (merged, max(newest, reset.0)) }
+        // The cached local value may itself include a pre-reset maximum. Local
+        // edits have already been flushed into `rows` before reconciliation.
+        if let reset { return (merged, max(newest, reset.0)) }
         return (max(localPosition, merged), max(localUpdatedAt, newest))
     }
 }
 
 enum WatchQueueResolution {
+    static let legacyMembershipDate = Date.distantPast.addingTimeInterval(1)
+
     static func membershipClock(_ row: CloudQueueItemProjection) -> Date {
         row.membershipUpdatedAt == .distantPast ? row.modifiedAt : row.membershipUpdatedAt
     }
@@ -49,6 +54,19 @@ enum WatchQueueResolution {
     }
 }
 
+enum WatchFolderResolution {
+    static func liveLatest(_ rows: [CloudFolderProjection]) -> [CloudFolderProjection] {
+        Dictionary(grouping: rows, by: \.folderID).compactMap { _, versions in
+            versions.max { lhs, rhs in
+                lhs.modifiedAt == rhs.modifiedAt
+                    ? lhs.sourceDeviceID < rhs.sourceDeviceID
+                    : lhs.modifiedAt < rhs.modifiedAt
+            }
+        }
+        .filter { $0.deletedAt == nil }
+    }
+}
+
 /// Uses Earshot's existing compact projection schema in a separate watch store.
 /// The phone and watch never open one another's application store. Local watch
 /// edits remain in WatchPendingSyncEvent until projection storage accepts them.
@@ -59,6 +77,7 @@ final class WatchCloudSync {
     private let container: ModelContainer
     private let context: ModelContext
     private let deviceID: String
+    private var importObserver: NSObjectProtocol?
     private(set) var lastError: String?
     private(set) var folders: [WatchFolderSnapshot] = []
     private(set) var conflicts: [String] = []
@@ -72,11 +91,16 @@ final class WatchCloudSync {
             CloudFolderProjection.self
         ])
         let store = URL.applicationSupportDirectory.appending(path: "WatchCloudProjection.sqlite")
+        #if targetEnvironment(simulator)
+        let database: ModelConfiguration.CloudKitDatabase = .none
+        #else
+        let database = CloudKitLaunchPolicy.projectionDatabase()
+        #endif
         let config = inMemory
             ? ModelConfiguration("WatchCloudProjectionTest", schema: schema,
                                  isStoredInMemoryOnly: true, cloudKitDatabase: .none)
             : ModelConfiguration("WatchCloudProjection", schema: schema,
-                                 url: store, cloudKitDatabase: CloudKitLaunchPolicy.projectionDatabase())
+                                 url: store, cloudKitDatabase: database)
         container = try ModelContainer(for: schema, configurations: config)
         context = container.mainContext
         if let saved = UserDefaults.standard.string(forKey: "watchProjectionDeviceID") {
@@ -87,6 +111,24 @@ final class WatchCloudSync {
             deviceID = generated
         }
         conflicts = UserDefaults.standard.stringArray(forKey: "watchSyncConflicts") ?? []
+        #if !targetEnvironment(simulator)
+        if !inMemory && CloudKitLaunchPolicy.isMirroringEnabled() {
+            importObserver = NotificationCenter.default.addObserver(
+                forName: NSPersistentCloudKitContainer.eventChangedNotification,
+                object: nil, queue: .main
+            ) { [weak self] notification in
+                guard let event = notification.userInfo?[
+                    NSPersistentCloudKitContainer.eventNotificationUserInfoKey
+                ] as? NSPersistentCloudKitContainer.Event,
+                    event.type == .import, event.endDate != nil, event.succeeded else { return }
+                Task { @MainActor [weak self] in self?.reconcile() }
+            }
+        }
+        #endif
+    }
+
+    isolated deinit {
+        if let importObserver { NotificationCenter.default.removeObserver(importObserver) }
     }
 
     func reconcile() {
@@ -95,8 +137,8 @@ final class WatchCloudSync {
         do {
             try flushPending()
             try pullSubscriptions()
-            try pullEpisodeStates()
             try pullQueue()
+            try pullEpisodeStates()
             try pullBookmarks()
             try pullSettings()
             try loadFolders()
@@ -163,8 +205,9 @@ final class WatchCloudSync {
         row.feedURL = feed
         row.episodeGUID = guid
         row.sourceDeviceID = deviceID
+        if let reset = payload.positionResetAt,
+           reset > (row.positionResetAt ?? .distantPast) { row.positionResetAt = reset }
         if payload.positionUpdatedAt > row.positionUpdatedAt {
-            if payload.position < row.positionSeconds { row.positionResetAt = payload.positionUpdatedAt }
             row.positionSeconds = max(0, payload.position)
             row.positionUpdatedAt = payload.positionUpdatedAt
         }
@@ -303,6 +346,7 @@ final class WatchCloudSync {
                                                          localUpdatedAt: episode.positionUpdatedAt)
             episode.positionSeconds = episode.isPlayed ? 0 : Double(merged.position)
             episode.positionUpdatedAt = merged.updatedAt
+            episode.positionResetAt = contributions.compactMap(\.positionResetAt).max()
         }
     }
 
@@ -367,8 +411,8 @@ final class WatchCloudSync {
     }
 
     private func loadFolders() throws {
-        folders = try context.fetch(FetchDescriptor<CloudFolderProjection>())
-            .filter { $0.deletedAt == nil }
+        let rows = try context.fetch(FetchDescriptor<CloudFolderProjection>())
+        folders = WatchFolderResolution.liveLatest(rows)
             .compactMap { row in
                 guard let data = row.podcastMembersJSON.data(using: .utf8),
                       let members = try? JSONDecoder().decode([WatchFolderSnapshot.Member].self, from: data) else {
@@ -410,6 +454,16 @@ final class WatchCloudSync {
 #if DEBUG
     func episodeContributionCountForTesting() throws -> Int {
         try context.fetchCount(FetchDescriptor<CloudEpisodeStateProjection>())
+    }
+
+    func insertForTesting(_ row: CloudQueueItemProjection) throws {
+        context.insert(row)
+        try context.save()
+    }
+
+    func insertForTesting(_ row: CloudEpisodeStateProjection) throws {
+        context.insert(row)
+        try context.save()
     }
 #endif
 }
