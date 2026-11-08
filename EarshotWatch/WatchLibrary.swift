@@ -298,8 +298,8 @@ final class WatchLibrary {
     func unsubscribe(_ podcast: WatchPodcast) {
         let title = podcast.title
         // Keep downloads and listening history, as the phone app does.
-        context.delete(podcast)
         stagePodcast(podcast, deleted: true)
+        context.delete(podcast)
         persist()
         message = "Unfollowed \(title)"
         AccessibilityNotification.Announcement(message ?? "Unfollowed").post()

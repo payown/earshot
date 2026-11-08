@@ -1,4 +1,5 @@
 import XCTest
+import SwiftData
 @testable import EarshotWatch
 
 final class EarshotWatchTests: XCTestCase {
@@ -73,4 +74,20 @@ final class EarshotWatchTests: XCTestCase {
                                              "feedURL": state.feedURL, "guid": state.guid,
                                              "position": 140.0]), 140)
     }
+    @MainActor
+    func testUnfollowStagesDurablePayloadBeforeDeletingPodcast() throws {
+        let library = try WatchLibrary(inMemory: true)
+        let podcast = WatchPodcast(feedURL: "https://example.com/feed", title: "Show")
+        library.context.insert(podcast)
+        library.persist()
+        library.unsubscribe(podcast)
+
+        let events = try library.context.fetch(FetchDescriptor<WatchPendingSyncEvent>())
+        let event = try XCTUnwrap(events.first { $0.kind == "unfollow" })
+        let payload = try JSONDecoder().decode(WatchSyncPayload.self, from: event.payload)
+        XCTAssertEqual(payload.feedURL, "https://example.com/feed")
+        XCTAssertEqual(payload.title, "Show")
+        XCTAssertTrue(library.podcasts.isEmpty)
+    }
+
 }
