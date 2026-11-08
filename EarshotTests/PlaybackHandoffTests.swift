@@ -230,6 +230,23 @@ final class PlaybackHandoffTests: XCTestCase {
         )
     }
 
+    func testWatchTransferUsesSessionRateWithoutChangingPhonePreference() {
+        let context = TestStore.freshContext()
+        let settings = AppSettingsStore(context: context)
+        settings.setDouble(1.25, for: SettingsKey.globalSpeed)
+        let player = PlayerService()
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 20)
+
+        player.play(episode, at: 90, handoffRate: 1.75)
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 90)
+        XCTAssertEqual(player.effectiveRate, 1.75)
+        XCTAssertEqual(AppSettingsStore(context: context).double(SettingsKey.globalSpeed, default: 1), 1.25)
+        XCTAssertNil(episode.podcast?.speedOverride)
+    }
+
     func testResumeFallsBackToLocalStateAtDeadline() async throws {
         let context = TestStore.freshContext()
         let remote = PlaybackHandoffSnapshot(
