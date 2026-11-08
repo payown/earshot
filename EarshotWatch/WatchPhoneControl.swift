@@ -4,6 +4,50 @@ import SwiftUI
 import WatchConnectivity
 import Accessibility
 
+struct WatchHandoffSourceState: Sendable {
+    let feedURL: String
+    let guid: String
+    let title: String
+    let podcastTitle: String
+    let audioURL: String
+    let position: Double
+    let rate: Float
+    let observedAt: Double
+
+    init?(_ response: [String: Any], now: Double = Date.now.timeIntervalSince1970) {
+        guard response["accepted"] as? Bool == true, response["owner"] as? String == "phone",
+              response["playing"] as? Bool == true,
+              let feedURL = response["feedURL"] as? String, !feedURL.isEmpty,
+              let guid = response["guid"] as? String, !guid.isEmpty,
+              let audioURL = response["audioURL"] as? String, !audioURL.isEmpty,
+              let position = response["position"] as? Double, position.isFinite, position >= 0,
+              let rawRate = response["rate"] as? Double, rawRate.isFinite, (0.5...3).contains(rawRate),
+              let observedAt = response["observedAt"] as? Double,
+              (0...15).contains(now - observedAt) else { return nil }
+        self.feedURL = feedURL
+        self.guid = guid
+        self.title = response["title"] as? String ?? ""
+        self.podcastTitle = response["podcastTitle"] as? String ?? "Podcast"
+        self.audioURL = audioURL
+        self.position = position
+        self.rate = Float(rawRate)
+        self.observedAt = observedAt
+    }
+
+    func anticipatedPosition(now: Double = Date.now.timeIntervalSince1970) -> Double {
+        position + max(0, min(15, now - observedAt)) * Double(rate)
+    }
+
+    func pausedPosition(_ response: [String: Any]) -> Double? {
+        guard response["accepted"] as? Bool == true, response["owner"] as? String == "phone",
+              response["playing"] as? Bool == false,
+              response["feedURL"] as? String == feedURL,
+              response["guid"] as? String == guid,
+              let final = response["position"] as? Double, final.isFinite, final >= 0 else { return nil }
+        return final
+    }
+}
+
 @MainActor
 @Observable
 final class WatchPhoneControl: NSObject, WCSessionDelegate {
@@ -48,55 +92,130 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
     func forward() { send("forward") }
 
     func handoffToWatch(library: WatchLibrary, watchPlayer: WatchPlayer) {
-        guard !pending, phonePlaying, !phoneFeedURL.isEmpty, !phoneGUID.isEmpty,
-              let episode = library.playablePhoneEpisode(feedURL: phoneFeedURL, guid: phoneGUID,
-                                                        title: phoneEpisodeTitle,
-                                                        podcastTitle: phonePodcastTitle,
-                                                        audioURL: phoneAudioURL) else {
-            status = "Refresh iPhone state before transferring playback"
+        guard !pending, WCSession.isSupported(), WCSession.default.isReachable else {
+            status = "iPhone is unreachable. No transfer was started."
             AccessibilityNotification.Announcement(status).post()
             return
         }
-        let position = phonePosition
-        let rate = phoneRate
+        pending = true
+        status = "Checking current iPhone playback"
+        WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString, "command": "state"]) { [weak self] response in
+            let state = WatchHandoffSourceState(response)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard let state,
+                      let episode = library.playablePhoneEpisode(feedURL: state.feedURL, guid: state.guid,
+                                                                  title: state.title,
+                                                                  podcastTitle: state.podcastTitle,
+                                                                  audioURL: state.audioURL) else {
+                    self.pending = false
+                    self.status = "iPhone playback changed or this episode is unavailable on watch. No transfer occurred."
+                    AccessibilityNotification.Announcement(self.status).post()
+                    return
+                }
+                self.startHandoffToWatch(episode, state: state, watchPlayer: watchPlayer)
+            }
+        } errorHandler: { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.pending = false
+                self?.status = "iPhone did not confirm its playback state. No transfer occurred."
+                AccessibilityNotification.Announcement("iPhone did not confirm its playback state. No transfer occurred.").post()
+            }
+        }
+    }
+
+    private func startHandoffToWatch(_ episode: WatchEpisode, state: WatchHandoffSourceState,
+                                     watchPlayer: WatchPlayer) {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            watchPlayer.setRate(rate)
-            await watchPlayer.play(episode, at: position)
-            guard watchPlayer.isPlaying else {
+            let requestID = UUID()
+            watchPlayer.setRate(state.rate)
+            await watchPlayer.play(episode, at: state.anticipatedPosition(), announce: false,
+                                   requestID: requestID)
+            guard watchPlayer.ownsPlaybackRequest(requestID), watchPlayer.isPlaying,
+                  watchPlayer.episode?.identity == episode.identity else {
+                self.pending = false
                 self.status = "Apple Watch could not start audio. iPhone continues."
                 AccessibilityNotification.Announcement(self.status).post()
                 return
             }
             guard WCSession.default.isReachable else {
-                watchPlayer.pause()
+                watchPlayer.pause(announce: false)
+                self.pending = false
                 self.status = "iPhone disconnected before transfer completed."
                 AccessibilityNotification.Announcement(self.status).post()
                 return
             }
-            self.pending = true
             self.status = "Stopping playback on iPhone"
             WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString,
-                                           "command": "pause"]) { [weak self] response in
+                                           "command": "pauseIfEpisode", "feedURL": state.feedURL,
+                                           "guid": state.guid]) { [weak self] response in
+                let finalPosition = state.pausedPosition(response)
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.pending = false
-                    if response["accepted"] as? Bool == true, response["playing"] as? Bool == false {
+                    guard watchPlayer.ownsPlaybackRequest(requestID) else {
+                        self.pending = false
+                        self.status = "Watch playback changed during transfer. Check both devices."
+                        AccessibilityNotification.Announcement(self.status).post()
+                        return
+                    }
+                    if let finalPosition,
+                       await watchPlayer.alignToPausedSource(finalPosition, expectedIdentity: episode.identity) {
+                        self.pending = false
                         self.phonePlaying = false
                         self.status = "Playback transferred to Apple Watch"
+                        AccessibilityNotification.Announcement(self.status).post()
                     } else {
-                        watchPlayer.pause()
-                        self.status = "iPhone did not confirm pause. Watch playback stopped."
+                        guard watchPlayer.ownsPlaybackRequest(requestID) else {
+                            self.pending = false
+                            self.status = "Watch playback changed during transfer. Check both devices."
+                            AccessibilityNotification.Announcement(self.status).post()
+                            return
+                        }
+                        watchPlayer.pause(announce: false)
+                        if let finalPosition {
+                            self.restorePhonePlayback(state: state, position: finalPosition)
+                        } else {
+                            self.pending = false
+                            self.status = "iPhone did not confirm its final position. Watch playback stopped."
+                            AccessibilityNotification.Announcement(self.status).post()
+                        }
                     }
-                    AccessibilityNotification.Announcement(self.status).post()
                 }
             } errorHandler: { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    watchPlayer.pause()
+                    if watchPlayer.ownsPlaybackRequest(requestID) { watchPlayer.pause(announce: false) }
                     self?.pending = false
                     self?.status = "iPhone did not confirm pause. Watch playback stopped."
                     AccessibilityNotification.Announcement("iPhone did not confirm pause. Watch playback stopped.").post()
                 }
+            }
+        }
+    }
+
+    private func restorePhonePlayback(state: WatchHandoffSourceState, position: Double) {
+        status = "Watch could not align to iPhone position. Restoring iPhone playback."
+        WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString,
+                                       "command": "resumeIfEpisode", "feedURL": state.feedURL,
+                                       "guid": state.guid, "position": position,
+                                       "rate": Double(state.rate)]) { [weak self] response in
+            let restored = response["accepted"] as? Bool == true &&
+                response["playing"] as? Bool == true &&
+                response["feedURL"] as? String == state.feedURL &&
+                response["guid"] as? String == state.guid
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.pending = false
+                self.phonePlaying = restored
+                self.status = restored ? "iPhone playback restored. Watch transfer did not finish." :
+                    "Watch transfer failed. Check iPhone playback before retrying."
+                AccessibilityNotification.Announcement(self.status).post()
+            }
+        } errorHandler: { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.pending = false
+                self?.status = "Watch transfer failed. Check iPhone playback before retrying."
+                AccessibilityNotification.Announcement("Watch transfer failed. Check iPhone playback before retrying.").post()
             }
         }
     }

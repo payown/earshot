@@ -5,6 +5,18 @@ import Observation
 import MediaPlayer
 import WidgetKit
 
+struct WatchPlaybackRequestGate {
+    private(set) var current = UUID()
+
+    mutating func begin(_ request: UUID = UUID()) -> UUID {
+        current = request
+        return current
+    }
+
+    mutating func invalidate() { current = UUID() }
+    func owns(_ request: UUID) -> Bool { current == request }
+}
+
 @MainActor
 @Observable
 final class WatchPlayer {
@@ -13,6 +25,7 @@ final class WatchPlayer {
     private var lastSavedSecond = -1
     private var sleepTask: Task<Void, Never>?
     private var notificationTokens: [NSObjectProtocol] = []
+    private var playbackRequests = WatchPlaybackRequestGate()
     private let library: WatchLibrary
 
     private(set) var episode: WatchEpisode?
@@ -44,10 +57,12 @@ final class WatchPlayer {
         configureRemoteCommands()
     }
 
-    func play(_ item: WatchEpisode, at requestedPosition: Double? = nil) async {
+    func play(_ item: WatchEpisode, at requestedPosition: Double? = nil,
+              announce: Bool = true, requestID: UUID = UUID()) async {
+        let request = playbackRequests.begin(requestID)
         guard let remote = URL(string: item.audioURL), ["https", "http"].contains(remote.scheme?.lowercased() ?? "") else {
             status = "This episode has no playable audio address"
-            AccessibilityNotification.Announcement(status).post()
+            if announce { AccessibilityNotification.Announcement(status).post() }
             return
         }
         let local = item.downloadFilename.map { WatchDownloadManager.destination(for: $0) }
@@ -56,6 +71,7 @@ final class WatchPlayer {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
             try await session.activate()
+            guard playbackRequests.owns(request) else { return }
             let changedEpisode = episode?.identity != item.identity
             if changedEpisode {
                 player.replaceCurrentItem(with: AVPlayerItem(url: url))
@@ -69,6 +85,7 @@ final class WatchPlayer {
             let resume = max(0, requestedPosition ?? item.positionSeconds)
             if changedEpisode || abs(positionSeconds - resume) > 2 {
                 await player.seek(to: CMTime(seconds: resume, preferredTimescale: 600))
+                guard playbackRequests.owns(request) else { return }
             }
             player.defaultRate = rate
             player.play()
@@ -77,38 +94,57 @@ final class WatchPlayer {
             status = "Starting playback on Apple Watch"
             for _ in 0..<20 where player.timeControlStatus != .playing {
                 try await Task.sleep(for: .milliseconds(500))
+                guard playbackRequests.owns(request) else { return }
             }
             guard player.timeControlStatus == .playing else {
                 player.pause()
                 isPlaying = false
                 isBuffering = false
                 status = "Apple Watch could not start audio. Check the playback route or network."
-                AccessibilityNotification.Announcement(status).post()
+                if announce { AccessibilityNotification.Announcement(status).post() }
                 return
             }
             isPlaying = true
             isBuffering = false
             status = "Playing on Apple Watch"
-            AccessibilityNotification.Announcement(status).post()
+            if announce { AccessibilityNotification.Announcement(status).post() }
             publishNowPlaying()
             WatchWidgetSnapshot.save(title: item.title, playing: true)
         } catch {
+            guard playbackRequests.owns(request) else { return }
             isPlaying = false
             status = "Could not start watch playback: \(error.localizedDescription)"
-            AccessibilityNotification.Announcement(status).post()
+            if announce { AccessibilityNotification.Announcement(status).post() }
             AppLog.player.error("Watch playback failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    func pause() {
+    func pause(announce: Bool = true) {
+        playbackRequests.invalidate()
         player.pause()
         isPlaying = false
         status = "Paused on Apple Watch"
-        AccessibilityNotification.Announcement(status).post()
+        if announce { AccessibilityNotification.Announcement(status).post() }
         savePosition()
         publishNowPlaying()
         WatchWidgetSnapshot.save(title: episode?.title, playing: false)
     }
+
+    func alignToPausedSource(_ seconds: Double, expectedIdentity: String) async -> Bool {
+        guard seconds.isFinite, seconds >= 0, isPlaying, episode?.identity == expectedIdentity else { return false }
+        let request = playbackRequests.current
+        let aligned = await player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
+                                        toleranceBefore: .zero, toleranceAfter: .zero)
+        guard aligned, playbackRequests.owns(request), episode?.identity == expectedIdentity else { return false }
+        let actual = player.currentTime().seconds
+        guard actual.isFinite, abs(actual - seconds) <= 2 else { return false }
+        positionSeconds = actual
+        savePosition()
+        publishNowPlaying()
+        return true
+    }
+
+    func ownsPlaybackRequest(_ request: UUID) -> Bool { playbackRequests.owns(request) }
 
     func toggle() async {
         if isPlaying { pause() }
@@ -181,11 +217,14 @@ final class WatchPlayer {
             savePosition()
         }
         if durationSeconds > 0, seconds >= durationSeconds - 1, isPlaying {
+            playbackRequests.invalidate()
             isPlaying = false
             episode?.isPlayed = true
             episode?.inboxDismissed = true
             savePosition()
             status = "Episode finished"
+            publishNowPlaying()
+            WatchWidgetSnapshot.save(title: episode?.title, playing: false)
         }
     }
 

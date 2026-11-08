@@ -1,5 +1,13 @@
 import SwiftUI
 
+enum WatchPlaybackDeviceStatus {
+    static func spokenText(watchPlaying: Bool, phonePlaying: Bool) -> String {
+        if watchPlaying { return "Audio is playing on Apple Watch" }
+        if phonePlaying { return "Audio is playing on iPhone" }
+        return "Audio is paused on Apple Watch"
+    }
+}
+
 struct WatchNowPlayingView: View {
     let runtime: WatchRuntime
     var body: some View {
@@ -45,7 +53,8 @@ struct WatchNowPlayingView: View {
                     Button("30 minutes") { runtime.player.setSleepTimer(minutes: 30) }
                 }
                 Section("Playback device") {
-                    Text("Audio is playing on Apple Watch")
+                    Text(WatchPlaybackDeviceStatus.spokenText(watchPlaying: runtime.player.isPlaying,
+                                                             phonePlaying: runtime.phone.phonePlaying))
                     Button("Transfer to iPhone") {
                         runtime.phone.handoffToPhone(episode: episode,
                                                     position: runtime.player.positionSeconds,

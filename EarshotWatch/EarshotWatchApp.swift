@@ -57,6 +57,7 @@ struct WatchLaunchView: View {
 
 struct WatchHomeView: View {
     let runtime: WatchRuntime
+    @Environment(\.scenePhase) private var scenePhase
     @State private var path: [String] = []
     var body: some View {
         NavigationStack(path: $path) {
@@ -90,13 +91,19 @@ struct WatchHomeView: View {
                     path.append("now-playing")
                 }
             }
-            .onAppear {
-                if UserDefaults.standard.string(forKey: "watchPendingDestination") == "now-playing" {
-                    UserDefaults.standard.removeObject(forKey: "watchPendingDestination")
-                    path.append("now-playing")
-                }
+            .onAppear(perform: openPendingDestination)
+            .onReceive(NotificationCenter.default.publisher(for: WatchNavigationRequest.changed)) { _ in
+                openPendingDestination()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { openPendingDestination() }
             }
         }
+    }
+
+    private func openPendingDestination() {
+        guard WatchNavigationRequest.consumeNowPlaying() else { return }
+        if path.last != "now-playing" { path.append("now-playing") }
     }
 }
 

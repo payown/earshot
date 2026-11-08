@@ -1,13 +1,32 @@
 import AppIntents
 import Foundation
 
+enum WatchNavigationRequest {
+    static let changed = Notification.Name("EarshotWatchNavigationRequestChanged")
+    private static var sharedDefaults: UserDefaults {
+        UserDefaults(suiteName: "group.media.payown.earshot.watch") ?? .standard
+    }
+
+    static func openNowPlaying(defaults: UserDefaults? = nil) {
+        (defaults ?? sharedDefaults).set("now-playing", forKey: "watchPendingDestination")
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    static func consumeNowPlaying(defaults: UserDefaults? = nil) -> Bool {
+        let store = defaults ?? sharedDefaults
+        guard store.string(forKey: "watchPendingDestination") == "now-playing" else { return false }
+        store.removeObject(forKey: "watchPendingDestination")
+        return true
+    }
+}
+
 struct OpenWatchNowPlayingIntent: AppIntent {
     static let title: LocalizedStringResource = "Open Earshot Now Playing"
     static let description = IntentDescription("Open the Now Playing screen on Apple Watch.")
     static var openAppWhenRun: Bool { true }
 
     func perform() async throws -> some IntentResult {
-        UserDefaults.standard.set("now-playing", forKey: "watchPendingDestination")
+        await MainActor.run { WatchNavigationRequest.openNowPlaying() }
         return .result()
     }
 }

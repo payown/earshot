@@ -24,4 +24,53 @@ final class EarshotWatchTests: XCTestCase {
                                                          id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
         XCTAssertEqual(filename, "00000000-0000-0000-0000-000000000001.m4a")
     }
+
+    func testStorageReserveDoesNotRequireDownloadSizeTwice() {
+        XCTAssertTrue(WatchStoragePolicy.hasReserve(availableBytes: 100 * 1_024 * 1_024))
+        XCTAssertFalse(WatchStoragePolicy.hasReserve(availableBytes: 40 * 1_024 * 1_024))
+        XCTAssertTrue(WatchStoragePolicy.hasReserve(availableBytes: 0))
+    }
+
+    func testNewPlaybackRequestInvalidatesEarlierStartup() {
+        var requests = WatchPlaybackRequestGate()
+        let first = requests.begin()
+        let second = requests.begin()
+        XCTAssertFalse(requests.owns(first))
+        XCTAssertTrue(requests.owns(second))
+        requests.invalidate()
+        XCTAssertFalse(requests.owns(second))
+    }
+
+    func testShortcutDestinationCanBeConsumedAfterHomeIsAlreadyMounted() {
+        let suite = "WatchNavigationRequestTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        WatchNavigationRequest.openNowPlaying(defaults: defaults)
+        XCTAssertTrue(WatchNavigationRequest.consumeNowPlaying(defaults: defaults))
+        XCTAssertFalse(WatchNavigationRequest.consumeNowPlaying(defaults: defaults))
+    }
+
+    func testSpokenPlaybackDeviceReflectsPausedAndTransferredStates() {
+        XCTAssertEqual(WatchPlaybackDeviceStatus.spokenText(watchPlaying: true, phonePlaying: false),
+                       "Audio is playing on Apple Watch")
+        XCTAssertEqual(WatchPlaybackDeviceStatus.spokenText(watchPlaying: false, phonePlaying: false),
+                       "Audio is paused on Apple Watch")
+        XCTAssertEqual(WatchPlaybackDeviceStatus.spokenText(watchPlaying: false, phonePlaying: true),
+                       "Audio is playing on iPhone")
+    }
+
+    func testHandoffUsesFreshMatchingPhoneStateAndFinalPausedPosition() throws {
+        let snapshot: [String: Any] = ["accepted": true, "owner": "phone", "playing": true,
+                                       "feedURL": "https://example.com/feed", "guid": "one",
+                                       "audioURL": "https://example.com/one.mp3",
+                                       "position": 120.0, "rate": 1.5, "observedAt": 1_000.0]
+        let state = try XCTUnwrap(WatchHandoffSourceState(snapshot, now: 1_002))
+        XCTAssertEqual(state.anticipatedPosition(now: 1_002), 123, accuracy: 0.001)
+        XCTAssertNil(WatchHandoffSourceState(snapshot, now: 1_020))
+        XCTAssertNil(state.pausedPosition(["accepted": true, "owner": "phone", "playing": false,
+                                           "feedURL": state.feedURL, "guid": "another", "position": 140.0]))
+        XCTAssertEqual(state.pausedPosition(["accepted": true, "owner": "phone", "playing": false,
+                                             "feedURL": state.feedURL, "guid": state.guid,
+                                             "position": 140.0]), 140)
+    }
 }

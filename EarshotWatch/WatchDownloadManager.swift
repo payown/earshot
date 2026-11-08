@@ -20,6 +20,14 @@ enum WatchDownloadValidation {
     }
 }
 
+enum WatchStoragePolicy {
+    static let minimumFreeBytes: Int64 = 50 * 1_024 * 1_024
+
+    static func hasReserve(availableBytes: Int64) -> Bool {
+        availableBytes == 0 || availableBytes >= minimumFreeBytes
+    }
+}
+
 @MainActor
 @Observable
 final class WatchDownloadManager {
@@ -76,7 +84,7 @@ final class WatchDownloadManager {
                     throw WatchLibraryError.badResponse
                 }
                 let available = self.availableBytes
-                guard available == 0 || size < available else {
+                guard WatchStoragePolicy.hasReserve(availableBytes: available) else {
                     throw CocoaError(.fileWriteOutOfSpace)
                 }
                 let filename = WatchDownloadValidation.filename(for: url)
