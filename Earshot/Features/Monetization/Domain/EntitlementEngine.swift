@@ -32,7 +32,10 @@ enum EntitlementEngine {
     static func grantsEntitlement(_ fact: EntitlementFact, now: Date = .now) -> Bool {
         guard EarshotPlusProduct.earshotPlusProducts.contains(fact.product) else { return false }
         guard fact.revocationDate == nil else { return false }
-        if let expirationDate = fact.expirationDate, expirationDate <= now { return false }
+        if let expirationDate = fact.expirationDate,
+           expirationDate.timeIntervalSinceReferenceDate <= now.timeIntervalSinceReferenceDate {
+            return false
+        }
         return true
     }
 }

@@ -7,29 +7,8 @@ struct ShowNotesView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                // One Text per paragraph so each is its own VoiceOver element and
-                // the notes can be navigated paragraph by paragraph instead of read
-                // as one continuous block (#547). `id: \.offset` is stable for a
-                // static, read-only list that never reorders.
-                LazyVStack(alignment: .leading, spacing: Spacing.md) {
-                    ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                        Text(paragraph)
-                            .font(.body)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
-                }
-                .padding()
-                // Defense in depth: the builder already drops unsafe schemes, but
-                // scope an explicit policy to the notes so only http(s)/mailto ever
-                // open and anything else is discarded rather than handed to the OS.
-                .environment(\.openURL, OpenURLAction { url in
-                    guard let scheme = url.scheme?.lowercased(),
-                          Self.openableLinkSchemes.contains(scheme) else {
-                        return .discarded
-                    }
-                    return .systemAction
-                })
+                ShowNotesContent(episode: episode)
+                    .padding()
             }
             .navigationTitle("Show notes")
             .navigationBarTitleDisplayMode(.inline)
@@ -39,6 +18,30 @@ struct ShowNotesView: View {
                 }
             }
         }
+    }
+}
+
+/// The same readable, link-safe notes in a sheet or an in-tab detail pane.
+struct ShowNotesContent: View {
+    let episode: Episode
+
+    var body: some View {
+        // One Text per paragraph remains one VoiceOver stop (#547).
+        LazyVStack(alignment: .leading, spacing: Spacing.md) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                Text(paragraph)
+                    .font(.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+        }
+        .environment(\.openURL, OpenURLAction { url in
+            guard let scheme = url.scheme?.lowercased(),
+                  Self.openableLinkSchemes.contains(scheme) else {
+                return .discarded
+            }
+            return .systemAction
+        })
     }
 
     /// Readable show notes split into paragraphs via the shared HTML parser, with

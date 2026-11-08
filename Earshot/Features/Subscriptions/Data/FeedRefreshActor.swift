@@ -1494,7 +1494,9 @@ actor FeedRefreshActor {
     private func seedInbox(_ episodes: [Episode], seedCount: Int, perPodcastCap: Int?, now: Date) {
         // Only non-future episodes are eligible for the inbox (#296).
         let eligible = episodes
-            .filter { ($0.pubDate ?? .distantPast) <= now }
+            .filter {
+                ($0.pubDate ?? .distantPast).timeIntervalSinceReferenceDate <= now.timeIntervalSinceReferenceDate
+            }
             .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
         guard !eligible.isEmpty else { return }
 
@@ -1790,8 +1792,8 @@ actor FeedRefreshActor {
             }
             let pub = item.pubDate ?? .distantPast
             // New = newer than the mark AND not future-dated (#296).
-            let isNewEpisode = pub > mark && pub <= now
-            if isNewEpisode && pub >= newestNewPub {
+            let isNewEpisode = pub > mark && pub.timeIntervalSinceReferenceDate <= now.timeIntervalSinceReferenceDate
+            if isNewEpisode && pub.timeIntervalSinceReferenceDate >= newestNewPub.timeIntervalSinceReferenceDate {
                 newestNewGUID = episode.guid
                 newestNewPub = pub
             }
@@ -1953,7 +1955,7 @@ actor FeedRefreshActor {
         let allNew = parsedEpisodes
             .filter {
                 let pub = $0.pubDate ?? .distantPast
-                return pub > mark && pub <= now
+                return pub > mark && pub.timeIntervalSinceReferenceDate <= now.timeIntervalSinceReferenceDate
             }
             .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
         let raw = AppSettingIdentity.value(
@@ -2046,7 +2048,7 @@ actor FeedRefreshActor {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
             let pub = item.pubDate ?? .distantPast
-            let isNewEpisode = pub > mark && pub <= now
+            let isNewEpisode = pub > mark && pub.timeIntervalSinceReferenceDate <= now.timeIntervalSinceReferenceDate
             if isNewEpisode, selection.filteredGUIDs.contains(item.guid) {
                 episode.inboxDismissed = true
                 modelContext.insert(episode)
@@ -2057,7 +2059,7 @@ actor FeedRefreshActor {
             modelContext.insert(episode)
             if isNewEpisode {
                 genuinelyNew.append(episode)
-                if pub >= newestNewPub {
+                if pub.timeIntervalSinceReferenceDate >= newestNewPub.timeIntervalSinceReferenceDate {
                     newestNewPub = pub
                     newestNewGUID = episode.guid
                 }
@@ -2160,7 +2162,9 @@ actor FeedRefreshActor {
         var resurfaced: [Episode] = []
         for item in items {
             guard let existing = existingByGUID[item.guid] else { continue }
-            guard let newPub = item.pubDate, newPub <= now else { continue }
+            guard let newPub = item.pubDate,
+                  newPub.timeIntervalSinceReferenceDate <= now.timeIntervalSinceReferenceDate
+            else { continue }
             let storedPub = existing.pubDate ?? .distantPast
             guard newPub > storedPub else { continue }
             guard existing.status != .played, existing.queueItem == nil else { continue }
@@ -2409,6 +2413,8 @@ actor FeedRefreshActor {
 
     /// The newest episode pub date that is not in the future, or nil if none.
     private static func latestNonFuturePubDate(_ episodes: [ParsedEpisode], now: Date) -> Date? {
-        episodes.compactMap(\.pubDate).filter { $0 <= now }.max()
+        episodes.compactMap(\.pubDate).filter {
+            $0.timeIntervalSinceReferenceDate <= now.timeIntervalSinceReferenceDate
+        }.max()
     }
 }

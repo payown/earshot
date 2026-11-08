@@ -7,25 +7,33 @@ import SwiftData
 struct NowPlayingBar: View {
     @Environment(PlayerService.self) private var player
     @Environment(\.modelContext) private var context
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var nativeAccessory = false
 
     var body: some View {
         if let title = player.currentTitle {
-            // Four 44pt transport buttons plus the title don't fit one row at the
-            // largest Dynamic Type sizes, where the glyphs grow and the trailing
-            // button would clip below its tap target. ViewThatFits keeps the
-            // single-row layout when it fits and drops to title-over-controls when
-            // it doesn't, so every button keeps a full 44pt target.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    nowPlayingInfo(title: title)
-                    Spacer(minLength: 8)
-                    controls
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    nowPlayingInfo(title: title)
-                    HStack(spacing: 12) {
-                        Spacer(minLength: 0)
-                        controls
+            // The pre-iOS-26 inset can grow vertically at large Dynamic Type
+            // sizes. Its ViewThatFits fallback keeps all buttons reachable.
+            // Native tab accessories have a fixed capsule height, so they use
+            // a single row even when the visible title must truncate.
+            Group {
+                if nativeAccessory {
+                    // The system accessory has a fixed capsule height, including
+                    // beside Duo's vertical bar. Its two-row fallback clips the
+                    // title above that capsule. Keep a single row and let the
+                    // title truncate visually; VoiceOver retains the full label.
+                    horizontalContent(title: title, compact: true)
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        horizontalContent(title: title, compact: false)
+                        VStack(alignment: .leading, spacing: 8) {
+                            nowPlayingInfo(title: title, compact: false)
+                            HStack(spacing: 12) {
+                                Spacer(minLength: 0)
+                                controls
+                            }
+                        }
                     }
                 }
             }
@@ -50,9 +58,26 @@ struct NowPlayingBar: View {
         }
     }
 
+    @ViewBuilder
+    private func horizontalContent(title: String, compact: Bool) -> some View {
+        if compact {
+            HStack(spacing: 12) {
+                nowPlayingInfo(title: title, compact: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                controls
+            }
+        } else {
+            HStack(spacing: 12) {
+                nowPlayingInfo(title: title, compact: false)
+                Spacer(minLength: 8)
+                controls
+            }
+        }
+    }
+
     /// The title/show area, which doubles as the button that opens the expanded
     /// player controls (sleep timer + chapters).
-    private func nowPlayingInfo(title: String) -> some View {
+    private func nowPlayingInfo(title: String, compact: Bool) -> some View {
         Button {
             // Present from RootView's single stable sheet host. This bar is
             // recreated when its tab/safe-area inset refreshes; local @State
@@ -68,13 +93,14 @@ struct NowPlayingBar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.subheadline)
-                        .lineLimit(2)
+                        .lineLimit(compact ? 1 : 2)
                         .foregroundStyle(.primary)
-                    if let artist = player.currentArtist {
+                    if let artist = player.currentArtist,
+                       !compact || !dynamicTypeSize.isAccessibilitySize {
                         Text(artist)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                            .lineLimit(compact ? 1 : 2)
                     }
                 }
             }

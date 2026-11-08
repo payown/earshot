@@ -12,9 +12,12 @@ struct EpisodeListView: View {
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
 
     @State private var showNotesEpisode: Episode?
+    @State private var selectedDetailEpisode: Episode?
+    @State private var compactDetailEpisode: Episode?
     @State private var sharingEpisode: Episode?
     // The episode a pending "Export audio" Quick Action targets (#689). Drives
     // the shared `.episodeAudioExport` download-then-share flow.
@@ -119,9 +122,26 @@ struct EpisodeListView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                header
+        GeometryReader { geometry in
+            let wide = ListDetailLayoutPolicy.usesTwoPanes(
+                width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
+            )
+            HStack(spacing: 0) {
+                List {
+            if wide {
+                Section {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Label("Back to Library shows", systemImage: "chevron.left")
+                    }
+                    .accessibilityIdentifier("library.backToShows")
+                    .markAllPlayedAccessibilityAction(enabled: unplayedCount > 0) {
+                        requestMarkAllPlayed()
+                    }
+                }
+            } else {
+                Section { header }
             }
             Section {
                 Picker("Filter episodes", selection: filterSelection) {
@@ -162,7 +182,7 @@ struct EpisodeListView: View {
             } else {
                 Section {
                     ForEach(visibleEpisodes) { episode in
-                        rowContainer(for: episode)
+                        rowContainer(for: episode, wide: wide)
                             // Lets the rotor mark-played runner hand VoiceOver focus
                             // to this row when its neighbor vanishes (#579).
                             .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
@@ -192,6 +212,28 @@ struct EpisodeListView: View {
                     olderEpisodesControl
                 }
             }
+                }
+                .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                .frame(maxWidth: wide ? nil : .infinity)
+                if wide {
+                    Divider()
+                    Group {
+                        if let episode = selectedDetailEpisode, !episode.isDeleted {
+                            EpisodeDetailPane(episode: episode)
+                        } else {
+                            PodcastDetailPane(podcast: podcast)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .onChange(of: wide) { oldValue, newValue in
+                if oldValue && !newValue, compactDetailEpisode == nil {
+                    compactDetailEpisode = selectedDetailEpisode
+                } else if !oldValue && newValue {
+                    compactDetailEpisode = nil
+                }
+            }
         }
         .task(id: podcast.feedURL) {
             sortOrder = AppSettingsStore(context: context).episodeSortOrder(forFeedURL: podcast.feedURL)
@@ -215,6 +257,12 @@ struct EpisodeListView: View {
         .refreshable { await refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
             .receive(on: DispatchQueue.main)) { note in
+            if EpisodeDetailSelection.isAffected(selectedDetailEpisode, by: note, in: context) {
+                selectedDetailEpisode = nil
+            }
+            if EpisodeDetailSelection.isAffected(compactDetailEpisode, by: note, in: context) {
+                compactDetailEpisode = nil
+            }
             guard let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey]
                     as? PersistentIdentifier,
                   deletedPodcastID == podcast.persistentModelID else { return }
@@ -370,6 +418,7 @@ struct EpisodeListView: View {
             PodcastSettingsView(podcast: podcast)
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .episodeDetailSheet($compactDetailEpisode)
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
@@ -454,7 +503,7 @@ struct EpisodeListView: View {
     /// selection mode (#758, via the shared ``SelectableRow`` scaffold),
     /// otherwise the normal navigate/rotor row with its full Quick Actions.
     @ViewBuilder
-    private func rowContainer(for episode: Episode) -> some View {
+    private func rowContainer(for episode: Episode, wide: Bool) -> some View {
         if selection.isSelecting {
             EpisodeSelectableRow(
                 episode: episode,
@@ -473,6 +522,11 @@ struct EpisodeListView: View {
                     supportsAddToFolder: true,
                     supportsMoveToFolder: true
                 ),
+                onSelect: {
+                    selectedDetailEpisode = episode
+                    if !wide { compactDetailEpisode = episode }
+                },
+                isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
                 performAction: { action in perform(action, for: episode) }
             )
         }

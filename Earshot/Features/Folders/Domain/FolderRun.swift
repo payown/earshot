@@ -22,7 +22,9 @@ struct FolderRunCandidate: Sendable {
     /// Inbox dismissal, Queue age/caps, download state, and saved position are
     /// intentionally not inputs. None of them excludes an unheard episode.
     func isEligible(at date: Date) -> Bool {
-        !isPlayed && (publicationDate.map { $0 <= date } ?? true)
+        !isPlayed && (publicationDate.map {
+            $0.timeIntervalSinceReferenceDate <= date.timeIntervalSinceReferenceDate
+        } ?? true)
     }
 }
 

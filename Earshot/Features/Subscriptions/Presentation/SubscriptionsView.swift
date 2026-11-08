@@ -23,6 +23,7 @@ struct SubscriptionsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(DownloadManager.self) private var downloads
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     // A live `@Query<Podcast>` asks Core Data to populate to-many faults for the
     // inverse `episodes` relationship. On the 242K-episode device library that
     // blocks VoiceOver even though this screen never needs those episodes.
@@ -105,7 +106,12 @@ struct SubscriptionsView: View {
         let visible = visiblePodcasts
         let visibleIDs = visible.map(\.persistentModelID)
         Group {
-            List {
+            GeometryReader { geometry in
+                let wide = ListDetailLayoutPolicy.usesTwoPanes(
+                    width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
+                )
+                HStack(spacing: 0) {
+                    List {
                 NavigationLink {
                     PersonalAudioLibraryScreen()
                 } label: {
@@ -144,8 +150,21 @@ struct SubscriptionsView: View {
                             .accessibilityFocused($focusedRowID, equals: podcast.persistentModelID)
                     }
                 }
+                    }
+                    .refreshable { await performRefresh(trigger: .manualPullToRefresh) }
+                    .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                    .frame(maxWidth: wide ? nil : .infinity)
+                    if wide {
+                        Divider()
+                        ContentUnavailableView(
+                            "Select a show",
+                            systemImage: "books.vertical",
+                            description: Text("Choose a show to read its description and browse its episodes.")
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
             }
-            .refreshable { await performRefresh(trigger: .manualPullToRefresh) }
         }
         // Persistent multi-select bar (#757): its primary button's label carries
         // the live count ("Add 3 podcasts to folder") and is the count's
