@@ -90,4 +90,23 @@ final class EarshotWatchTests: XCTestCase {
         XCTAssertTrue(library.podcasts.isEmpty)
     }
 
+    @MainActor
+    func testBookmarkRemovalStagesPayloadBeforeDeletingModel() throws {
+        let library = try WatchLibrary(inMemory: true)
+        let episode = WatchEpisode(feedURL: "https://example.com/feed", guid: "one", title: "One",
+                                   podcastTitle: "Show", audioURL: "https://example.com/one.mp3")
+        library.context.insert(episode)
+        library.persist()
+        library.addBookmark(episode)
+        let bookmark = try XCTUnwrap(library.bookmarks.first)
+        let expectedID = bookmark.id
+        library.removeBookmark(bookmark)
+
+        let events = try library.context.fetch(FetchDescriptor<WatchPendingSyncEvent>())
+        let event = try XCTUnwrap(events.first { $0.kind == "removeBookmark" })
+        let payload = try JSONDecoder().decode(WatchSyncPayload.self, from: event.payload)
+        XCTAssertEqual(payload.bookmarkID, expectedID)
+        XCTAssertTrue(library.bookmarks.isEmpty)
+    }
+
 }

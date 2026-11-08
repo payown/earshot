@@ -400,8 +400,8 @@ final class WatchLibrary {
     }
 
     func removeBookmark(_ bookmark: WatchBookmark) {
-        context.delete(bookmark)
         stageBookmark(bookmark, deleted: true)
+        context.delete(bookmark)
         persist()
         announceAfterCollapse("Bookmark deleted")
     }
