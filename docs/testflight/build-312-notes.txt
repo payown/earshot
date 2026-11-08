@@ -1,5 +1,0 @@
-Chapter 117 - Watch-open crash repair candidate
-
-Please update Earshot from TestFlight without deleting the app. With the iPhone and Apple Watch nearby, open the watch app several times, including while Earshot on iPhone is open and while it is in the background. The iPhone should remain running. Open Up Next on both devices and refresh the queue; adding an episode on either device should appear on the other without a crash. If the iPhone closes, note the exact time, whether the phone app was foregrounded, and the build number. We will inspect the device crash report.
-
-This build recompiles the paired queue validator implicated in the build 311 iPhone crash reports and rejects oversized queue responses before decoding. Build 311 was removed from public beta testing while the replacement is verified. Other watch features remain as in build 311. Physical paired-device and VoiceOver behavior still need confirmation.
