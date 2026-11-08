@@ -221,6 +221,8 @@ final class WatchPlayer {
             isPlaying = false
             episode?.isPlayed = true
             episode?.inboxDismissed = true
+            episode?.playedUpdatedAt = .now
+            episode?.inboxDismissedUpdatedAt = .now
             savePosition()
             status = "Episode finished"
             publishNowPlaying()
@@ -229,8 +231,10 @@ final class WatchPlayer {
     }
 
     private func savePosition() {
+        let previous = episode?.positionSeconds
         episode?.positionSeconds = positionSeconds
         episode?.updatedAt = .now
+        if let episode { library.stageListeningPosition(episode, previousPosition: previous) }
         library.persist()
     }
 
