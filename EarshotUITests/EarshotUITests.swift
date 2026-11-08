@@ -70,6 +70,42 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(secondShow.isSelected, "Switching tabs should retain the selected show")
     }
 
+    func testIPadSearchSwitchesPodcastDetails() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Search detail columns require an iPad layout")
+        }
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        if os.majorVersion == 26 && os.minorVersion == 0 {
+            throw XCTSkip("iPadOS 26.0 simulator aborts in UIKit SearchBar when switching results")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        let searchButton = app.buttons["Search your library"]
+        XCTAssertTrue(searchButton.waitForExistence(timeout: 15), app.debugDescription)
+        searchButton.tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        field.tap()
+        field.typeText("e")
+        let firstShow = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        let secondShow = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Our Perspective"
+        )).firstMatch
+        XCTAssertTrue(firstShow.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(secondShow.exists)
+        firstShow.tap()
+        let firstEpisode = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        XCTAssertTrue(firstEpisode.waitForExistence(timeout: 5), app.debugDescription)
+        secondShow.tap()
+        XCTAssertTrue(secondShow.isSelected, "The new podcast result should be selected")
+        XCTAssertFalse(firstEpisode.exists, "Switching search results must replace the episode data source")
+    }
+
     func testIPadLibraryVoiceOverReadsSelectedSidebarShow() throws {
         guard UIDevice.current.userInterfaceIdiom == .pad, #available(iOS 27.0, *) else {
             throw XCTSkip("VoiceOver sidebar automation requires iPadOS 27")
