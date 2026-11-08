@@ -242,22 +242,6 @@ final class WatchPlayer {
         publishNowPlaying()
     }
 
-    /// Reconcile to the phone's position at its acknowledged pause, after watch
-    /// startup and buffering have completed. Do not claim transfer if seeking fails.
-    func alignToPausedSource(_ seconds: Double) async -> Bool {
-        guard hasLoadedItem, seconds.isFinite, seconds >= 0 else { return false }
-        let target = CMTime(seconds: seconds, preferredTimescale: 600)
-        guard await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) else {
-            return false
-        }
-        let actual = player.currentTime().seconds
-        guard actual.isFinite, abs(actual - seconds) <= 2 else { return false }
-        positionSeconds = actual
-        savePosition()
-        publishNowPlaying()
-        return true
-    }
-
     func skipBackward() async { await seek(to: positionSeconds - Double(library.skipBackward)) }
     func skipForward() async { await seek(to: positionSeconds + Double(library.skipForward)) }
 

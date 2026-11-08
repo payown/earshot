@@ -570,6 +570,7 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
                    !PhonePlaybackAckPolicy.matches(player.nowPlayingEpisode, feedURL: feedURL, guid: guid) {
                     return ["accepted": false, "reason": "Phone episode changed"]
                 }
+                if command == "resumeIfEpisode", player.isActuallyPlaying { break }
                 if let rate { player.play(episode, at: max(0, position ?? 0), handoffRate: rate) }
                 else { player.play(episode, at: max(0, position ?? 0)) }
                 var confirmed = false
