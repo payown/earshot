@@ -19,4 +19,9 @@ final class PhonePlaybackAcknowledgementTests: XCTestCase {
         player.isPlaying = true // A request can set this before AVPlayer is ready.
         XCTAssertFalse(player.isActuallyPlaying)
     }
+
+    func testPauseButtonUsesIdempotentPauseCommand() {
+        XCTAssertEqual(PhoneWatchControlView.playbackCommand(isPlaying: true), "pause")
+        XCTAssertEqual(PhoneWatchControlView.playbackCommand(isPlaying: false), "toggle")
+    }
 }

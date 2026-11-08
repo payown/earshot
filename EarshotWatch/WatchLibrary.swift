@@ -415,11 +415,15 @@ final class WatchLibrary {
 
     func playablePhoneEpisode(feedURL: String, guid: String, title: String,
                               podcastTitle: String, audioURL: String) -> WatchEpisode? {
-        if let existing = episodes.first(where: { $0.identity == WatchEpisode.key(feedURL: feedURL, guid: guid) }) {
-            return existing
-        }
         guard let url = URL(string: audioURL), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else {
             return nil
+        }
+        if let existing = episodes.first(where: { $0.identity == WatchEpisode.key(feedURL: feedURL, guid: guid) }) {
+            if existing.audioURL != url.absoluteString {
+                existing.audioURL = url.absoluteString
+                persist()
+            }
+            return existing
         }
         let episode = WatchEpisode(feedURL: feedURL, guid: guid, title: title,
                                    podcastTitle: podcastTitle, audioURL: audioURL)

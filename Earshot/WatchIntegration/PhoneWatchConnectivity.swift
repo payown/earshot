@@ -50,8 +50,8 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
             }
         } errorHandler: { @Sendable [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.watchStatus = "Apple Watch did not confirm the request. Its playback is unchanged."
-                AccessibilityNotification.Announcement("Apple Watch did not confirm the request. Its playback is unchanged.").post()
+                self?.watchStatus = "Apple Watch playback is unconfirmed. Refresh its state before retrying."
+                AccessibilityNotification.Announcement("Apple Watch playback is unconfirmed. Refresh its state before retrying.").post()
             }
         }
     }
@@ -215,6 +215,7 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
             "version": 1,
             "owner": "phone",
             "playing": player.isPlaying,
+            "audioReady": player.isActuallyPlaying,
             "position": player.currentWatchSnapshotPosition,
             "rate": player.effectiveRate,
             "observedAt": Date.now.timeIntervalSince1970

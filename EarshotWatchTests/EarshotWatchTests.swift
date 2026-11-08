@@ -117,6 +117,7 @@ final class EarshotWatchTests: XCTestCase {
 
     func testHandoffRejectsStaleOrUnacknowledgedPhoneState() {
         let good: [String: Any] = ["owner": "phone", "accepted": true, "playing": true,
+                                   "audioReady": true,
                                    "feedURL": "https://example.com/feed", "guid": "one"]
         XCTAssertTrue(WatchHandoffDecision.phoneConfirmed(good, feedURL: "https://example.com/feed", guid: "one"))
         var stale = good
@@ -125,6 +126,70 @@ final class EarshotWatchTests: XCTestCase {
         var rejected = good
         rejected["accepted"] = false
         XCTAssertFalse(WatchHandoffDecision.phoneConfirmed(rejected, feedURL: "https://example.com/feed", guid: "one"))
+        var buffering = good
+        buffering["audioReady"] = false
+        XCTAssertFalse(WatchHandoffDecision.phoneConfirmed(buffering, feedURL: "https://example.com/feed", guid: "one"))
+    }
+
+    func testHandoffConfirmationCannotPauseNewerWatchRequest() {
+        var gate = WatchPlaybackRequestGate()
+        let source = gate.begin()
+        XCTAssertTrue(WatchHandoffDecision.mayPauseWatch(
+            requestOwned: gate.owns(source), identity: "one", expectedIdentity: "one"))
+        gate.begin()
+        XCTAssertFalse(WatchHandoffDecision.mayPauseWatch(
+            requestOwned: gate.owns(source), identity: "one", expectedIdentity: "one"))
+        XCTAssertFalse(WatchHandoffDecision.mayPauseWatch(
+            requestOwned: true, identity: "two", expectedIdentity: "one"))
+    }
+
+    func testRestoredPlaybackUsesReconciledPositionUntilItemLoads() {
+        XCTAssertEqual(WatchResumePosition.select(hasLoadedItem: false, cached: 120, persisted: 600), 600)
+        XCTAssertEqual(WatchResumePosition.select(hasLoadedItem: true, cached: 120, persisted: 600), 120)
+    }
+
+    func testCompletedEpisodeCannotAutoAdvanceAfterNewRequestOrPause() {
+        var gate = WatchPlaybackRequestGate()
+        gate.invalidate()
+        let completion = gate.current
+        gate.invalidate()
+        XCTAssertFalse(gate.owns(completion))
+        let nextCompletion = gate.current
+        gate.begin()
+        XCTAssertFalse(gate.owns(nextCompletion))
+    }
+
+    @MainActor
+    func testLifecycleWithoutPlaybackPreservesReconciledPosition() throws {
+        let library = try WatchLibrary(inMemory: true)
+        let episode = try XCTUnwrap(library.playablePhoneEpisode(feedURL: "https://example.com/feed", guid: "one",
+            title: "One", podcastTitle: "Show", audioURL: "https://example.com/one.mp3"))
+        episode.positionSeconds = 120
+        library.persist()
+        let player = WatchPlayer(library: library)
+        episode.positionSeconds = 600
+        player.saveForLifecycle()
+        XCTAssertEqual(episode.positionSeconds, 600)
+    }
+
+    @MainActor
+    func testPhoneDownloadRequestRefreshesExistingSignedAudioAddress() throws {
+        let library = try WatchLibrary(inMemory: true)
+        let old = try XCTUnwrap(library.playablePhoneEpisode(feedURL: "https://example.com/feed", guid: "one",
+            title: "One", podcastTitle: "Show", audioURL: "https://example.com/one.mp3?token=old"))
+        let refreshed = try XCTUnwrap(library.playablePhoneEpisode(feedURL: old.feedURL, guid: old.guid,
+            title: old.title, podcastTitle: old.podcastTitle,
+            audioURL: "https://example.com/one.mp3?token=new"))
+        XCTAssertTrue(old === refreshed)
+        XCTAssertEqual(refreshed.audioURL, "https://example.com/one.mp3?token=new")
+    }
+
+    func testExpiredWidgetSnapshotReloadsWithSameContent() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        XCTAssertFalse(WatchWidgetSnapshot.shouldReload(changed: false,
+            previousUpdate: now.addingTimeInterval(-60), now: now))
+        XCTAssertTrue(WatchWidgetSnapshot.shouldReload(changed: false,
+            previousUpdate: now.addingTimeInterval(-25 * 60 * 60), now: now))
     }
 
     @MainActor

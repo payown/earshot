@@ -53,8 +53,13 @@ enum WatchHandoffDecision {
         reply["owner"] as? String == "phone" &&
         reply["accepted"] as? Bool == true &&
         reply["playing"] as? Bool == true &&
+        reply["audioReady"] as? Bool == true &&
         (reply["feedURL"] as? String).map { FeedURLIdentity.matches($0, feedURL) } == true &&
         reply["guid"] as? String == guid
+    }
+
+    static func mayPauseWatch(requestOwned: Bool, identity: String?, expectedIdentity: String) -> Bool {
+        requestOwned && identity == expectedIdentity
     }
 }
 
@@ -362,6 +367,8 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         status = "Checking iPhone playback"
         let feedURL = episode.feedURL
         let guid = episode.guid
+        let watchRequest = watchPlayer.currentPlaybackRequest
+        let watchIdentity = episode.identity
         var prepare: [String: Any] = ["feedURL": feedURL, "guid": guid]
         prepare["version"] = 1
         prepare["id"] = UUID().uuidString
@@ -403,7 +410,6 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                         guard let self else { return }
                         self.pending = false
                         if confirmed {
-                            watchPlayer.pause(announce: false)
                             self.phoneAvailable = true
                             self.phonePlaying = true
                             self.phoneEpisodeTitle = title
@@ -414,7 +420,14 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                             self.phonePodcastTitle = podcastTitle
                             self.phoneRate = Float(confirmedRate)
                             self.phoneObservedAt = Date(timeIntervalSince1970: observedAt)
-                            self.status = "Playback transferred to iPhone"
+                            if WatchHandoffDecision.mayPauseWatch(
+                                requestOwned: watchPlayer.ownsPlaybackRequest(watchRequest),
+                                identity: watchPlayer.episode?.identity, expectedIdentity: watchIdentity) {
+                                watchPlayer.pause(announce: false)
+                                self.status = "Playback transferred to iPhone"
+                            } else {
+                                self.status = "Watch playback changed during transfer. Check both devices."
+                            }
                         } else {
                             self.status = "iPhone did not confirm playback. Apple Watch continues."
                         }
@@ -431,13 +444,31 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                         }
                         WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString,
                                                        "command": "state"]) { @Sendable [weak self] state in
-                            let confirmed = WatchHandoffDecision.phoneConfirmed(state, feedURL: feedURL, guid: guid)
+                            let recovered = WatchHandoffSourceState(state)
+                            let confirmed = recovered != nil &&
+                                WatchHandoffDecision.phoneConfirmed(state, feedURL: feedURL, guid: guid)
                             Task { @MainActor [weak self] in
                                 guard let self else { return }
                                 self.pending = false
-                                if confirmed {
-                                    watchPlayer.pause(announce: false)
-                                    self.status = "iPhone playback confirmed after reconnect. Watch paused."
+                                if confirmed, let recovered {
+                                    self.phoneAvailable = true
+                                    self.phonePlaying = true
+                                    self.phoneEpisodeTitle = recovered.title
+                                    self.phonePosition = recovered.position
+                                    self.phoneFeedURL = recovered.feedURL
+                                    self.phoneGUID = recovered.guid
+                                    self.phoneAudioURL = recovered.audioURL
+                                    self.phonePodcastTitle = recovered.podcastTitle
+                                    self.phoneRate = recovered.rate
+                                    self.phoneObservedAt = Date(timeIntervalSince1970: recovered.observedAt)
+                                    if WatchHandoffDecision.mayPauseWatch(
+                                        requestOwned: watchPlayer.ownsPlaybackRequest(watchRequest),
+                                        identity: watchPlayer.episode?.identity, expectedIdentity: watchIdentity) {
+                                        watchPlayer.pause(announce: false)
+                                        self.status = "iPhone playback confirmed after reconnect. Watch paused."
+                                    } else {
+                                        self.status = "Watch playback changed during transfer. Check both devices."
+                                    }
                                 } else {
                                     self.status = "iPhone playback was not confirmed. Apple Watch continues."
                                 }

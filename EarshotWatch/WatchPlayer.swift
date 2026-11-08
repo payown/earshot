@@ -17,6 +17,12 @@ struct WatchPlaybackRequestGate {
     func owns(_ request: UUID) -> Bool { current == request }
 }
 
+enum WatchResumePosition {
+    static func select(hasLoadedItem: Bool, cached: Double, persisted: Double) -> Double {
+        hasLoadedItem ? cached : persisted
+    }
+}
+
 enum WatchPlaybackSource {
     static func choose(local: URL?, remoteAddress: String) -> URL? {
         if let local, FileManager.default.fileExists(atPath: local.path) { return local }
@@ -204,10 +210,14 @@ final class WatchPlayer {
     }
 
     func ownsPlaybackRequest(_ request: UUID) -> Bool { playbackRequests.owns(request) }
+    var currentPlaybackRequest: UUID { playbackRequests.current }
 
     func toggle() async {
         if isPlaying { pause() }
-        else if let episode { await play(episode, at: positionSeconds) }
+        else if let episode {
+            await play(episode, at: WatchResumePosition.select(
+                hasLoadedItem: hasLoadedItem, cached: positionSeconds, persisted: episode.positionSeconds))
+        }
     }
 
     func seek(to seconds: Double) async {
@@ -309,6 +319,7 @@ final class WatchPlayer {
         }
         if durationSeconds > 0, seconds >= durationSeconds - 1, isPlaying {
             playbackRequests.invalidate()
+            let completionRequest = playbackRequests.current
             isPlaying = false
             episode?.isPlayed = true
             episode?.inboxDismissed = true
@@ -321,7 +332,12 @@ final class WatchPlayer {
             if let episode {
                 let next = library.queue.first { $0.identity != episode.identity }
                 if episode.queuePosition != nil { library.removeFromQueue(episode, announce: false) }
-                if let next { Task { @MainActor [weak self] in await self?.play(next) } }
+                if let next {
+                    Task { @MainActor [weak self] in
+                        guard let self, self.playbackRequests.owns(completionRequest) else { return }
+                        await self.play(next)
+                    }
+                }
             }
         }
     }
@@ -334,7 +350,7 @@ final class WatchPlayer {
         library.persist()
     }
 
-    func saveForLifecycle() { if episode != nil { savePosition() } }
+    func saveForLifecycle() { if isPlaying { savePosition() } }
 
     private func handleInterruption(_ raw: UInt?) {
         guard let raw,
