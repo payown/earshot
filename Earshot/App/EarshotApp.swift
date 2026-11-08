@@ -1205,6 +1205,7 @@ final class AppRuntime {
     func activateProcessServices() async {
         guard mode != .testHost, !processServicesStarted else { return }
         processServicesStarted = true
+        PhoneWatchConnectivity.shared.start(runtime: self)
         UNUserNotificationCenter.current().delegate = notificationDelegate
         await NotificationService().registerCategories()
         if CloudKitLaunchPolicy.isMirroringEnabled() {
