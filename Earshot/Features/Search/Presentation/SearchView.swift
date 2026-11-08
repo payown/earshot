@@ -185,6 +185,90 @@ struct SearchView<HeaderContent: View>: View {
                 width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
             )
             HStack(spacing: 0) {
+                resultsList(wide: wide)
+                .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                .frame(maxWidth: wide ? nil : .infinity)
+                if wide {
+                    Divider()
+                    Group {
+                        if let episode = selectedSearchEpisode, !episode.isDeleted {
+                            EpisodeDetailPane(episode: episode)
+                        } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
+                            EpisodeListView(podcast: podcast)
+                        } else {
+                            ContentUnavailableView(
+                                "Select a result",
+                                systemImage: "magnifyingglass",
+                                description: Text("Choose a podcast or episode to inspect it while keeping your search results.")
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .onChange(of: wide) { oldValue, newValue in
+                if oldValue && !newValue {
+                    if let episode = selectedSearchEpisode, !episode.isDeleted {
+                        compactSearchEpisode = episode
+                    } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
+                        compactSearchPodcast = podcast
+                    }
+                } else if !oldValue && newValue {
+                    compactSearchEpisode = nil
+                    compactSearchPodcast = nil
+                }
+            }
+        }
+        .navigationTitle(titleOverride ?? "Search")
+        .searchable(text: $query, placement: searchPlacement, prompt: searchPrompt)
+        .modifier(SearchFieldFocus(focused: $searchFieldFocused, autoFocus: autoFocusSearch))
+        // The directory search only ever fires in a directory-backed scope (Add
+        // Podcast); in `.library` scope `scheduleDirectorySearch` is never wired
+        // up, so no network request, debounce task, or directory state change can
+        // occur.
+        .onChange(of: query) { _, newValue in
+            scheduleLocalSearch(for: newValue)
+            if scope.showsDirectory { scheduleDirectorySearch(for: newValue) }
+        }
+        .onDisappear {
+            directoryTask?.cancel()
+            localSearchTask?.cancel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
+            .receive(on: DispatchQueue.main)) { note in
+            if EpisodeDetailSelection.isAffected(selectedSearchEpisode, by: note, in: context) {
+                selectedSearchEpisode = nil
+            }
+            if EpisodeDetailSelection.isAffected(compactSearchEpisode, by: note, in: context) {
+                compactSearchEpisode = nil
+            }
+            let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey] as? PersistentIdentifier
+            if deletedPodcastID == nil || selectedSearchPodcast?.persistentModelID == deletedPodcastID {
+                selectedSearchPodcast = nil
+            }
+            if deletedPodcastID == nil || compactSearchPodcast?.persistentModelID == deletedPodcastID {
+                compactSearchPodcast = nil
+            }
+        }
+        .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
+        .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
+        .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+        .sheet(item: $fullPodcastDescription) { PodcastDescriptionView(presentation: $0) }
+        .episodeDetailSheet($compactSearchEpisode)
+        .sheet(item: $compactSearchPodcast) { podcast in
+            NavigationStack {
+                EpisodeListView(podcast: podcast)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { compactSearchPodcast = nil }
+                        }
+                    }
+            }
+        }
+    }
+
+    private func resultsList(wide: Bool) -> some View {
                 List {
             if scope.showsPodcasts && !matchedPodcasts.isEmpty {
                 Section(header: Text("Podcasts").accessibilityAddTraits(.isHeader)) {
@@ -269,70 +353,6 @@ struct SearchView<HeaderContent: View>: View {
             headerContent
                 }
                 .overlay { emptyOverlay }
-                .frame(width: wide ? geometry.size.width * 0.5 : nil)
-                .frame(maxWidth: wide ? nil : .infinity)
-                if wide {
-                    Divider()
-                    Group {
-                        if let episode = selectedSearchEpisode, !episode.isDeleted {
-                            EpisodeDetailPane(episode: episode)
-                        } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
-                            EpisodeListView(podcast: podcast)
-                        } else {
-                            ContentUnavailableView(
-                                "Select a result",
-                                systemImage: "magnifyingglass",
-                                description: Text("Choose a podcast or episode to inspect it while keeping your search results.")
-                            )
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .onChange(of: wide) { oldValue, newValue in
-                if oldValue && !newValue {
-                    if let episode = selectedSearchEpisode, !episode.isDeleted {
-                        compactSearchEpisode = episode
-                    } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
-                        compactSearchPodcast = podcast
-                    }
-                } else if !oldValue && newValue {
-                    compactSearchEpisode = nil
-                    compactSearchPodcast = nil
-                }
-            }
-        }
-        .navigationTitle(titleOverride ?? "Search")
-        .searchable(text: $query, placement: searchPlacement, prompt: searchPrompt)
-        .modifier(SearchFieldFocus(focused: $searchFieldFocused, autoFocus: autoFocusSearch))
-        // The directory search only ever fires in a directory-backed scope (Add
-        // Podcast); in `.library` scope `scheduleDirectorySearch` is never wired
-        // up, so no network request, debounce task, or directory state change can
-        // occur.
-        .onChange(of: query) { _, newValue in
-            scheduleLocalSearch(for: newValue)
-            if scope.showsDirectory { scheduleDirectorySearch(for: newValue) }
-        }
-        .onDisappear {
-            directoryTask?.cancel()
-            localSearchTask?.cancel()
-        }
-        .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
-        .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
-        .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
-        .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
-        .sheet(item: $fullPodcastDescription) { PodcastDescriptionView(presentation: $0) }
-        .sheet(item: $compactSearchEpisode) { EpisodeDetailSheet(episode: $0) }
-        .sheet(item: $compactSearchPodcast) { podcast in
-            NavigationStack {
-                EpisodeListView(podcast: podcast)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { compactSearchPodcast = nil }
-                        }
-                    }
-            }
-        }
     }
 
     private enum LocalSection: String {
