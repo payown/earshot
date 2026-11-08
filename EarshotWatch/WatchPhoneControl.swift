@@ -48,6 +48,16 @@ struct WatchHandoffSourceState: Sendable {
     }
 }
 
+enum WatchHandoffDecision {
+    static func phoneConfirmed(_ reply: [String: Any], feedURL: String, guid: String) -> Bool {
+        reply["owner"] as? String == "phone" &&
+        reply["accepted"] as? Bool == true &&
+        reply["playing"] as? Bool == true &&
+        (reply["feedURL"] as? String).map { FeedURLIdentity.matches($0, feedURL) } == true &&
+        reply["guid"] as? String == guid
+    }
+}
+
 @MainActor
 @Observable
 final class WatchPhoneControl: NSObject, WCSessionDelegate {
