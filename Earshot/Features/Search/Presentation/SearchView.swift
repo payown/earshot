@@ -132,6 +132,7 @@ struct SearchView<HeaderContent: View>: View {
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var query = ""
     @State private var matchedPodcasts: [Podcast] = []
@@ -157,6 +158,11 @@ struct SearchView<HeaderContent: View>: View {
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var fullPodcastDescription: PodcastDescriptionPresentation?
+    @State private var selectedSearchPodcast: Podcast?
+    @State private var selectedSearchEpisode: Episode?
+    @State private var compactSearchPodcast: Podcast?
+    @State private var compactSearchEpisode: Episode?
+    @State private var pendingPodcastSheetPlayID: PersistentIdentifier?
     private let itunes = ITunesSearchService()
 
     /// How long the query must be quiet before a directory request fires. Computed
@@ -175,12 +181,128 @@ struct SearchView<HeaderContent: View>: View {
     }
 
     var body: some View {
-        List {
+        GeometryReader { geometry in
+            let wide = scope == .library && ListDetailLayoutPolicy.usesTwoPanes(
+                width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
+            )
+            HStack(spacing: 0) {
+                resultsList(wide: wide)
+                .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                .frame(maxWidth: wide ? nil : .infinity)
+                if wide {
+                    Divider()
+                    Group {
+                        if let episode = selectedSearchEpisode, !episode.isDeleted {
+                            EpisodeDetailPane(episode: episode)
+                        } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
+                            EpisodeListView(podcast: podcast)
+                                .id(podcast.persistentModelID)
+                        } else {
+                            ContentUnavailableView(
+                                "Select a result",
+                                systemImage: "magnifyingglass",
+                                description: Text("Choose a podcast or episode to inspect it while keeping your search results.")
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .onChange(of: wide) { oldValue, newValue in
+                if oldValue && !newValue {
+                    if let episode = selectedSearchEpisode, !episode.isDeleted {
+                        compactSearchEpisode = episode
+                    } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
+                        compactSearchPodcast = podcast
+                    }
+                } else if !oldValue && newValue {
+                    compactSearchEpisode = nil
+                    compactSearchPodcast = nil
+                }
+            }
+        }
+        .navigationTitle(titleOverride ?? "Search")
+        .searchable(text: $query, placement: searchPlacement, prompt: searchPrompt)
+        .modifier(SearchFieldFocus(focused: $searchFieldFocused, autoFocus: autoFocusSearch))
+        // The directory search only ever fires in a directory-backed scope (Add
+        // Podcast); in `.library` scope `scheduleDirectorySearch` is never wired
+        // up, so no network request, debounce task, or directory state change can
+        // occur.
+        .onChange(of: query) { _, newValue in
+            scheduleLocalSearch(for: newValue)
+            if scope.showsDirectory { scheduleDirectorySearch(for: newValue) }
+        }
+        .onDisappear {
+            directoryTask?.cancel()
+            localSearchTask?.cancel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
+            .receive(on: DispatchQueue.main)) { note in
+            if EpisodeDetailSelection.isAffected(selectedSearchEpisode, by: note, in: context) {
+                selectedSearchEpisode = nil
+            }
+            if EpisodeDetailSelection.isAffected(compactSearchEpisode, by: note, in: context) {
+                compactSearchEpisode = nil
+            }
+            let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey] as? PersistentIdentifier
+            let hasEpisodeIDs = note.userInfo?[PlayerService.willDeleteEpisodeIDsKey] != nil
+            let deletesAll = deletedPodcastID == nil && !hasEpisodeIDs
+            if deletesAll || selectedSearchPodcast?.persistentModelID == deletedPodcastID {
+                selectedSearchPodcast = nil
+            }
+            if deletesAll || compactSearchPodcast?.persistentModelID == deletedPodcastID {
+                compactSearchPodcast = nil
+            }
+        }
+        .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
+        .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
+        .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+        .sheet(item: $fullPodcastDescription) { PodcastDescriptionView(presentation: $0) }
+        .episodeDetailSheet($compactSearchEpisode)
+        .sheet(item: $compactSearchPodcast, onDismiss: {
+            guard let id = pendingPodcastSheetPlayID else { return }
+            pendingPodcastSheetPlayID = nil
+            guard PersistentModelLifetime.episodeExists(id, in: context),
+                  let liveEpisode = context.model(for: id) as? Episode else { return }
+            player.playFromEpisodeList(liveEpisode)
+        }) { podcast in
+            NavigationStack {
+                EpisodeListView(podcast: podcast, onPlayRequest: { episode in
+                    pendingPodcastSheetPlayID = episode.persistentModelID
+                    compactSearchPodcast = nil
+                })
+                    .id(podcast.persistentModelID)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { compactSearchPodcast = nil }
+                        }
+                    }
+            }
+        }
+    }
+
+    private func resultsList(wide: Bool) -> some View {
+                List {
             if scope.showsPodcasts && !matchedPodcasts.isEmpty {
                 Section(header: Text("Podcasts").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedPodcasts) { podcast in
-                        NavigationLink(value: podcast) {
-                            Text(podcast.displayName)
+                        Group {
+                            if wide {
+                                Button {
+                                    selectedSearchPodcast = podcast
+                                    selectedSearchEpisode = nil
+                                } label: {
+                                    Text(podcast.displayName)
+                                }
+                                .modifier(DetailSelectionTrait(
+                                    selected: selectedSearchPodcast?.persistentModelID == podcast.persistentModelID
+                                ))
+                            } else {
+                                NavigationLink(value: podcast) {
+                                    Text(podcast.displayName)
+                                }
+                            }
                         }
                         .accessibilityLabel(PodcastRowSpeech.label(
                             title: podcast.displayName,
@@ -209,6 +331,12 @@ struct SearchView<HeaderContent: View>: View {
                                 episode: episode,
                                 order: quickActions.episodeActions
                             ),
+                            includesPodcastName: wide,
+                            onSelect: wide ? {
+                                selectedSearchEpisode = episode
+                                selectedSearchPodcast = nil
+                            } : nil,
+                            isDetailSelected: wide && selectedSearchEpisode?.persistentModelID == episode.persistentModelID,
                             performAction: { action in perform(action, for: episode) }
                         )
                     }
@@ -237,28 +365,8 @@ struct SearchView<HeaderContent: View>: View {
             // results keeps the search field and its results together; with an empty
             // query these rows naturally become the landing content.
             headerContent
-        }
-        .navigationTitle(titleOverride ?? "Search")
-        .searchable(text: $query, placement: searchPlacement, prompt: searchPrompt)
-        .modifier(SearchFieldFocus(focused: $searchFieldFocused, autoFocus: autoFocusSearch))
-        // The directory search only ever fires in a directory-backed scope (Add
-        // Podcast); in `.library` scope `scheduleDirectorySearch` is never wired
-        // up, so no network request, debounce task, or directory state change can
-        // occur.
-        .onChange(of: query) { _, newValue in
-            scheduleLocalSearch(for: newValue)
-            if scope.showsDirectory { scheduleDirectorySearch(for: newValue) }
-        }
-        .onDisappear {
-            directoryTask?.cancel()
-            localSearchTask?.cancel()
-        }
-        .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
-        .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
-        .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
-        .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
-        .sheet(item: $fullPodcastDescription) { PodcastDescriptionView(presentation: $0) }
-        .overlay { emptyOverlay }
+                }
+                .overlay { emptyOverlay }
     }
 
     private enum LocalSection: String {

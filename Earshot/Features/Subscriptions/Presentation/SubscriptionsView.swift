@@ -16,14 +16,69 @@ private enum PodcastQuickActionEditor: Identifiable {
     }
 }
 
+/// Keeps the show list in the native sidebar while the selected show's
+/// existing episode screen occupies the detail column. SwiftUI collapses the
+/// same selection into a navigation stack when the window becomes compact.
+private struct LibrarySplitLayout<Sidebar: View>: View {
+    @Binding var selectedPodcast: Podcast?
+    @Binding var folderDestination: PodcastFolder?
+    @Environment(\.modelContext) private var context
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
+    @ViewBuilder let sidebar: () -> Sidebar
+
+    var body: some View {
+        NavigationSplitView(
+            columnVisibility: $columnVisibility,
+            preferredCompactColumn: $preferredCompactColumn
+        ) {
+            sidebar()
+        } detail: {
+            NavigationStack {
+                Group {
+                    if let selectedPodcast,
+                   PersistentModelLifetime.podcastExists(selectedPodcast.persistentModelID, in: context) {
+                    EpisodeListView(podcast: selectedPodcast, showsBackToShows: false)
+                        .id(selectedPodcast.persistentModelID)
+                } else {
+                    ContentUnavailableView(
+                        "Select a show",
+                        systemImage: "books.vertical",
+                        description: Text("Choose a show to read its description and browse its episodes.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+                .navigationDestination(item: $folderDestination) { folder in
+                    FolderDetailScreen(folder: folder)
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
+            .receive(on: DispatchQueue.main)) { note in
+            let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey] as? PersistentIdentifier
+            let hasEpisodeIDs = note.userInfo?[PlayerService.willDeleteEpisodeIDsKey] != nil
+            if (deletedPodcastID == nil && !hasEpisodeIDs)
+                || selectedPodcast?.persistentModelID == deletedPodcastID {
+                selectedPodcast = nil
+            }
+        }
+        .onChange(of: selectedPodcast, initial: true) { _, podcast in
+            preferredCompactColumn = podcast == nil ? .sidebar : .detail
+        }
+    }
+}
+
 struct SubscriptionsView: View {
+    @Binding var selectedPodcast: Podcast?
+    @Binding var folderDestination: PodcastFolder?
+    let isReady: Bool
     @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var context
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
     @Environment(DownloadManager.self) private var downloads
     @Environment(EntitlementStore.self) private var entitlements
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     // A live `@Query<Podcast>` asks Core Data to populate to-many faults for the
     // inverse `episodes` relationship. On the 242K-episode device library that
     // blocks VoiceOver even though this screen never needs those episodes.
@@ -105,13 +160,11 @@ struct SubscriptionsView: View {
         let readOnlyIDs = readOnlyPodcastIDs
         let visible = visiblePodcasts
         let visibleIDs = visible.map(\.persistentModelID)
-        Group {
-            GeometryReader { geometry in
-                let wide = ListDetailLayoutPolicy.usesTwoPanes(
-                    width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
-                )
-                HStack(spacing: 0) {
-                    List {
+        LibrarySplitLayout(
+            selectedPodcast: $selectedPodcast,
+            folderDestination: $folderDestination
+        ) {
+            List(selection: $selectedPodcast) {
                 NavigationLink {
                     PersonalAudioLibraryScreen()
                 } label: {
@@ -150,18 +203,81 @@ struct SubscriptionsView: View {
                             .accessibilityFocused($focusedRowID, equals: podcast.persistentModelID)
                     }
                 }
+            }
+            .refreshable { await performRefresh(trigger: .manualPullToRefresh) }
+            .navigationTitle("Library")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Library")
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityFocused($focusLaunchHeading)
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    // Scoped to the user's OWN content — subscribed podcasts, episodes,
+                    // and bookmarks. Does NOT search the directory; finding new podcasts
+                    // lives behind the "Add podcast" button instead.
+                    NavigationLink {
+                        SearchView(scope: .library)
+                    } label: {
+                        Label("Search your library", systemImage: "magnifyingglass")
                     }
-                    .refreshable { await performRefresh(trigger: .manualPullToRefresh) }
-                    .frame(width: wide ? geometry.size.width * 0.5 : nil)
-                    .frame(maxWidth: wide ? nil : .infinity)
-                    if wide {
-                        Divider()
-                        ContentUnavailableView(
-                            "Select a show",
-                            systemImage: "books.vertical",
-                            description: Text("Choose a show to read its description and browse its episodes.")
+                    .keyboardShortcut("f", modifiers: .command)
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        FoldersScreen()
+                    } label: {
+                        Label("Folders", systemImage: "folder")
+                    }
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        Task { await performRefresh(trigger: .manualToolbar) }
+                    } label: {
+                        Label(
+                            refreshInProgress ? "Refreshing library" : "Refresh library",
+                            systemImage: "arrow.clockwise"
                         )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .disabled(refreshInProgress)
+                }
+                if !podcasts.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if selection.isSelecting {
+                            Button("Done") { exitSelection(announce: true) }
+                                .accessibilityHint("Leaves selection mode")
+                        } else {
+                            Menu {
+                                Picker("Sort library", selection: Binding(
+                                    get: { settings.librarySortOrder },
+                                    set: { settings.librarySortOrder = $0 }
+                                )) {
+                                    ForEach(LibrarySortOrder.allCases) { order in
+                                        Text(order.title).tag(order)
+                                    }
+                                }
+                                Toggle("Hide caught-up podcasts", isOn: Binding(
+                                    get: { settings.hideCaughtUpPodcasts },
+                                    set: { settings.hideCaughtUpPodcasts = $0 }
+                                ))
+                                Button { enterSelection() } label: {
+                                    Label("Select podcasts", systemImage: "checkmark.circle")
+                                }
+                                .disabled(visible.isEmpty)
+                            } label: {
+                                Label("Library options", systemImage: "ellipsis.circle")
+                            }
+                            .accessibilityValue(settings.librarySortOrder.title)
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        AddPodcastView()
+                    } label: {
+                        Label("Discover podcasts", systemImage: "plus")
                     }
                 }
             }
@@ -198,15 +314,13 @@ struct SubscriptionsView: View {
         // all swept before the content-area title, so "Library" was announced last;
         // the principal heading is traversed before the trailing items and carries
         // the heading trait. The plain `navigationTitle` keeps back-button identity.
-        .navigationTitle("Library")
-        .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top) {
             LiveFeedRefreshInlineStatus()
                 .accessibilityFocused($focusRefreshStatus)
         }
         .onAppear {
-            // This screen remains alive while Discovery is pushed onto the
-            // Library NavigationStack. Reload when it becomes visible again so
+            // This screen remains alive while Discovery is shown from Library.
+            // Reload when it becomes visible again so
             // podcasts followed from Discovery appear immediately without
             // restoring the expensive live @Query this screen intentionally
             // avoids for large libraries.
@@ -215,84 +329,18 @@ struct SubscriptionsView: View {
             requestLaunchHeadingFocus()
             requestTabEntryFocus()
         }
+        .onChange(of: isReady) { _, ready in
+            guard ready else { return }
+            // Root services can finish after the split sidebar appears. Read
+            // the definitive store snapshot once activation has completed.
+            loadPodcasts()
+            loadPersonalAudioCount()
+        }
         .onChange(of: runtime.launchFocusRequest) { _, _ in
             requestLaunchHeadingFocus()
         }
         .onChange(of: runtime.tabFocusRevision) { _, _ in
             requestTabEntryFocus()
-        }
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Library")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityFocused($focusLaunchHeading)
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                // Scoped to the user's OWN content — subscribed podcasts, episodes,
-                // and bookmarks. Does NOT search the directory; finding new podcasts
-                // lives behind the "Add podcast" button instead.
-                NavigationLink {
-                    SearchView(scope: .library)
-                } label: {
-                    Label("Search your library", systemImage: "magnifyingglass")
-                }
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                NavigationLink {
-                    FoldersScreen()
-                } label: {
-                    Label("Folders", systemImage: "folder")
-                }
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    Task { await performRefresh(trigger: .manualToolbar) }
-                } label: {
-                    Label(
-                        refreshInProgress ? "Refreshing library" : "Refresh library",
-                        systemImage: "arrow.clockwise"
-                    )
-                }
-                .disabled(refreshInProgress)
-            }
-            if !podcasts.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if selection.isSelecting {
-                        Button("Done") { exitSelection(announce: true) }
-                            .accessibilityHint("Leaves selection mode")
-                    } else {
-                        Menu {
-                            Picker("Sort library", selection: Binding(
-                                get: { settings.librarySortOrder },
-                                set: { settings.librarySortOrder = $0 }
-                            )) {
-                                ForEach(LibrarySortOrder.allCases) { order in
-                                    Text(order.title).tag(order)
-                                }
-                            }
-                            Toggle("Hide caught-up podcasts", isOn: Binding(
-                                get: { settings.hideCaughtUpPodcasts },
-                                set: { settings.hideCaughtUpPodcasts = $0 }
-                            ))
-                            Button { enterSelection() } label: {
-                                Label("Select podcasts", systemImage: "checkmark.circle")
-                            }
-                            .disabled(visible.isEmpty)
-                        } label: {
-                            Label("Library options", systemImage: "ellipsis.circle")
-                        }
-                        .accessibilityValue(settings.librarySortOrder.title)
-                    }
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink {
-                    AddPodcastView()
-                } label: {
-                    Label("Discover podcasts", systemImage: "plus")
-                }
-            }
         }
         .sheet(item: $sharingPodcast) { podcast in
             ShareSheet(items: shareItems(for: podcast))
@@ -336,7 +384,6 @@ struct SubscriptionsView: View {
         } message: { podcast in
             Text("This removes \(podcast.displayName) and its episodes. This can't be undone.")
         }
-        .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
         .task {
             sharedRefreshInProgress = BackgroundFeedRefresher.isRefreshInProgress
         }
@@ -767,6 +814,7 @@ struct SubscriptionsView: View {
             // logs failures; announce only on a successful delete (#499/#500).
             if await SubscriptionRepository(context: context).unsubscribeInBackground(podcast) {
                 podcasts.removeAll { $0.persistentModelID == id }
+                if selectedPodcast?.persistentModelID == id { selectedPodcast = nil }
                 Announcer.announce("Unfollowed \(title)")
             }
         }

@@ -1,49 +1,38 @@
-# Earshot (native Swift) — accessibility-core slice
+# Earshot
 
-A native SwiftUI rewrite of Earshot, on the `swift` branch. This is the first
-runnable slice, not the full app. It exists so you can feel native iOS
-accessibility (especially the VoiceOver Actions rotor) on a real device and
-compare it head-to-head with the Flutter build.
+Earshot is a native SwiftUI podcast app for iPhone, iPhone Duo, and iPad. It
+uses one iOS application target and an iOS 18 minimum deployment target.
+Inbox, Queue, Library, Downloads, and Settings remain primary tabs. Content
+within a tab adapts to the available window width; iPad also supports
+multiple windows with shared library data and playback.
 
-## What works in this slice
+The app includes subscriptions, podcast search, show notes, downloads, OPML
+import, a customizable episode Actions rotor, background audio, and system
+media controls. Its interface and testing prioritize VoiceOver.
 
-- Subscribe to a podcast by RSS URL (two sample feeds provided), persisted with
-  SwiftData.
-- Accessible episode list per podcast.
-- **Quick Actions + VoiceOver rotor:** each episode row exposes Play now, Mark
-  as played/unplayed, Open show notes, and Share as VoiceOver custom actions, in
-  the order you set. The first action is the default double-tap.
-- **Reorder in the Actions tab** and the rotor updates **immediately** — no
-  startup seeding, no relaunch. (This is the native payoff over the Flutter
-  build, where the rotor order is locked per launch.)
-- Basic AVFoundation playback with a Now Playing bar (play/pause).
+## Build
 
-## Not in this slice yet
-
-Downloads, queue, inbox, OPML, share extension, search, bookmarks, sleep timer,
-podcast/player screens, settings beyond Quick Actions. These come next,
-feature-by-feature, toward parity with the Flutter app.
-
-## Requirements
-
-- Xcode 16+ (built with Xcode 26.5), iOS 17+ device or simulator.
-
-## Run it
+Use Xcode 27.0 or later with Swift 6.4 and XcodeGen 2.46.0. The project source
+of truth is `project.yml`; run `xcodegen` after changing it. There are no
+third-party Swift dependencies.
 
 ```bash
-# The Xcode project is committed at the repo root, just open it:
-open Earshot.xcodeproj
-# (If you change project.yml, regenerate with: xcodegen generate)
+xcodegen
+xcodebuild build -project Earshot.xcodeproj -scheme Earshot \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
-In Xcode: pick a simulator or your device, press Run. Bundle id is
-`media.payown.earshot.swift`, so it installs alongside the Flutter Earshot.
+The bundle identifier is `media.payown.earshot`. Device builds use the
+repository's existing automatic signing setup.
 
-## What to test (VoiceOver)
+## Adaptive device support
 
-1. Add a sample feed (Podcasts tab → +).
-2. Open a podcast, turn on VoiceOver, focus an episode.
-3. Open the Actions rotor (rotate to "Actions", swipe up/down). Confirm the
-   actions are in the configured order; double-tap the row to run the default.
-4. Go to the Actions tab, tap Edit, drag to reorder, tap Done.
-5. Back on an episode, check the rotor order changed **without relaunching**.
+- [iPhone Duo design and validation](docs/iphone-duo-support.md)
+- [Native iPad design and validation](docs/native-ipad-support.md)
+
+The shared layout responds to content width and Dynamic Type. Duo-specific
+fold behavior stays isolated to the player arrangement. Each iPad scene owns
+its tab and selection state; the app owns one player, download service, and
+model container. The iPad document records simulator coverage and the physical
+device checks still required for windowing, input devices, and VoiceOver.

@@ -57,7 +57,8 @@ struct EpisodeDetailPane: View {
                         .accessibilityAddTraits(.isHeader)
                     ShowNotesContent(episode: episode)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity)
                 .padding()
             }
             .accessibilityIdentifier("episode.detail")
@@ -86,6 +87,7 @@ struct EpisodeDetailSheet: View {
 
 private struct EpisodeDetailSheetModifier: ViewModifier {
     @Binding var episode: Episode?
+    let onPlay: ((Episode) -> Void)?
     @State private var pendingPlayID: PersistentIdentifier?
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
@@ -96,7 +98,11 @@ private struct EpisodeDetailSheetModifier: ViewModifier {
             pendingPlayID = nil
             guard PersistentModelLifetime.episodeExists(id, in: context),
                   let liveEpisode = context.model(for: id) as? Episode else { return }
-            player.playFromEpisodeList(liveEpisode)
+            if let onPlay {
+                onPlay(liveEpisode)
+            } else {
+                player.playFromEpisodeList(liveEpisode)
+            }
         }) { selected in
             EpisodeDetailSheet(episode: selected) {
                 pendingPlayID = selected.persistentModelID
@@ -107,8 +113,11 @@ private struct EpisodeDetailSheetModifier: ViewModifier {
 }
 
 extension View {
-    func episodeDetailSheet(_ episode: Binding<Episode?>) -> some View {
-        modifier(EpisodeDetailSheetModifier(episode: episode))
+    func episodeDetailSheet(
+        _ episode: Binding<Episode?>,
+        onPlay: ((Episode) -> Void)? = nil
+    ) -> some View {
+        modifier(EpisodeDetailSheetModifier(episode: episode, onPlay: onPlay))
     }
 }
 
@@ -156,7 +165,8 @@ struct PodcastDetailPane: View {
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity)
                 .padding()
             }
             .accessibilityIdentifier("library.showDetail")

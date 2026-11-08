@@ -28,9 +28,8 @@ enum TabBadgeFormat {
 /// later layout pass), so we leave the reliable native string.
 ///
 /// The view itself renders nothing; it only needs to be in the hierarchy so its
-/// `updateUIView` runs whenever `count` changes. It finds the tab bar by scanning
-/// the connected window scenes, which assumes the app has a single
-/// `UITabBarController` (true for Earshot's root `TabView`).
+/// `updateUIView` runs whenever `count` changes. Each connected Earshot window
+/// has its own native tab bar, so a badge update applies to all of them.
 struct TabBarBadgeApplier: UIViewRepresentable {
     /// Zero-based index of the tab to badge (Inbox is 0, Queue is 1 in RootView's
     /// TabView). UIKit folds the badge into that tab's VoiceOver announcement
@@ -67,19 +66,20 @@ struct TabBarBadgeApplier: UIViewRepresentable {
             flushScheduled = false
             let counts = pendingCounts
             pendingCounts.removeAll(keepingCapacity: true)
-            guard let tabBar = findTabBar(), let items = tabBar.items else { return }
-            for (index, count) in counts where items.indices.contains(index) {
-                let value = TabBadgeFormat.badgeText(count)
-                if items[index].badgeValue != value { items[index].badgeValue = value }
-            }
-            // Preserve immediate suppression even when counts are unchanged:
-            // UIKit may have recreated the badge during a tab selection.
-            tabBar.layoutIfNeeded()
-            hideBadgeAccessibility(in: tabBar)
-            settledSuppression?.cancel()
-            let suppression = DispatchWorkItem { [weak tabBar] in
-                guard let tabBar else { return }
+            let tabBars = findTabBars()
+            for tabBar in tabBars {
+                guard let items = tabBar.items else { continue }
+                for (index, count) in counts where items.indices.contains(index) {
+                    let value = TabBadgeFormat.badgeText(count)
+                    if items[index].badgeValue != value { items[index].badgeValue = value }
+                }
+                // UIKit may have recreated a badge during a tab selection.
+                tabBar.layoutIfNeeded()
                 hideBadgeAccessibility(in: tabBar)
+            }
+            settledSuppression?.cancel()
+            let suppression = DispatchWorkItem {
+                for tabBar in tabBars { hideBadgeAccessibility(in: tabBar) }
             }
             settledSuppression = suppression
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: suppression)
@@ -113,19 +113,20 @@ struct TabBarBadgeApplier: UIViewRepresentable {
         for sub in view.subviews { setIsAccessibilityElementFalse(in: sub) }
     }
 
-    /// Locates the app's single `UITabBar`. Earshot has exactly one
-    /// `UITabBarController` (the root `TabView`), so the first match is correct.
-    private static func findTabBar() -> UITabBar? {
+    /// Locates the native tab bar in each scene. The counts come from the same
+    /// shared store, while UIKit owns separate badge views per window.
+    private static func findTabBars() -> [UITabBar] {
+        var bars: [UITabBar] = []
         for scene in UIApplication.shared.connectedScenes {
             guard let windowScene = scene as? UIWindowScene else { continue }
             for window in windowScene.windows {
                 if let root = window.rootViewController,
                    let bar = tabBar(in: root) {
-                    return bar
+                    bars.append(bar)
                 }
             }
         }
-        return nil
+        return bars
     }
 
     private static func tabBar(in controller: UIViewController) -> UITabBar? {

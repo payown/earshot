@@ -4,7 +4,19 @@ import SwiftData
 
 struct EpisodeListView: View {
     let podcast: Podcast
+    let showsBackToShows: Bool
+    let onPlayRequest: ((Episode) -> Void)?
     private let nonPlayedBatchLimit = 1_000
+
+    init(
+        podcast: Podcast,
+        showsBackToShows: Bool = true,
+        onPlayRequest: ((Episode) -> Void)? = nil
+    ) {
+        self.podcast = podcast
+        self.showsBackToShows = showsBackToShows
+        self.onPlayRequest = onPlayRequest
+    }
 
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
@@ -66,6 +78,7 @@ struct EpisodeListView: View {
     // (mirrors SubscriptionsView's podcast multi-select, #757).
     @AccessibilityFocusState private var focusedRowID: PersistentIdentifier?
     @AccessibilityFocusState private var focusSelectButton: Bool
+    @AccessibilityFocusState private var focusEmbeddedBackButton: Bool
 
     // Focus targets for the rotor "Mark as played" under the Unheard filter,
     // where the marked row leaves the visible list (#579): the neighbor row, or
@@ -127,108 +140,130 @@ struct EpisodeListView: View {
                 width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
             )
             HStack(spacing: 0) {
-                List {
-            if wide {
-                Section {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Label("Back to Library shows", systemImage: "chevron.left")
-                    }
-                    .accessibilityIdentifier("library.backToShows")
-                    .markAllPlayedAccessibilityAction(enabled: unplayedCount > 0) {
-                        requestMarkAllPlayed()
-                    }
-                }
-            } else {
-                Section { header }
-            }
-            Section {
-                Picker("Filter episodes", selection: filterSelection) {
-                    ForEach(EpisodeListFilter.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityLabel("Filter episodes")
-            }
-            if filteredCount > 0 {
-                Section {
-                    chronologicalSortButton
-                }
-            }
-            if allEpisodeCount == 0 && podcast.refreshedAt == nil {
-                // Freshly-migrated show whose episodes haven't been fetched yet.
-                // Distinguish "still loading" from a genuinely empty feed so a
-                // VoiceOver user isn't told "no episodes" prematurely.
-                Section {
-                    Label("Loading episodes…", systemImage: "arrow.triangle.2.circlepath")
-                        .foregroundStyle(.secondary)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Loading episodes")
-                        .accessibilityAddTraits(.updatesFrequently)
-                }
-            } else if filteredCount == 0 {
-                // Episodes exist but none match the current filter. Give a
-                // descriptive message and a one-tap way out, not a blank list.
-                Section {
-                    emptyFilterState
-                }
-            } else if visibleEpisodes.isEmpty {
-                Section {
-                    NoSearchMatchesView(query: searchText)
-                        .accessibilityFocused($focusEmptyFilter)
-                }
-            } else {
-                Section {
-                    ForEach(visibleEpisodes) { episode in
-                        rowContainer(for: episode, wide: wide)
-                            // Lets the rotor mark-played runner hand VoiceOver focus
-                            // to this row when its neighbor vanishes (#579).
-                            .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
-                            // Same focus id on whichever row variant renders, so
-                            // focus can be moved onto the first row when selection
-                            // mode is entered (#758).
-                            .accessibilityFocused($focusedRowID, equals: episode.persistentModelID)
-                    }
-                    if episodeList?.hasMore == true {
-                        Button(showMoreEpisodesLabel) {
-                            episodeList?.loadMore(
-                                filter: filter,
-                                sort: sortOrder,
-                                searchText: searchText
-                            )
+                if !wide && !showsBackToShows,
+                   let selectedDetailEpisode, !selectedDetailEpisode.isDeleted {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            let episodeID = selectedDetailEpisode.persistentModelID
+                            self.selectedDetailEpisode = nil
+                            DispatchQueue.main.async { focusedEpisode = episodeID }
+                        } label: {
+                            Label("Back to episodes", systemImage: "chevron.left")
                         }
-                    }
-                } header: {
-                    Text(filter == .unheard
-                         ? "^[\(matchingCount) unheard episode](inflect: true)"
-                         : "^[\(matchingCount) episode](inflect: true)")
-                        .accessibilityFocused($focusResultsHeading)
-                }
-            }
-            if episodeList != nil && episodeList?.hasMore == false {
-                Section {
-                    olderEpisodesControl
-                }
-            }
-                }
-                .frame(width: wide ? geometry.size.width * 0.5 : nil)
-                .frame(maxWidth: wide ? nil : .infinity)
-                if wide {
-                    Divider()
-                    Group {
-                        if let episode = selectedDetailEpisode, !episode.isDeleted {
-                            EpisodeDetailPane(episode: episode)
-                        } else {
-                            PodcastDetailPane(podcast: podcast)
-                        }
+                        .accessibilityFocused($focusEmbeddedBackButton)
+                        .padding(.horizontal)
+                        .padding(.top)
+                        EpisodeDetailPane(episode: selectedDetailEpisode, onPlay: onPlayRequest == nil ? nil : {
+                            onPlayRequest?(selectedDetailEpisode)
+                        })
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        if wide && showsBackToShows {
+                            Section {
+                                Button {
+                                    dismiss()
+                                } label: {
+                                    Label("Back to Library shows", systemImage: "chevron.left")
+                                }
+                                .accessibilityIdentifier("library.backToShows")
+                                .markAllPlayedAccessibilityAction(enabled: unplayedCount > 0) {
+                                    requestMarkAllPlayed()
+                                }
+                            }
+                        } else {
+                            Section { header }
+                        }
+                        Section {
+                            Picker("Filter episodes", selection: filterSelection) {
+                                ForEach(EpisodeListFilter.allCases) { option in
+                                    Text(option.title).tag(option)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .accessibilityLabel("Filter episodes")
+                        }
+                        if filteredCount > 0 {
+                            Section {
+                                chronologicalSortButton
+                            }
+                        }
+                        if allEpisodeCount == 0 && podcast.refreshedAt == nil {
+                            // Freshly-migrated show whose episodes haven't been fetched yet.
+                            // Distinguish "still loading" from a genuinely empty feed so a
+                            // VoiceOver user isn't told "no episodes" prematurely.
+                            Section {
+                                Label("Loading episodes…", systemImage: "arrow.triangle.2.circlepath")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel("Loading episodes")
+                                    .accessibilityAddTraits(.updatesFrequently)
+                            }
+                        } else if filteredCount == 0 {
+                            // Episodes exist but none match the current filter. Give a
+                            // descriptive message and a one-tap way out, not a blank list.
+                            Section {
+                                emptyFilterState
+                            }
+                        } else if visibleEpisodes.isEmpty {
+                            Section {
+                                NoSearchMatchesView(query: searchText)
+                                    .accessibilityFocused($focusEmptyFilter)
+                            }
+                        } else {
+                            Section {
+                                ForEach(visibleEpisodes) { episode in
+                                    rowContainer(for: episode, wide: wide)
+                                        // Lets the rotor mark-played runner hand VoiceOver focus
+                                        // to this row when its neighbor vanishes (#579).
+                                        .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
+                                        // Same focus id on whichever row variant renders, so
+                                        // focus can be moved onto the first row when selection
+                                        // mode is entered (#758).
+                                        .accessibilityFocused($focusedRowID, equals: episode.persistentModelID)
+                                }
+                                if episodeList?.hasMore == true {
+                                    Button(showMoreEpisodesLabel) {
+                                        episodeList?.loadMore(
+                                            filter: filter,
+                                            sort: sortOrder,
+                                            searchText: searchText
+                                        )
+                                    }
+                                }
+                            } header: {
+                                Text(filter == .unheard
+                                     ? "^[\(matchingCount) unheard episode](inflect: true)"
+                                     : "^[\(matchingCount) episode](inflect: true)")
+                                    .accessibilityFocused($focusResultsHeading)
+                            }
+                        }
+                        if episodeList != nil && episodeList?.hasMore == false {
+                            Section {
+                                olderEpisodesControl
+                            }
+                        }
+                    }
+                    .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                    .frame(maxWidth: wide ? nil : .infinity)
+                    if wide {
+                        Divider()
+                        Group {
+                            if let episode = selectedDetailEpisode, !episode.isDeleted {
+                                EpisodeDetailPane(episode: episode, onPlay: onPlayRequest == nil ? nil : {
+                                    onPlayRequest?(episode)
+                                })
+                            } else {
+                                PodcastDetailPane(podcast: podcast)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
             .onChange(of: wide) { oldValue, newValue in
-                if oldValue && !newValue, compactDetailEpisode == nil {
+                if showsBackToShows && oldValue && !newValue, compactDetailEpisode == nil {
                     compactDetailEpisode = selectedDetailEpisode
                 } else if !oldValue && newValue {
                     compactDetailEpisode = nil
@@ -418,7 +453,7 @@ struct EpisodeListView: View {
             PodcastSettingsView(podcast: podcast)
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
-        .episodeDetailSheet($compactDetailEpisode)
+        .episodeDetailSheet($compactDetailEpisode, onPlay: onPlayRequest)
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
@@ -524,7 +559,13 @@ struct EpisodeListView: View {
                 ),
                 onSelect: {
                     selectedDetailEpisode = episode
-                    if !wide { compactDetailEpisode = episode }
+                    if !wide {
+                        if showsBackToShows {
+                            compactDetailEpisode = episode
+                        } else {
+                            DispatchQueue.main.async { focusEmbeddedBackButton = true }
+                        }
+                    }
                 },
                 isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
                 performAction: { action in perform(action, for: episode) }
@@ -536,6 +577,10 @@ struct EpisodeListView: View {
     /// many thousands of episodes, so row recycling must not construct the full
     /// UUID/closure action set for every visible row.
     private func perform(_ action: EpisodeAction, for episode: Episode) {
+        if action == .playNow, let onPlayRequest {
+            onPlayRequest(episode)
+            return
+        }
         buildEpisodeActions(
             episode: episode,
             order: [action],
