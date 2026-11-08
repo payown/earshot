@@ -5,11 +5,17 @@ import SwiftData
 struct EpisodeListView: View {
     let podcast: Podcast
     let showsBackToShows: Bool
+    let onPlayRequest: ((Episode) -> Void)?
     private let nonPlayedBatchLimit = 1_000
 
-    init(podcast: Podcast, showsBackToShows: Bool = true) {
+    init(
+        podcast: Podcast,
+        showsBackToShows: Bool = true,
+        onPlayRequest: ((Episode) -> Void)? = nil
+    ) {
         self.podcast = podcast
         self.showsBackToShows = showsBackToShows
+        self.onPlayRequest = onPlayRequest
     }
 
     @Environment(\.modelContext) private var context
@@ -147,7 +153,9 @@ struct EpisodeListView: View {
                         .accessibilityFocused($focusEmbeddedBackButton)
                         .padding(.horizontal)
                         .padding(.top)
-                        EpisodeDetailPane(episode: selectedDetailEpisode)
+                        EpisodeDetailPane(episode: selectedDetailEpisode, onPlay: onPlayRequest == nil ? nil : {
+                            onPlayRequest?(selectedDetailEpisode)
+                        })
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -243,7 +251,9 @@ struct EpisodeListView: View {
                         Divider()
                         Group {
                             if let episode = selectedDetailEpisode, !episode.isDeleted {
-                                EpisodeDetailPane(episode: episode)
+                                EpisodeDetailPane(episode: episode, onPlay: onPlayRequest == nil ? nil : {
+                                    onPlayRequest?(episode)
+                                })
                             } else {
                                 PodcastDetailPane(podcast: podcast)
                             }
@@ -443,7 +453,7 @@ struct EpisodeListView: View {
             PodcastSettingsView(podcast: podcast)
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
-        .episodeDetailSheet($compactDetailEpisode)
+        .episodeDetailSheet($compactDetailEpisode, onPlay: onPlayRequest)
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
@@ -567,6 +577,10 @@ struct EpisodeListView: View {
     /// many thousands of episodes, so row recycling must not construct the full
     /// UUID/closure action set for every visible row.
     private func perform(_ action: EpisodeAction, for episode: Episode) {
+        if action == .playNow, let onPlayRequest {
+            onPlayRequest(episode)
+            return
+        }
         buildEpisodeActions(
             episode: episode,
             order: [action],

@@ -450,7 +450,7 @@ struct RootView: View {
         // from the view tree.
         .modifier(LibrarySearchPresentation(
             episode: $searchNotesEpisode,
-            window: windowReference.value,
+            windowReference: windowReference,
             isReady: rootServicesActivated && !showOnboarding && isFocusedWindow,
             route: routeSearch
         ))

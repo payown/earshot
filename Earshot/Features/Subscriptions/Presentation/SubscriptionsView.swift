@@ -22,6 +22,7 @@ private enum PodcastQuickActionEditor: Identifiable {
 private struct LibrarySplitLayout<Sidebar: View>: View {
     @Binding var selectedPodcast: Podcast?
     @Binding var folderDestination: PodcastFolder?
+    @Environment(\.modelContext) private var context
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
     @ViewBuilder let sidebar: () -> Sidebar
@@ -34,7 +35,9 @@ private struct LibrarySplitLayout<Sidebar: View>: View {
             sidebar()
         } detail: {
             NavigationStack {
-                if let selectedPodcast, !selectedPodcast.isDeleted {
+                Group {
+                    if let selectedPodcast,
+                   PersistentModelLifetime.podcastExists(selectedPodcast.persistentModelID, in: context) {
                     EpisodeListView(podcast: selectedPodcast, showsBackToShows: false)
                         .id(selectedPodcast.persistentModelID)
                 } else {
@@ -44,10 +47,20 @@ private struct LibrarySplitLayout<Sidebar: View>: View {
                         description: Text("Choose a show to read its description and browse its episodes.")
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+                .navigationDestination(item: $folderDestination) { folder in
+                    FolderDetailScreen(folder: folder)
                 }
             }
-            .navigationDestination(item: $folderDestination) { folder in
-                FolderDetailScreen(folder: folder)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
+            .receive(on: DispatchQueue.main)) { note in
+            let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey] as? PersistentIdentifier
+            let hasEpisodeIDs = note.userInfo?[PlayerService.willDeleteEpisodeIDsKey] != nil
+            if (deletedPodcastID == nil && !hasEpisodeIDs)
+                || selectedPodcast?.persistentModelID == deletedPodcastID {
+                selectedPodcast = nil
             }
         }
         .onChange(of: selectedPodcast, initial: true) { _, podcast in

@@ -162,6 +162,7 @@ struct SearchView<HeaderContent: View>: View {
     @State private var selectedSearchEpisode: Episode?
     @State private var compactSearchPodcast: Podcast?
     @State private var compactSearchEpisode: Episode?
+    @State private var pendingPodcastSheetPlayID: PersistentIdentifier?
     private let itunes = ITunesSearchService()
 
     /// How long the query must be quiet before a directory request fires. Computed
@@ -195,6 +196,7 @@ struct SearchView<HeaderContent: View>: View {
                             EpisodeDetailPane(episode: episode)
                         } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
                             EpisodeListView(podcast: podcast)
+                                .id(podcast.persistentModelID)
                         } else {
                             ContentUnavailableView(
                                 "Select a result",
@@ -243,10 +245,12 @@ struct SearchView<HeaderContent: View>: View {
                 compactSearchEpisode = nil
             }
             let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey] as? PersistentIdentifier
-            if deletedPodcastID == nil || selectedSearchPodcast?.persistentModelID == deletedPodcastID {
+            let hasEpisodeIDs = note.userInfo?[PlayerService.willDeleteEpisodeIDsKey] != nil
+            let deletesAll = deletedPodcastID == nil && !hasEpisodeIDs
+            if deletesAll || selectedSearchPodcast?.persistentModelID == deletedPodcastID {
                 selectedSearchPodcast = nil
             }
-            if deletedPodcastID == nil || compactSearchPodcast?.persistentModelID == deletedPodcastID {
+            if deletesAll || compactSearchPodcast?.persistentModelID == deletedPodcastID {
                 compactSearchPodcast = nil
             }
         }
@@ -256,9 +260,19 @@ struct SearchView<HeaderContent: View>: View {
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
         .sheet(item: $fullPodcastDescription) { PodcastDescriptionView(presentation: $0) }
         .episodeDetailSheet($compactSearchEpisode)
-        .sheet(item: $compactSearchPodcast) { podcast in
+        .sheet(item: $compactSearchPodcast, onDismiss: {
+            guard let id = pendingPodcastSheetPlayID else { return }
+            pendingPodcastSheetPlayID = nil
+            guard PersistentModelLifetime.episodeExists(id, in: context),
+                  let liveEpisode = context.model(for: id) as? Episode else { return }
+            player.playFromEpisodeList(liveEpisode)
+        }) { podcast in
             NavigationStack {
-                EpisodeListView(podcast: podcast)
+                EpisodeListView(podcast: podcast, onPlayRequest: { episode in
+                    pendingPodcastSheetPlayID = episode.persistentModelID
+                    compactSearchPodcast = nil
+                })
+                    .id(podcast.persistentModelID)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             Button("Done") { compactSearchPodcast = nil }
