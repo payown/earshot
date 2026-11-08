@@ -51,6 +51,15 @@ final class PlayerService {
     var currentArtist: String?
     /// Whether audio is currently playing.
     var isPlaying = false
+    /// The transport reached audible playback, rather than merely accepting a play request.
+    var isActuallyPlaying: Bool {
+        player.timeControlStatus == .playing && player.currentItem?.status == .readyToPlay &&
+            playbackFailureMessage == nil
+    }
+    var currentWatchSnapshotPosition: Double {
+        let seconds = player.currentTime().seconds
+        return seconds.isFinite && seconds >= 0 ? seconds : currentPositionSeconds
+    }
     /// Current playback position in seconds (kept fresh by the time observer).
     var currentPositionSeconds: Double = 0
     /// Loaded episode duration in seconds, if known.
