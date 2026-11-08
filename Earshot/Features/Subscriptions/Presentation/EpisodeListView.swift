@@ -136,6 +136,9 @@ struct EpisodeListView: View {
                         Label("Back to Library shows", systemImage: "chevron.left")
                     }
                     .accessibilityIdentifier("library.backToShows")
+                    .markAllPlayedAccessibilityAction(enabled: unplayedCount > 0) {
+                        requestMarkAllPlayed()
+                    }
                 }
             } else {
                 Section { header }
@@ -254,6 +257,12 @@ struct EpisodeListView: View {
         .refreshable { await refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
             .receive(on: DispatchQueue.main)) { note in
+            if EpisodeDetailSelection.isAffected(selectedDetailEpisode, by: note, in: context) {
+                selectedDetailEpisode = nil
+            }
+            if EpisodeDetailSelection.isAffected(compactDetailEpisode, by: note, in: context) {
+                compactDetailEpisode = nil
+            }
             guard let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey]
                     as? PersistentIdentifier,
                   deletedPodcastID == podcast.persistentModelID else { return }
@@ -409,7 +418,7 @@ struct EpisodeListView: View {
             PodcastSettingsView(podcast: podcast)
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
-        .sheet(item: $compactDetailEpisode) { EpisodeDetailSheet(episode: $0) }
+        .episodeDetailSheet($compactDetailEpisode)
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
@@ -514,8 +523,8 @@ struct EpisodeListView: View {
                     supportsMoveToFolder: true
                 ),
                 onSelect: {
-                    if wide { selectedDetailEpisode = episode }
-                    else { compactDetailEpisode = episode }
+                    selectedDetailEpisode = episode
+                    if !wide { compactDetailEpisode = episode }
                 },
                 isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
                 performAction: { action in perform(action, for: episode) }

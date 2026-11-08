@@ -199,8 +199,8 @@ struct DownloadsScreen: View {
                                         deferredActions: availableActions(for: episode),
                                         includesPodcastName: true,
                                         onSelect: {
-                                            if wide { selectedDetailEpisode = episode }
-                                            else { compactDetailEpisode = episode }
+                                            selectedDetailEpisode = episode
+                                            if !wide { compactDetailEpisode = episode }
                                         },
                                         isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
                                         performAction: { action in
@@ -330,7 +330,16 @@ struct DownloadsScreen: View {
             }
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
-        .sheet(item: $compactDetailEpisode) { EpisodeDetailSheet(episode: $0) }
+        .episodeDetailSheet($compactDetailEpisode)
+        .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
+            .receive(on: DispatchQueue.main)) { note in
+            if EpisodeDetailSelection.isAffected(selectedDetailEpisode, by: note, in: context) {
+                selectedDetailEpisode = nil
+            }
+            if EpisodeDetailSelection.isAffected(compactDetailEpisode, by: note, in: context) {
+                compactDetailEpisode = nil
+            }
+        }
         .task(id: downloadCandidates.count) {
             storageSummary = await downloads.storageSummary()
         }

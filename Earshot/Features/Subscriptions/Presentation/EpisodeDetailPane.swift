@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 enum ListDetailLayoutPolicy {
     // The list and detail each need a readable column. Accessibility text
@@ -12,10 +13,17 @@ enum ListDetailLayoutPolicy {
 /// calls the shared player service.
 struct EpisodeDetailPane: View {
     let episode: Episode
+    let onPlay: (() -> Void)?
     @Environment(PlayerService.self) private var player
+    @Environment(\.modelContext) private var context
+
+    init(episode: Episode, onPlay: (() -> Void)? = nil) {
+        self.episode = episode
+        self.onPlay = onPlay
+    }
 
     var body: some View {
-        if episode.isDeleted {
+        if !PersistentModelLifetime.episodeExists(episode.persistentModelID, in: context) || episode.isDeleted {
             ContentUnavailableView("Episode unavailable", systemImage: "music.note")
         } else {
             ScrollView {
@@ -34,7 +42,8 @@ struct EpisodeDetailPane: View {
                             .foregroundStyle(.secondary)
                     }
                     Button {
-                        player.playFromEpisodeList(episode)
+                        guard PersistentModelLifetime.episodeExists(episode.persistentModelID, in: context) else { return }
+                        if let onPlay { onPlay() } else { player.playFromEpisodeList(episode) }
                     } label: {
                         Label("Play episode", systemImage: "play.fill")
                             .frame(minHeight: Spacing.minTouchTarget)
@@ -58,11 +67,12 @@ struct EpisodeDetailPane: View {
 
 struct EpisodeDetailSheet: View {
     let episode: Episode
+    let onPlay: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            EpisodeDetailPane(episode: episode)
+            EpisodeDetailPane(episode: episode, onPlay: onPlay)
                 .navigationTitle("Episode details")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -71,6 +81,50 @@ struct EpisodeDetailSheet: View {
                     }
                 }
         }
+    }
+}
+
+private struct EpisodeDetailSheetModifier: ViewModifier {
+    @Binding var episode: Episode?
+    @State private var pendingPlayID: PersistentIdentifier?
+    @Environment(\.modelContext) private var context
+    @Environment(PlayerService.self) private var player
+
+    func body(content: Content) -> some View {
+        content.sheet(item: $episode, onDismiss: {
+            guard let id = pendingPlayID else { return }
+            pendingPlayID = nil
+            guard PersistentModelLifetime.episodeExists(id, in: context),
+                  let liveEpisode = context.model(for: id) as? Episode else { return }
+            player.playFromEpisodeList(liveEpisode)
+        }) { selected in
+            EpisodeDetailSheet(episode: selected) {
+                pendingPlayID = selected.persistentModelID
+                episode = nil
+            }
+        }
+    }
+}
+
+extension View {
+    func episodeDetailSheet(_ episode: Binding<Episode?>) -> some View {
+        modifier(EpisodeDetailSheetModifier(episode: episode))
+    }
+}
+
+/// Clears retained detail selections before a model deletion or reset can
+/// leave a view holding a detached SwiftData object.
+enum EpisodeDetailSelection {
+    static func isAffected(_ episode: Episode?, by note: Notification, in context: ModelContext) -> Bool {
+        guard let episode else { return false }
+        let id = episode.persistentModelID
+        if !PersistentModelLifetime.episodeExists(id, in: context) { return true }
+        if let ids = note.userInfo?[PlayerService.willDeleteEpisodeIDsKey] as? Set<PersistentIdentifier>,
+           ids.contains(id) { return true }
+        if let podcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey] as? PersistentIdentifier {
+            return episode.podcast?.persistentModelID == podcastID
+        }
+        return note.userInfo?[PlayerService.willDeleteEpisodeIDsKey] == nil
     }
 }
 
