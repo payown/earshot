@@ -32,6 +32,7 @@ struct InboxScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     // Folder filter choices (#763). The selected id, rather than a model
     // reference, remains stable across SwiftUI rebuilds. Folder rows use their
@@ -42,6 +43,8 @@ struct InboxScreen: View {
     @State private var selectedFolderID: PersistentIdentifier?
 
     @State private var showNotesEpisode: Episode?
+    @State private var selectedDetailEpisode: Episode?
+    @State private var compactDetailEpisode: Episode?
     @State private var sharingEpisode: Episode?
     // The episode a pending "Export audio" Quick Action targets (#689). Drives
     // the shared `.episodeAudioExport` download-then-share flow.
@@ -152,9 +155,14 @@ struct InboxScreen: View {
         // (#457). With no search active this IS `inbox` (same array, no copy).
         let visible = EpisodeSearchFilter.filter(inbox, query: searchText)
         let displayed = visible.prefix(displayedEpisodeLimit)
-        return VStack(spacing: 0) {
-            inboxFilter
-            Group {
+        return GeometryReader { geometry in
+            let wide = ListDetailLayoutPolicy.usesTwoPanes(
+                width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
+            )
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    inboxFilter
+                    Group {
                 if inbox.isEmpty {
                     ContentUnavailableView(
                         selectedFolder == nil ? "Inbox is empty" : "No new episodes",
@@ -174,7 +182,7 @@ struct InboxScreen: View {
                         // episode Quick Actions. Sighted-only swipes stay gated
                         // below so iOS cannot mirror duplicates into the rotor.
                         ForEach(displayed) { episode in
-                            rowContainer(for: episode)
+                            rowContainer(for: episode, wide: wide)
                                 .accessibilityFocused(
                                     $focusedEpisode, equals: episode.persistentModelID
                                 )
@@ -201,6 +209,32 @@ struct InboxScreen: View {
                             )
                         }
                     }
+                }
+                    }
+                }
+                .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                .frame(maxWidth: wide ? nil : .infinity)
+                if wide {
+                    Divider()
+                    Group {
+                        if let episode = selectedDetailEpisode, !episode.isDeleted {
+                            EpisodeDetailPane(episode: episode)
+                        } else {
+                            ContentUnavailableView(
+                                "Select an episode",
+                                systemImage: "text.alignleft",
+                                description: Text("Choose an Inbox episode to read its information and show notes.")
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .onChange(of: wide) { oldValue, newValue in
+                if oldValue && !newValue, compactDetailEpisode == nil {
+                    compactDetailEpisode = selectedDetailEpisode
+                } else if !oldValue && newValue {
+                    compactDetailEpisode = nil
                 }
             }
         }
@@ -436,6 +470,7 @@ struct InboxScreen: View {
             Text("This removes \(podcast.displayName) and its episodes from your library. This can't be undone.")
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .sheet(item: $compactDetailEpisode) { EpisodeDetailSheet(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
         .episodeAudioExport($exportEpisode)
@@ -498,7 +533,7 @@ struct InboxScreen: View {
     /// selection mode (#758, via the shared ``SelectableRow`` scaffold),
     /// otherwise the normal navigate/rotor + sighted-swipe row.
     @ViewBuilder
-    private func rowContainer(for episode: Episode) -> some View {
+    private func rowContainer(for episode: Episode, wide: Bool) -> some View {
         if selection.isSelecting {
             EpisodeSelectableRow(
                 episode: episode,
@@ -507,7 +542,7 @@ struct InboxScreen: View {
                 onToggle: { selection.toggle(episode.persistentModelID) }
             )
         } else {
-            normalRow(for: episode)
+            normalRow(for: episode, wide: wide)
         }
     }
 
@@ -515,8 +550,8 @@ struct InboxScreen: View {
     /// plus, for sighted users only, the mark-played and unfollow swipes. Selection
     /// mode swaps this out entirely for ``EpisodeSelectableRow`` (#758).
     @ViewBuilder
-    private func normalRow(for episode: Episode) -> some View {
-        let row = episodeRow(for: episode)
+    private func normalRow(for episode: Episode, wide: Bool) -> some View {
+        let row = episodeRow(for: episode, wide: wide)
         if voiceOverEnabled {
             row
         } else {
@@ -562,11 +597,16 @@ struct InboxScreen: View {
         }
     }
 
-    private func episodeRow(for episode: Episode) -> EpisodeRow {
+    private func episodeRow(for episode: Episode, wide: Bool) -> EpisodeRow {
         EpisodeRow(
             episode: episode,
             deferredActions: availableActions(for: episode),
             includesPodcastName: true,
+            onSelect: {
+                if wide { selectedDetailEpisode = episode }
+                else { compactDetailEpisode = episode }
+            },
+            isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
             performAction: { action in perform(action, for: episode) }
         )
     }

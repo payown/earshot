@@ -61,7 +61,7 @@ enum PlaybackHandoffOrdering {
     ) -> Bool {
         guard let existing else { return true }
         if incoming.eventID == existing.eventID { return false }
-        return incoming.eventDate >= existing.eventDate
+        return incoming.eventDate.timeIntervalSinceReferenceDate >= existing.eventDate.timeIntervalSinceReferenceDate
     }
 }
 
