@@ -23,6 +23,7 @@ struct WatchNowPlayingView: View {
                     Button(runtime.player.isPlaying ? "Pause" : "Play") { Task { await runtime.player.toggle() } }
                     Button("Back \(runtime.library.skipBackward) seconds") { Task { await runtime.player.skipBackward() } }
                     Button("Forward \(runtime.library.skipForward) seconds") { Task { await runtime.player.skipForward() } }
+                    Button("Restart episode") { Task { await runtime.player.seek(to: 0) } }
                     WatchSeekControl(player: runtime.player)
                     Text("Elapsed \(Int(runtime.player.positionSeconds / 60)) minutes. Remaining \(Int(max(0, runtime.player.durationSeconds - runtime.player.positionSeconds) / 60)) minutes")
                 }
@@ -43,6 +44,9 @@ struct WatchNowPlayingView: View {
                             Button("\(chapter.title), \(Int(chapter.startTime / 60)) minutes") {
                                 Task { await runtime.player.seek(to: chapter.startTime) }
                             }
+                            .accessibilityAddTraits(runtime.player.currentChapterIndex
+                                .map { runtime.player.chapters[$0].startTime == chapter.startTime } == true
+                                ? .isSelected : [])
                         }
                     }
                 }
@@ -55,6 +59,7 @@ struct WatchNowPlayingView: View {
                 Section("Playback device") {
                     Text(WatchPlaybackDeviceStatus.spokenText(watchPlaying: runtime.player.isPlaying,
                                                              phonePlaying: runtime.phone.phonePlaying))
+                    Text("Audio route: \(runtime.player.routeDescription)")
                     Button("Transfer to iPhone") {
                         runtime.phone.handoffToPhone(episode: episode,
                                                     position: runtime.player.positionSeconds,
@@ -76,12 +81,14 @@ struct WatchSeekControl: View {
         Slider(value: Binding(
             get: { min(player.positionSeconds, max(1, player.durationSeconds)) },
             set: { seconds in Task { await player.seek(to: seconds) } }
-        ), in: 0...max(1, player.durationSeconds), step: 30) {
+        ), in: 0...max(1, player.durationSeconds), step: player.durationSeconds < 30 ? 1 : 30) {
             Text("Playback position")
         }
             .disabled(player.durationSeconds <= 0)
             .accessibilityLabel("Playback position")
             .accessibilityValue("\(Int(player.positionSeconds / 60)) minutes, \(Int(player.positionSeconds) % 60) seconds")
-            .accessibilityHint("Swipe up or down to seek by 30 seconds")
+            .accessibilityHint(player.durationSeconds < 30
+                               ? "Swipe up or down to seek by one second"
+                               : "Swipe up or down to seek by 30 seconds")
     }
 }

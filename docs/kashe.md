@@ -3872,3 +3872,26 @@ Kashe's story:
 Kashe moved through her Inbox on the bus. VoiceOver said an episode title, then made her flick again just to pass a Play button before reaching the next title. The Queue did the same.
 
 After updating, she heard one episode per flick. A double tap opened its notes; Play waited in the row's Actions rotor when she wanted to listen. Renata could still tap the visible Play button beside an episode without opening the notes first.
+
+---
+
+Chapter 113 - Build 306
+
+Earshot now runs natively on iPad while keeping the five primary tabs. On a wide iPad, select an Inbox episode and read its information beside the list. In Library, choose a podcast, then an episode; use Back to Library shows to return. Try Search and Downloads in both portrait and landscape. Make the app window narrower and wider while reading an episode and while audio plays, then check that your place and playback stay intact.
+
+In Settings, choose Open another Earshot window. Browse different tabs and episodes in each window, play an episode, close one window, and check that audio and the remaining window continue. This two-window sequence needs your physical iPad report because simulator automation cannot reliably identify both scenes.
+
+With VoiceOver, check the list-to-detail reading order, selected episode, Play and Pause, and player controls. Try a hardware keyboard and pointer if available. On iPhone Duo, check folded and unfolded lists and playback; on a standard iPhone, check the usual single-column flow. Please include build 306, device, iOS version, window arrangement, and exact spoken sequence or control behavior in any report.
+
+Archive note: The build 306 tester notes above are the recorded chapter; no separate Kashe story text appears in the repository history.
+
+
+---
+
+Chapter 114 - Build 307
+
+Earshot 1.2.6 now includes an independent Apple Watch podcast player alongside the current iPhone Duo and native iPad experience. On Apple Watch, browse Library and Inbox, subscribe to feeds, stream directly, save episodes for offline playback, manage Queue and bookmarks, and use accessible Now Playing controls. When both devices are available, try iPhone Control and transfer playback in each direction. Earshot also offers watch complications, Smart Stack widgets, and playback shortcuts.
+
+This is one integrated hardware evaluation. With VoiceOver enabled, follow the steps in the Earshot Apple Watch device-testing guide: first use the watch without the iPhone, then test offline playback, Bluetooth, background audio, handoff, synchronization and widgets. Please report the step number, device and OS versions, exact spoken text, what audio played, and which connections were available if anything differs from the expected result. The prior 1.2.6 Duo and iPad changes remain included; the iPad Library sidebar fix after build 306 is included as well.
+
+Archive note: Build 309 reused this chapter with only its build number changed in the tester-note heading. No separate Kashe story text appears in the repository history.

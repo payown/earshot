@@ -75,6 +75,20 @@ struct SettingsScreen: View {
                 .accessibilityHint("Wi-Fi restriction and auto-download")
 
                 NavigationLink {
+                    WatchDownloadPickerView()
+                } label: {
+                    Label("Apple Watch Downloads", systemImage: "applewatch")
+                }
+                .accessibilityHint("Choose episodes to download directly on Apple Watch")
+
+                NavigationLink {
+                    PhoneWatchControlView()
+                } label: {
+                    Label("Apple Watch Playback", systemImage: "applewatch")
+                }
+                .accessibilityHint("Control audio playing on your Apple Watch")
+
+                NavigationLink {
                     HistorySettingsView()
                 } label: {
                     Label("History & Stats", systemImage: "clock")

@@ -175,6 +175,7 @@ final class WatchLibrary {
     private(set) var isBusy = false
     private(set) var message: String?
     private(set) var isPlus = false
+    private var entitlementTask: Task<Void, Never>?
     private(set) var episodeActionOrder = ["playNow", "addToQueueBottom", "addToQueueTop", "download", "markPlayed"]
     var isApplyingCloud = false
     var onLocalChange: (() -> Void)?
@@ -214,6 +215,7 @@ final class WatchLibrary {
         if let order = UserDefaults.standard.stringArray(forKey: "watchEpisodeActionOrder"), !order.isEmpty {
             episodeActionOrder = order
         }
+        isPlus = UserDefaults.standard.bool(forKey: "watchPlusEntitled")
         try repairLegacyIdentities()
         reload()
     }
@@ -297,6 +299,17 @@ final class WatchLibrary {
             }
         }
         if context.hasChanges { try context.save() }
+
+    }
+
+    func startObservingEntitlementUpdates() {
+        guard entitlementTask == nil else { return }
+        entitlementTask = Task { @MainActor [weak self] in
+            for await _ in Transaction.updates {
+                guard !Task.isCancelled else { return }
+                await self?.updateEntitlement()
+            }
+        }
     }
 
     func updateEpisodeActionOrder(_ order: [String]) {
@@ -325,6 +338,7 @@ final class WatchLibrary {
             }
         }
         isPlus = found
+        UserDefaults.standard.set(found, forKey: "watchPlusEntitled")
     }
 
     func subscribe(_ address: String) async {
@@ -401,11 +415,15 @@ final class WatchLibrary {
 
     func playablePhoneEpisode(feedURL: String, guid: String, title: String,
                               podcastTitle: String, audioURL: String) -> WatchEpisode? {
-        if let existing = episodes.first(where: { $0.identity == WatchEpisode.key(feedURL: feedURL, guid: guid) }) {
-            return existing
-        }
         guard let url = URL(string: audioURL), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else {
             return nil
+        }
+        if let existing = episodes.first(where: { $0.identity == WatchEpisode.key(feedURL: feedURL, guid: guid) }) {
+            if existing.audioURL != url.absoluteString {
+                existing.audioURL = url.absoluteString
+                persist()
+            }
+            return existing
         }
         let episode = WatchEpisode(feedURL: feedURL, guid: guid, title: title,
                                    podcastTitle: podcastTitle, audioURL: audioURL)
