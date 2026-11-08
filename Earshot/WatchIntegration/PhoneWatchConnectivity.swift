@@ -128,16 +128,18 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
                           FeedURLIdentity.matches(player.nowPlayingEpisode?.podcast?.feedURL ?? "", state.feedURL) else {
                         // Also cancels a delayed cleartext URL resolution before it
                         // can start after this timeout and create double playback.
-                        player.pause()
+                        if PhonePlaybackAckPolicy.matches(player.nowPlayingEpisode,
+                                                          feedURL: state.feedURL, guid: state.guid) { player.pause() }
                         self.handoffPending = false
-                        self.watchStatus = "iPhone could not start audio. Apple Watch continues."
+                        self.watchStatus = "iPhone handoff did not complete. Check both devices."
                         AccessibilityNotification.Announcement(self.watchStatus).post()
                         return
                     }
                     guard WCSession.default.isReachable else {
-                        player.pause()
+                        if PhonePlaybackAckPolicy.matches(player.nowPlayingEpisode,
+                                                          feedURL: state.feedURL, guid: state.guid) { player.pause() }
                         self.handoffPending = false
-                        self.watchStatus = "Apple Watch disconnected before transfer completed. iPhone stopped."
+                        self.watchStatus = "Apple Watch disconnected before transfer completed. Check iPhone playback."
                         AccessibilityNotification.Announcement(self.watchStatus).post()
                         return
                     }
@@ -155,17 +157,19 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
                                 self.watchPlaying = false
                                 self.watchStatus = "Playback transferred to iPhone"
                             } else {
-                                player.pause()
-                                self.watchStatus = "Apple Watch did not confirm pause. iPhone playback stopped."
+                                if PhonePlaybackAckPolicy.matches(player.nowPlayingEpisode,
+                                                                  feedURL: state.feedURL, guid: state.guid) { player.pause() }
+                                self.watchStatus = "Apple Watch did not confirm pause. Check both devices."
                             }
                             AccessibilityNotification.Announcement(self.watchStatus).post()
                         }
                     } errorHandler: { @Sendable [weak self] _ in
                         Task { @MainActor [weak self] in
-                            player.pause()
+                            if PhonePlaybackAckPolicy.matches(player.nowPlayingEpisode,
+                                                              feedURL: state.feedURL, guid: state.guid) { player.pause() }
                             self?.handoffPending = false
-                            self?.watchStatus = "Apple Watch did not confirm pause. iPhone playback stopped."
-                            AccessibilityNotification.Announcement("Apple Watch did not confirm pause. iPhone playback stopped.").post()
+                            self?.watchStatus = "Apple Watch did not confirm pause. Check both devices."
+                            AccessibilityNotification.Announcement("Apple Watch did not confirm pause. Check both devices.").post()
                         }
                     }
                 }

@@ -24,4 +24,12 @@ final class PhonePlaybackAcknowledgementTests: XCTestCase {
         XCTAssertEqual(PhoneWatchControlView.playbackCommand(isPlaying: true), "pause")
         XCTAssertEqual(PhoneWatchControlView.playbackCommand(isPlaying: false), "toggle")
     }
+
+    func testProvisionalHandoffMayOnlyStopMatchingPhoneEpisode() {
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "two", title: "Two", audioURL: "https://example.com/two.mp3")
+        episode.podcast = podcast
+        XCTAssertFalse(PhonePlaybackAckPolicy.matches(episode, feedURL: podcast.feedURL, guid: "one"))
+        XCTAssertTrue(PhonePlaybackAckPolicy.matches(episode, feedURL: podcast.feedURL, guid: "two"))
+    }
 }
