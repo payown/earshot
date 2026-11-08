@@ -1,0 +1,1 @@
+Earshot 1.2.6 adds adaptive iPhone Duo layouts. Please test Now Playing while folding and unfolding, and confirm audio, position, Queue, and navigation stay intact. Try the outer and inner displays, partial folds, landscape, Split View, VoiceOver, and large text. Report the iOS version, device pose, and screen where any control becomes hard to reach.
