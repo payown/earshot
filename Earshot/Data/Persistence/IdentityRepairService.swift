@@ -1,36 +1,6 @@
 import Foundation
 import SwiftData
 
-/// The single feed-URL identity rule used by every subscription entry point.
-///
-/// HTTP scheme and host names are case-insensitive, default ports do not change
-/// the resource, and fragments are never sent to the feed server. Path, query,
-/// percent encoding, and their case remain byte-for-byte intact because feeds
-/// can legitimately distinguish them.
-enum FeedURLIdentity {
-    static func canonical(_ rawValue: String) -> String {
-        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard var components = URLComponents(string: trimmed),
-              let scheme = components.scheme,
-              let host = components.host
-        else { return trimmed }
-
-        let lowercaseScheme = scheme.lowercased()
-        components.scheme = lowercaseScheme
-        components.host = host.lowercased()
-        if (lowercaseScheme == "http" && components.port == 80)
-            || (lowercaseScheme == "https" && components.port == 443) {
-            components.port = nil
-        }
-        components.fragment = nil
-        return components.string ?? trimmed
-    }
-
-    static func matches(_ lhs: String, _ rhs: String) -> Bool {
-        canonical(lhs) == canonical(rhs)
-    }
-}
-
 /// Serializes in-process podcast creation by canonical feed URL. SwiftData's
 /// fetch-then-insert sequence cannot be made atomic across independent model
 /// contexts once CloudKit compatibility removes the database unique constraint.

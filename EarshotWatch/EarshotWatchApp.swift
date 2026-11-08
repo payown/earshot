@@ -7,13 +7,37 @@ final class WatchRuntime {
     let player: WatchPlayer
     let downloads: WatchDownloadManager
     let phone: WatchPhoneControl
+    let cloud: WatchCloudSync?
+    private var syncTask: Task<Void, Never>?
 
     init() throws {
         library = try WatchLibrary()
         player = WatchPlayer(library: library)
         downloads = WatchDownloadManager(library: library)
         phone = WatchPhoneControl()
+        do { cloud = try WatchCloudSync(library: library) }
+        catch {
+            cloud = nil
+            AppLog.data.error("Watch projection unavailable: \(error.localizedDescription, privacy: .public)")
+        }
+        library.onLocalChange = { [weak self] in self?.scheduleSync() }
         WatchRuntimeRegistry.runtime = self
+    }
+
+    func scheduleSync() {
+        guard syncTask == nil else { return }
+        syncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled else { return }
+            self?.cloud?.reconcile()
+            self?.syncTask = nil
+        }
+    }
+
+    func syncNow() {
+        syncTask?.cancel()
+        syncTask = nil
+        cloud?.reconcile()
     }
 }
 
@@ -28,6 +52,7 @@ struct EarshotWatchApp: App {
 }
 
 struct WatchLaunchView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var runtime: WatchRuntime?
     @State private var launchError = false
 
@@ -42,12 +67,16 @@ struct WatchLaunchView: View {
             } else { ProgressView("Opening Earshot") }
         }
         .task { if runtime == nil && !launchError { open() } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active || phase == .background { runtime?.syncNow() }
+        }
     }
 
     private func open() {
         do {
             runtime = try WatchRuntime()
             Task { await runtime?.library.updateEntitlement() }
+            runtime?.syncNow()
         } catch {
             launchError = true
             AppLog.data.error("Watch library open failed: \(error.localizedDescription, privacy: .public)")

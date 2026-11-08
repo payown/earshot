@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SwiftData
 import StoreKit
+import Accessibility
 
 @Model
 final class WatchPodcast {
@@ -11,6 +12,7 @@ final class WatchPodcast {
     var summary: String
     var artworkURL: String?
     var subscribedAt: Date
+    var modifiedAt: Date = Date.distantPast
     var lastRefreshedAt: Date?
 
     init(feedURL: String, title: String, author: String = "", summary: String = "", artworkURL: String? = nil) {
@@ -20,6 +22,7 @@ final class WatchPodcast {
         self.summary = summary
         self.artworkURL = artworkURL
         self.subscribedAt = .now
+        self.modifiedAt = .now
     }
 }
 
@@ -40,8 +43,15 @@ final class WatchEpisode {
     var inboxDismissed: Bool
     var queuePosition: Int?
     var downloadFilename: String?
+    var downloadState: String = "none"
     var downloadError: String?
     var updatedAt: Date
+    var positionUpdatedAt: Date = Date.distantPast
+    var positionResetAt: Date?
+    var playedUpdatedAt: Date = Date.distantPast
+    var inboxDismissedUpdatedAt: Date = Date.distantPast
+    var queueMembershipUpdatedAt: Date = Date.distantPast
+    var queueOrderUpdatedAt: Date = Date.distantPast
 
     init(feedURL: String, parsed: ParsedEpisode, podcastTitle: String) {
         self.identity = Self.key(feedURL: feedURL, guid: parsed.guid)
@@ -62,7 +72,7 @@ final class WatchEpisode {
 
     init(feedURL: String, guid: String, title: String, podcastTitle: String, audioURL: String) {
         self.identity = Self.key(feedURL: feedURL, guid: guid)
-        self.feedURL = feedURL
+        self.feedURL = FeedURLIdentity.canonical(feedURL)
         self.guid = guid
         self.title = title
         self.podcastTitle = podcastTitle
@@ -75,7 +85,7 @@ final class WatchEpisode {
     }
 
     static func key(feedURL: String, guid: String) -> String {
-        feedURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() + "\u{001f}" + guid
+        FeedURLIdentity.canonical(feedURL) + "\u{001f}" + guid
     }
 }
 
@@ -94,6 +104,48 @@ final class WatchBookmark {
         self.positionSeconds = episode.positionSeconds
         self.createdAt = .now
     }
+}
+
+/// A compact, durable outbox. Events are keyed by user-state identity so long
+/// listening sessions do not accumulate a record for every position save.
+@Model
+final class WatchPendingSyncEvent {
+    @Attribute(.unique) var key: String
+    var kind: String
+    var payload: Data
+    var createdAt: Date
+
+    init(key: String, kind: String, payload: Data, createdAt: Date = .now) {
+        self.key = key
+        self.kind = kind
+        self.payload = payload
+        self.createdAt = createdAt
+    }
+}
+
+struct WatchSyncPayload: Codable, Sendable {
+    var feedURL: String = ""
+    var guid: String = ""
+    var title: String = ""
+    var author: String = ""
+    var summary: String = ""
+    var artworkURL: String?
+    var position: Int = 0
+    var isPlayed = false
+    var inboxDismissed = false
+    var isQueued = false
+    var queuePosition = 0
+    var audioURL: String = ""
+    var bookmarkID: String = ""
+    var bookmarkPosition: Int = 0
+    var positionUpdatedAt: Date = Date.distantPast
+    var positionResetAt: Date?
+    var playedUpdatedAt: Date = Date.distantPast
+    var inboxUpdatedAt: Date = Date.distantPast
+    var membershipUpdatedAt: Date = Date.distantPast
+    var orderUpdatedAt: Date = Date.distantPast
+    var settingKey: String = ""
+    var settingValue: String = ""
 }
 
 enum WatchLibraryError: LocalizedError {
@@ -123,20 +175,134 @@ final class WatchLibrary {
     private(set) var isBusy = false
     private(set) var message: String?
     private(set) var isPlus = false
-    func report(_ text: String) { message = text }
-    var skipBackward = 15 { didSet { UserDefaults.standard.set(skipBackward, forKey: "watchSkipBackward") } }
-    var skipForward = 30 { didSet { UserDefaults.standard.set(skipForward, forKey: "watchSkipForward") } }
+    private(set) var episodeActionOrder = ["playNow", "addToQueueBottom", "addToQueueTop", "download", "markPlayed"]
+    var isApplyingCloud = false
+    var onLocalChange: (() -> Void)?
+    func report(_ text: String) {
+        message = text
+        AccessibilityNotification.Announcement(text).post()
+    }
+    var skipBackward = 15 {
+        didSet {
+            UserDefaults.standard.set(skipBackward, forKey: "watchSkipBackward")
+            if !isApplyingCloud, skipBackward != oldValue {
+                stageSetting("skip_back_seconds", value: skipBackward)
+                persist()
+            }
+        }
+    }
+    var skipForward = 30 {
+        didSet {
+            UserDefaults.standard.set(skipForward, forKey: "watchSkipForward")
+            if !isApplyingCloud, skipForward != oldValue {
+                stageSetting("skip_forward_seconds", value: skipForward)
+                persist()
+            }
+        }
+    }
 
-    init() throws {
-        let schema = Schema([WatchPodcast.self, WatchEpisode.self, WatchBookmark.self])
-        let configuration = ModelConfiguration("WatchLocal", schema: schema, cloudKitDatabase: .none)
+    init(inMemory: Bool = false) throws {
+        let schema = Schema([WatchPodcast.self, WatchEpisode.self, WatchBookmark.self, WatchPendingSyncEvent.self])
+        let configuration = ModelConfiguration("WatchLocal", schema: schema,
+                                               isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
         container = try ModelContainer(for: schema, configurations: configuration)
         context = container.mainContext
         let savedBack = UserDefaults.standard.integer(forKey: "watchSkipBackward")
         let savedForward = UserDefaults.standard.integer(forKey: "watchSkipForward")
         if savedBack >= 5 { skipBackward = savedBack }
         if savedForward >= 5 { skipForward = savedForward }
+        if let order = UserDefaults.standard.stringArray(forKey: "watchEpisodeActionOrder"), !order.isEmpty {
+            episodeActionOrder = order
+        }
+        try repairLegacyIdentities()
         reload()
+    }
+
+    /// Upgrade identities written by the older rule that lowercased entire
+    /// feed URLs. Keep the canonical row on collisions and transfer local state
+    /// before deleting duplicates. No media file is removed by this repair.
+    func repairLegacyIdentities() throws {
+        let storedPodcasts = try context.fetch(FetchDescriptor<WatchPodcast>())
+        var podcastKeepers: [(WatchPodcast, String)] = []
+        for (canonical, group) in Dictionary(grouping: storedPodcasts,
+                                             by: { FeedURLIdentity.canonical($0.feedURL) }) {
+            guard let keeper = group.first(where: { $0.feedURL == canonical }) ??
+                    group.max(by: { $0.modifiedAt < $1.modifiedAt }) else { continue }
+            for other in group where other !== keeper {
+                if other.modifiedAt > keeper.modifiedAt {
+                    keeper.title = other.title
+                    keeper.author = other.author
+                    keeper.summary = other.summary
+                    keeper.artworkURL = other.artworkURL
+                    keeper.modifiedAt = other.modifiedAt
+                }
+                keeper.subscribedAt = min(keeper.subscribedAt, other.subscribedAt)
+                context.delete(other)
+            }
+            podcastKeepers.append((keeper, canonical))
+        }
+
+        let storedEpisodes = try context.fetch(FetchDescriptor<WatchEpisode>())
+        let bookmarks = try context.fetch(FetchDescriptor<WatchBookmark>())
+        var episodeKeepers: [(WatchEpisode, String, String)] = []
+        for (identity, group) in Dictionary(grouping: storedEpisodes,
+                                            by: { WatchEpisode.key(feedURL: $0.feedURL, guid: $0.guid) }) {
+            guard let keeper = group.first(where: { $0.identity == identity }) ??
+                    group.max(by: { $0.updatedAt < $1.updatedAt }) else { continue }
+            for episode in group {
+                for bookmark in bookmarks where bookmark.episodeIdentity == episode.identity {
+                    bookmark.episodeIdentity = identity
+                }
+                guard episode !== keeper else { continue }
+                if episode.positionUpdatedAt > keeper.positionUpdatedAt ||
+                    (episode.positionUpdatedAt == keeper.positionUpdatedAt &&
+                     episode.positionSeconds > keeper.positionSeconds) {
+                    keeper.positionSeconds = episode.positionSeconds
+                    keeper.positionUpdatedAt = episode.positionUpdatedAt
+                }
+                if let reset = episode.positionResetAt,
+                   reset > (keeper.positionResetAt ?? .distantPast) { keeper.positionResetAt = reset }
+                if episode.playedUpdatedAt > keeper.playedUpdatedAt {
+                    keeper.isPlayed = episode.isPlayed
+                    keeper.playedUpdatedAt = episode.playedUpdatedAt
+                }
+                if episode.inboxDismissedUpdatedAt > keeper.inboxDismissedUpdatedAt {
+                    keeper.inboxDismissed = episode.inboxDismissed
+                    keeper.inboxDismissedUpdatedAt = episode.inboxDismissedUpdatedAt
+                }
+                if episode.queueMembershipUpdatedAt > keeper.queueMembershipUpdatedAt {
+                    keeper.queuePosition = episode.queuePosition
+                    keeper.queueMembershipUpdatedAt = episode.queueMembershipUpdatedAt
+                }
+                if episode.queueOrderUpdatedAt > keeper.queueOrderUpdatedAt {
+                    keeper.queuePosition = episode.queuePosition
+                    keeper.queueOrderUpdatedAt = episode.queueOrderUpdatedAt
+                }
+                if keeper.downloadFilename == nil { keeper.downloadFilename = episode.downloadFilename }
+                keeper.updatedAt = max(keeper.updatedAt, episode.updatedAt)
+                context.delete(episode)
+            }
+            episodeKeepers.append((keeper, identity, FeedURLIdentity.canonical(keeper.feedURL)))
+        }
+        // Delete collisions before changing unique feed and episode keys.
+        if context.hasChanges { try context.save() }
+        for (podcast, canonical) in podcastKeepers where podcast.feedURL != canonical {
+            podcast.feedURL = canonical
+        }
+        for (episode, identity, canonicalFeed) in episodeKeepers {
+            if episode.identity != identity { episode.identity = identity }
+            if episode.feedURL != canonicalFeed { episode.feedURL = canonicalFeed }
+            if episode.queuePosition != nil, episode.queueMembershipUpdatedAt == .distantPast {
+                stageQueue(episode)
+            }
+        }
+        if context.hasChanges { try context.save() }
+    }
+
+    func updateEpisodeActionOrder(_ order: [String]) {
+        guard !order.isEmpty else { return }
+        episodeActionOrder = order
+        UserDefaults.standard.set(order, forKey: "watchEpisodeActionOrder")
     }
 
     func reload() {
@@ -162,31 +328,36 @@ final class WatchLibrary {
     }
 
     func subscribe(_ address: String) async {
-        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), url.scheme?.lowercased() == "https" else {
+        let canonical = FeedURLIdentity.canonical(address)
+        guard let url = URL(string: canonical), url.scheme?.lowercased() == "https" else {
             message = WatchLibraryError.invalidFeed.localizedDescription
+            AccessibilityNotification.Announcement(message ?? "Invalid feed").post()
             return
         }
-        guard !podcasts.contains(where: { $0.feedURL == url.absoluteString }) else {
-            await refresh(feedURL: url.absoluteString)
+        if let existing = podcasts.first(where: { FeedURLIdentity.matches($0.feedURL, canonical) }) {
+            await refresh(feedURL: existing.feedURL)
             return
         }
         guard isPlus || podcasts.count < 10 else {
             message = WatchLibraryError.subscriptionLimit.localizedDescription
+            AccessibilityNotification.Announcement(message ?? "Subscription limit reached").post()
             return
         }
         isBusy = true
         defer { isBusy = false }
         do {
             let parsed = try await fetchFeed(url)
-            let podcast = WatchPodcast(feedURL: url.absoluteString, title: parsed.title, author: parsed.author ?? "", summary: parsed.description ?? "", artworkURL: parsed.artworkURL)
+            let podcast = WatchPodcast(feedURL: canonical, title: parsed.title, author: parsed.author ?? "", summary: parsed.description ?? "", artworkURL: parsed.artworkURL)
             context.insert(podcast)
-            upsertEpisodes(parsed.episodes, feedURL: url.absoluteString, podcastTitle: parsed.title)
+            upsertEpisodes(parsed.episodes, feedURL: canonical, podcastTitle: parsed.title)
+            stagePodcast(podcast, deleted: false)
             try context.save()
             reload()
             message = "Subscribed to \(parsed.title)"
+            AccessibilityNotification.Announcement(message ?? "Subscribed").post()
         } catch {
             message = error.localizedDescription
+            AccessibilityNotification.Announcement(message ?? "Subscription failed").post()
         }
     }
 
@@ -211,15 +382,17 @@ final class WatchLibrary {
     func unsubscribe(_ podcast: WatchPodcast) {
         let title = podcast.title
         // Keep downloads and listening history, as the phone app does.
+        stagePodcast(podcast, deleted: true)
         context.delete(podcast)
         persist()
         message = "Unfollowed \(title)"
+        AccessibilityNotification.Announcement(message ?? "Unfollowed").post()
     }
 
     func importPhoneFeeds(_ feeds: [WatchFeedSnapshot]) {
-        let known = Set(podcasts.map(\.feedURL))
-        for feed in feeds where !known.contains(feed.feedURL) {
-            context.insert(WatchPodcast(feedURL: feed.feedURL, title: feed.title,
+        let known = Set(podcasts.map { FeedURLIdentity.canonical($0.feedURL) })
+        for feed in feeds where !known.contains(FeedURLIdentity.canonical(feed.feedURL)) {
+            context.insert(WatchPodcast(feedURL: FeedURLIdentity.canonical(feed.feedURL), title: feed.title,
                                         author: feed.author, summary: feed.summary,
                                         artworkURL: feed.artworkURL))
         }
@@ -245,7 +418,24 @@ final class WatchLibrary {
         episode.isPlayed = played
         episode.inboxDismissed = played
         episode.updatedAt = .now
+        if played {
+            episode.positionSeconds = 0
+            episode.positionUpdatedAt = episode.updatedAt
+            episode.positionResetAt = episode.updatedAt
+        }
+        episode.playedUpdatedAt = episode.updatedAt
+        episode.inboxDismissedUpdatedAt = episode.updatedAt
+        stageEpisode(episode)
         persist()
+        announceAfterCollapse(played ? "Marked \(episode.title) played" : "Marked \(episode.title) unplayed")
+    }
+
+    func dismissFromInbox(_ episode: WatchEpisode) {
+        episode.inboxDismissed = true
+        episode.inboxDismissedUpdatedAt = .now
+        stageEpisode(episode)
+        persist()
+        announceAfterCollapse("Removed \(episode.title) from Inbox")
     }
 
     func enqueue(_ episode: WatchEpisode, next: Bool) {
@@ -255,13 +445,23 @@ final class WatchLibrary {
         reordered.insert(episode, at: next ? 0 : reordered.count)
         for (index, item) in reordered.enumerated() { item.queuePosition = index }
         episode.updatedAt = .now
+        episode.queueMembershipUpdatedAt = episode.updatedAt
+        for item in reordered { item.queueOrderUpdatedAt = .now; stageQueue(item) }
         persist()
+        AccessibilityNotification.Announcement("Added \(episode.title) to \(next ? "Play Next" : "Play Later")").post()
     }
 
-    func removeFromQueue(_ episode: WatchEpisode) {
+    func removeFromQueue(_ episode: WatchEpisode, announce: Bool = true) {
         episode.queuePosition = nil
-        for (index, item) in queue.enumerated() { item.queuePosition = index }
+        episode.queueMembershipUpdatedAt = .now
+        stageQueue(episode)
+        for (index, item) in queue.enumerated() {
+            item.queuePosition = index
+            item.queueOrderUpdatedAt = .now
+            stageQueue(item)
+        }
         persist()
+        if announce { announceAfterCollapse("Removed \(episode.title) from Queue") }
     }
 
     func moveQueue(_ episode: WatchEpisode, offset: Int) {
@@ -269,17 +469,26 @@ final class WatchLibrary {
         guard let old = list.firstIndex(where: { $0.identity == episode.identity }), list.indices.contains(old + offset) else { return }
         list.swapAt(old, old + offset)
         for (index, item) in list.enumerated() { item.queuePosition = index }
+        for item in list { item.queueOrderUpdatedAt = .now; stageQueue(item) }
         persist()
+        announceAfterCollapse("Moved \(episode.title) \(offset < 0 ? "up" : "down") in Queue")
     }
 
     func addBookmark(_ episode: WatchEpisode) {
-        context.insert(WatchBookmark(episode: episode))
+        let bookmark = WatchBookmark(episode: episode)
+        context.insert(bookmark)
+        stageBookmark(bookmark, deleted: false)
         persist()
+        let minutes = Int(episode.positionSeconds) / 60
+        let seconds = Int(episode.positionSeconds) % 60
+        AccessibilityNotification.Announcement("Bookmarked at \(minutes):\(String(format: "%02d", seconds))").post()
     }
 
     func removeBookmark(_ bookmark: WatchBookmark) {
+        stageBookmark(bookmark, deleted: true)
         context.delete(bookmark)
         persist()
+        announceAfterCollapse("Bookmark deleted")
     }
 
     var queue: [WatchEpisode] {
@@ -295,8 +504,85 @@ final class WatchLibrary {
     var downloads: [WatchEpisode] { episodes.filter { $0.downloadFilename != nil } }
 
     func persist() {
-        do { try context.save(); reload() }
+        do {
+            try context.save()
+            reload()
+            if !isApplyingCloud { onLocalChange?() }
+        }
         catch { message = "Could not save this change. Please try again." }
+    }
+
+    func stageListeningPosition(_ episode: WatchEpisode, previousPosition: Double? = nil) {
+        if let previousPosition, previousPosition > episode.positionSeconds + 2 {
+            episode.positionResetAt = .now
+        }
+        episode.positionUpdatedAt = .now
+        stageEpisode(episode)
+    }
+
+    private func stagePodcast(_ podcast: WatchPodcast, deleted: Bool) {
+        stage(key: "podcast:\(podcast.feedURL)", kind: deleted ? "unfollow" : "follow",
+              payload: WatchSyncPayload(feedURL: podcast.feedURL, title: podcast.title,
+                                        author: podcast.author, summary: podcast.summary,
+                                        artworkURL: podcast.artworkURL))
+    }
+
+    private func stageEpisode(_ episode: WatchEpisode) {
+        stage(key: "episode:\(episode.identity)", kind: "episode",
+              payload: WatchSyncPayload(feedURL: episode.feedURL, guid: episode.guid,
+                                        position: Int(episode.positionSeconds), isPlayed: episode.isPlayed,
+                                        inboxDismissed: episode.inboxDismissed,
+                                        positionUpdatedAt: episode.positionUpdatedAt,
+                                        positionResetAt: episode.positionResetAt,
+                                        playedUpdatedAt: episode.playedUpdatedAt,
+                                        inboxUpdatedAt: episode.inboxDismissedUpdatedAt))
+    }
+
+    private func stageQueue(_ episode: WatchEpisode) {
+        if episode.queuePosition != nil, episode.queueMembershipUpdatedAt == .distantPast {
+            episode.queueMembershipUpdatedAt = WatchQueueResolution.legacyMembershipDate
+        }
+        stage(key: "queue:\(episode.identity)", kind: "queue",
+              payload: WatchSyncPayload(feedURL: episode.feedURL, guid: episode.guid,
+                                        title: episode.title, summary: episode.summary,
+                                        isQueued: episode.queuePosition != nil,
+                                        queuePosition: episode.queuePosition ?? 0,
+                                        audioURL: episode.audioURL,
+                                        membershipUpdatedAt: episode.queueMembershipUpdatedAt,
+                                        orderUpdatedAt: episode.queueOrderUpdatedAt))
+    }
+
+    private func stageBookmark(_ bookmark: WatchBookmark, deleted: Bool) {
+        let parts = bookmark.episodeIdentity.split(separator: "\u{001f}", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        stage(key: "bookmark:\(bookmark.id)", kind: deleted ? "removeBookmark" : "bookmark",
+              payload: WatchSyncPayload(feedURL: parts[0], guid: parts[1],
+                                        title: bookmark.episodeTitle, bookmarkID: bookmark.id,
+                                        bookmarkPosition: Int(bookmark.positionSeconds)))
+    }
+
+    private func stage(key: String, kind: String, payload: WatchSyncPayload) {
+        guard let encoded = try? JSONEncoder().encode(payload) else { return }
+        let descriptor = FetchDescriptor<WatchPendingSyncEvent>(predicate: #Predicate { $0.key == key })
+        if let existing = try? context.fetch(descriptor).first {
+            existing.kind = kind
+            existing.payload = encoded
+            existing.createdAt = .now
+        } else {
+            context.insert(WatchPendingSyncEvent(key: key, kind: kind, payload: encoded))
+        }
+    }
+
+    private func stageSetting(_ key: String, value: Int) {
+        stage(key: "setting:\(key)", kind: "setting",
+              payload: WatchSyncPayload(settingKey: key, settingValue: String(value)))
+    }
+
+    private func announceAfterCollapse(_ message: String) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            AccessibilityNotification.Announcement(message).post()
+        }
     }
 
     private func fetchFeed(_ url: URL) async throws -> ParsedFeed {
