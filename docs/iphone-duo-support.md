@@ -2,12 +2,13 @@
 
 ## Design and SDK
 
-Earshot remains an iPhone app with an iOS 18 minimum deployment target. Its
+At the time of the original Duo work, Earshot was iPhone-only with an iOS 18 minimum deployment target. Its
 existing `WindowGroup` owns one `AppRuntime`, which owns the playback engine,
 download manager, settings, and store. Resizing a scene does not create another
 runtime. This release does not request a second scene or expose a multiwindow
-action. If multiwindow becomes a product feature, shared service ownership and
-SwiftData coordination need a separate design and test pass.
+action. Native iPad support and multiple scenes were added subsequently; see
+[`native-ipad-support.md`](native-ipad-support.md) for the current shared
+architecture and validation limits.
 
 Apple's iOS 27 SDK enables dynamic window resizing on Duo. The iOS 27.1 SDK
 adds full edge-to-edge use and vertical system bars. Earshot uses the native

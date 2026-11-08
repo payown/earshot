@@ -44,4 +44,12 @@ final class NotificationRouter {
     func clear() {
         pendingIntent = nil
     }
+
+    /// Claim an intent once before performing its action. Multiple window
+    /// observers can be notified in the same run-loop turn.
+    func takePendingIntent() -> NotificationIntent? {
+        let intent = pendingIntent
+        pendingIntent = nil
+        return intent
+    }
 }

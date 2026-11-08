@@ -5,25 +5,28 @@ import SwiftData
 private struct PlayerCompletionDismissal: ViewModifier {
     let player: PlayerService
     let settings: SettingsStore
+    @Binding var isPresented: Bool
 
     func body(content: Content) -> some View {
         content.onChange(of: player.completedPlaybackStopID) { _, completionID in
             guard completionID != nil,
                   settings.dismissPlayerWhenPlaybackEnds,
-                  player.pendingFullPlayerPresentation else { return }
-            player.pendingFullPlayerPresentation = false
+                  isPresented else { return }
+            isPresented = false
         }
     }
 }
 
 private struct CleartextPlaybackWarningPresenter: ViewModifier {
     let player: PlayerService
+    let isActiveWindow: Bool
 
     private var isPresented: Binding<Bool> {
         Binding(
-            get: { player.pendingCleartextPlaybackWarning != nil },
+            get: { isActiveWindow && player.pendingCleartextPlaybackWarning != nil },
             set: { isPresented in
-                if !isPresented, player.pendingCleartextPlaybackWarning != nil {
+                if isActiveWindow, !isPresented,
+                   player.pendingCleartextPlaybackWarning != nil {
                     player.cancelPendingCleartextPlayback()
                 }
             }
@@ -266,6 +269,9 @@ struct RootView: View {
     @State private var confirmOPMLReplacement = false
     @State private var confirmUnreadableOPMLReplacement = false
     @State private var rootServicesActivated = false
+    @State private var showsFullPlayer = false
+    @State private var isFocusedWindow = false
+    @State private var windowReference = WeakWindowReference()
 
     /// Which tab is selected. Optional so the first paint can resolve the saved
     /// launch-screen preference synchronously (#492) instead of rendering Inbox
@@ -274,20 +280,28 @@ struct RootView: View {
     /// or the `.task` seeds it from the initial preference. A notification tap can
     /// also set it to switch to Library.
     @State private var selectedTab: RootTab?
+    // SceneStorage is keyed per window. A second Earshot window starts with its
+    // own tab and restores that tab independently of the first window.
+    @SceneStorage("earshot.selectedTab") private var restoredTab = ""
+    @SceneStorage("earshot.libraryPodcastFeedURL") private var restoredLibraryPodcastFeedURL = ""
     @State private var launchPreferences = RootLaunchPreferences()
-    /// Navigation path for the Library tab, so a notification can push a podcast
-    /// detail screen onto it (#72).
-    @State private var libraryPath: [Podcast] = []
+    /// A selection in this window's Library sidebar. The feed URL in
+    /// SceneStorage restores it without sharing navigation between windows.
+    @State private var selectedLibraryPodcast: Podcast?
     @State private var searchNotesEpisode: Episode?
     /// Item-driven folder destination used by Now Playing's "Playing from"
-    /// route. Kept beside (not inside) the podcast-typed path so existing
-    /// notification and screenshot podcast routing stays unchanged.
+    /// route. It presents in the Library detail stack independently of the
+    /// selected podcast.
     @State private var libraryFolderDestination: PodcastFolder?
 
     /// Drives the app-background durability anchor for playback position/stats
     /// (#736): the ~5s tick no longer writes to the store, so persist on
     /// background instead.
     @Environment(\.scenePhase) private var scenePhase
+
+    private var currentTab: RootTab {
+        selectedTab ?? RootTab(rawValue: restoredTab) ?? resolvedLaunchTab
+    }
 
     var body: some View {
         // Live unplayed-inbox count from the same source of truth as the Inbox
@@ -309,9 +323,9 @@ struct RootView: View {
         let appearance = resolvedAppearance
 
         let tabSelection = Binding<RootTab>(
-            get: { selectedTab ?? resolvedLaunchTab },
+            get: { currentTab },
             set: { newTab in
-                let oldTab = selectedTab ?? resolvedLaunchTab
+                let oldTab = currentTab
                 selectedTab = newTab
                 guard oldTab != newTab else { return }
                 switch newTab {
@@ -327,14 +341,14 @@ struct RootView: View {
 
         TabView(selection: tabSelection) {
             NavigationStack {
-                InboxScreen(isActive: (selectedTab ?? resolvedLaunchTab) == .inbox)
+                InboxScreen(isActive: currentTab == .inbox)
             }
             .modifier(TabChrome())
             .tabItem { Label("Inbox", systemImage: "tray") }
             .tag(RootTab.inbox)
 
             NavigationStack {
-                DeferredTabContent(isSelected: (selectedTab ?? resolvedLaunchTab) == .queue) {
+                DeferredTabContent(isSelected: currentTab == .queue) {
                     QueueScreen()
                 }
             }
@@ -342,18 +356,17 @@ struct RootView: View {
             .tabItem { Label("Queue", systemImage: "list.bullet") }
             .tag(RootTab.queue)
 
-            NavigationStack(path: $libraryPath) {
-                SubscriptionsView()
-                    .navigationDestination(item: $libraryFolderDestination) { folder in
-                        FolderDetailScreen(folder: folder)
-                    }
-            }
+            SubscriptionsView(
+                selectedPodcast: $selectedLibraryPodcast,
+                folderDestination: $libraryFolderDestination,
+                isReady: rootServicesActivated
+            )
             .modifier(TabChrome())
             .tabItem { Label("Library", systemImage: "books.vertical") }
             .tag(RootTab.library)
 
             NavigationStack {
-                DeferredTabContent(isSelected: (selectedTab ?? resolvedLaunchTab) == .downloads) {
+                DeferredTabContent(isSelected: currentTab == .downloads) {
                     DownloadsScreen()
                 }
             }
@@ -396,27 +409,62 @@ struct RootView: View {
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
         .background(QueueTabBadge(selectedTab: selectedTab))
         .background(AppIconBadgeObserver())
+        .background {
+            KeyWindowProbe { window in
+                windowReference.value = window
+                isFocusedWindow = window?.isKeyWindow == true
+                    && window?.traitCollection.activeAppearance == .active
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIWindow.didBecomeKeyNotification)) { note in
+            if let window = note.object as? UIWindow, window === windowReference.value {
+                isFocusedWindow = window.traitCollection.activeAppearance == .active
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIWindow.didResignKeyNotification)) { note in
+            if let window = note.object as? UIWindow, window === windowReference.value {
+                isFocusedWindow = false
+            }
+        }
+        .onChange(of: isFocusedWindow) { _, active in
+            guard active else {
+                confirmOPMLReplacement = false
+                confirmUnreadableOPMLReplacement = false
+                return
+            }
+            presentPendingFullPlayer()
+            routePendingNotification()
+            if rootServicesActivated {
+                handlePendingIncomingFile()
+                handlePendingOPMLState()
+            }
+        }
+        .onChange(of: selectedTab) { _, tab in
+            if let tab { restoredTab = tab.rawValue }
+        }
+        .onChange(of: selectedLibraryPodcast) { _, podcast in
+            restoredLibraryPodcastFeedURL = podcast.flatMap { $0.isDeleted ? nil : $0.feedURL } ?? ""
+        }
         // Route a notification tap / action into the Library tab + podcast detail
         // (#72). Reacting on the published intent keeps the delegate decoupled
         // from the view tree.
         .modifier(LibrarySearchPresentation(
             episode: $searchNotesEpisode,
-            isReady: rootServicesActivated && !showOnboarding,
+            window: windowReference.value,
+            isReady: rootServicesActivated && !showOnboarding && isFocusedWindow,
             route: routeSearch
         ))
         .onChange(of: notificationRouter.pendingIntent) { _, intent in
-            if let intent { route(intent) }
+            if intent != nil { routePendingNotification() }
         }
         // The app host owns Open-in routing so a file handed to Earshot before
         // the data-bound root exists is retained. Consume it once this final
         // container's RootView is ready (#781).
         .onChange(of: runtime.pendingIncomingFileURL) { _, url in
-            if url != nil, rootServicesActivated { handlePendingIncomingFile() }
+            if url != nil, rootServicesActivated, isFocusedWindow { handlePendingIncomingFile() }
         }
-        .onChange(of: opmlImportCoordinator.state) { _, state in
-            if case .readyToImport = state, rootServicesActivated { continuePendingOPMLImport() }
-            if case .replacementRequested = state { confirmOPMLReplacement = true }
-            if case .unreadableReplacementRequested = state { confirmUnreadableOPMLReplacement = true }
+        .onChange(of: opmlImportCoordinator.state) { _, _ in
+            handlePendingOPMLState()
         }
         .confirmationDialog(
             "Replace pending OPML import?",
@@ -468,7 +516,7 @@ struct RootView: View {
         // announcement cannot live on NowPlayingBar without firing up to five
         // times per toggle. Announcer no-ops when VoiceOver is off.
         .onChange(of: player.isPlaying) { _, isPlaying in
-            Announcer.announce(isPlaying ? "Playing" : "Paused")
+            if isFocusedWindow { Announcer.announce(isPlaying ? "Playing" : "Paused") }
         }
         // Durably persist playback position + listening stats when the app goes
         // to the background (#736). The ~5s playback tick no longer writes to the
@@ -496,14 +544,16 @@ struct RootView: View {
         // tabs (#366), so a per-bar sheet would present up to five times. The row
         // "Play now" action sets `pendingFullPlayerPresentation`; the binding
         // clears it on dismiss so it never re-presents.
-        .sheet(isPresented: Binding(
-            get: { player.pendingFullPlayerPresentation },
-            set: { player.pendingFullPlayerPresentation = $0 }
-        )) {
+        .sheet(isPresented: $showsFullPlayer) {
             NowPlayingScreen()
         }
-        .modifier(PlayerCompletionDismissal(player: player, settings: settings))
-        .modifier(CleartextPlaybackWarningPresenter(player: player))
+        .onChange(of: player.pendingFullPlayerPresentation) { _, pending in
+            if pending { presentPendingFullPlayer() }
+        }
+        .modifier(PlayerCompletionDismissal(
+            player: player, settings: settings, isPresented: $showsFullPlayer
+        ))
+        .modifier(CleartextPlaybackWarningPresenter(player: player, isActiveWindow: isFocusedWindow))
         .sheet(isPresented: $showOPMLPaywall, onDismiss: {
             guard resumeImportAfterPaywall else { return }
             resumeImportAfterPaywall = false
@@ -593,12 +643,21 @@ struct RootView: View {
     }
 
     private func activateRoot() async {
-        if selectedTab == nil { selectedTab = resolvedLaunchTab }
+        if selectedTab == nil { selectedTab = currentTab }
         let activationCompleted = await runtime.preparePlaybackServices(
             container: modelContext.container,
             deferNoncriticalMaintenance: true
         )
         guard activationCompleted else { return }
+        if selectedLibraryPodcast == nil, !restoredLibraryPodcastFeedURL.isEmpty {
+            let feedURL = restoredLibraryPodcastFeedURL
+            let descriptor = FetchDescriptor<Podcast>(
+                predicate: #Predicate { $0.feedURL == feedURL }
+            )
+            if let podcast = try? modelContext.fetch(descriptor).first {
+                selectedLibraryPodcast = podcast
+            }
+        }
         showOnboarding = !settings.onboardingComplete
         #if DEBUG
         if ScreenshotHarness.isActive {
@@ -607,13 +666,17 @@ struct RootView: View {
                 in: modelContext,
                 player: player,
                 selectTab: { selectedTab = $0 },
-                pushLibrary: { libraryPath = $0 }
+                pushLibrary: { selectedLibraryPodcast = $0.last }
             )
         }
         #endif
-        if let intent = notificationRouter.pendingIntent { route(intent) }
         rootServicesActivated = true
-        handlePendingIncomingFile()
+        if isFocusedWindow {
+            routePendingNotification()
+            handlePendingIncomingFile()
+            handlePendingOPMLState()
+        }
+        presentPendingFullPlayer()
     }
 
     private func dismissLegacyPlayedInboxRows() async {
@@ -650,7 +713,7 @@ struct RootView: View {
         }) else { return }
 
         selectedTab = .library
-        libraryPath = []
+        selectedLibraryPodcast = nil
         libraryFolderDestination = nil
         DispatchQueue.main.async {
             libraryFolderDestination = folder
@@ -696,6 +759,20 @@ struct RootView: View {
     private func handlePendingIncomingFile() {
         guard let url = runtime.takePendingIncomingFile() else { return }
         handleIncomingFile(url)
+    }
+
+    private func handlePendingOPMLState() {
+        guard isFocusedWindow else { return }
+        switch opmlImportCoordinator.state {
+        case .readyToImport where rootServicesActivated:
+            continuePendingOPMLImport()
+        case .replacementRequested:
+            confirmOPMLReplacement = true
+        case .unreadableReplacementRequested:
+            confirmUnreadableOPMLReplacement = true
+        default:
+            break
+        }
     }
 
     /// Handles a file handed to Earshot via the share sheet or "Open in". Only
@@ -746,19 +823,29 @@ struct RootView: View {
         } else {
             selectedTab = .library
             libraryFolderDestination = nil
-            libraryPath = [podcast]
+            selectedLibraryPodcast = podcast
         }
     }
 
     // MARK: Notification routing (#72)
+
+    private func presentPendingFullPlayer() {
+        guard isFocusedWindow, player.pendingFullPlayerPresentation else { return }
+        player.pendingFullPlayerPresentation = false
+        showsFullPlayer = true
+    }
+
+    private func routePendingNotification() {
+        guard isFocusedWindow, rootServicesActivated,
+              let intent = notificationRouter.takePendingIntent() else { return }
+        route(intent)
+    }
 
     /// Resolves a notification intent against the model graph, performs any
     /// action (enqueue / play), switches to the Library tab, and pushes the
     /// podcast's detail screen. Clears the router when done. Missing podcasts /
     /// episodes are logged and skipped — never crash on a stale notification.
     private func route(_ intent: NotificationIntent) {
-        defer { notificationRouter.clear() }
-
         guard let podcast = try? PodcastIdentityService(context: modelContext)
             .existingFollowed(feedURL: intent.feedURL) else {
             AppLog.notifications.error("Notification routing: podcast not found for feed")
@@ -779,10 +866,9 @@ struct RootView: View {
             }
         }
 
-        // Switch to Library and push the podcast detail. Reset the path first so
-        // we always land on the show's detail, not stacked atop a prior push.
+        // Select the show in this window's Library sidebar.
         selectedTab = .library
-        libraryPath = [podcast]
+        selectedLibraryPodcast = podcast
     }
 
     /// Finds an episode by guid within a podcast's loaded episodes.
@@ -794,7 +880,7 @@ struct RootView: View {
 /// The five root tabs. Backs the `TabView` selection so notification routing can
 /// switch to Library programmatically (#72). Internal (not private) so the
 /// launch-screen mapping is unit-testable (#492).
-enum RootTab: Hashable {
+enum RootTab: String, Hashable {
     case inbox, queue, library, downloads, settings
 
     /// Maps a persisted ``LaunchScreen`` preference to the tab Earshot opens on

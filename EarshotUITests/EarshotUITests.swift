@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class EarshotUITests: XCTestCase {
@@ -8,6 +9,143 @@ final class EarshotUITests: XCTestCase {
         // XCTest launches the next app instance. Most UI tests exercise the
         // conventional portrait baseline.
         XCUIDevice.shared.orientation = .portrait
+    }
+
+    func testIPadExposesNewWindowAction() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Multiple windows are an iPad feature")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 15), app.debugDescription)
+        settings.tap()
+        let newWindow = app.buttons["Open another Earshot window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    func testIPadLibraryKeepsPodcastSidebarWhileBrowsing() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Persistent Library sidebar requires an iPad layout")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let firstShow = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        let secondShow = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Our Perspective"
+        )).firstMatch
+        XCTAssertTrue(firstShow.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(secondShow.exists)
+        firstShow.tap()
+        XCTAssertTrue(secondShow.waitForExistence(timeout: 5),
+                      "The show list should remain beside the selected show")
+        XCTAssertTrue(firstShow.isSelected, "The sidebar should expose its selected show")
+        let episode = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        for _ in 0..<5 where !episode.exists { app.collectionViews.firstMatch.swipeUp() }
+        XCTAssertTrue(episode.waitForExistence(timeout: 5), app.debugDescription)
+        episode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Back to episodes"].exists)
+        XCTAssertTrue(secondShow.exists, "Episode detail should keep the Library sidebar")
+        app.buttons["Back to episodes"].tap()
+        XCTAssertTrue(episode.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(firstShow.isSelected)
+        secondShow.tap()
+        XCTAssertTrue(firstShow.exists)
+        XCTAssertTrue(app.navigationBars["Our Perspective"].waitForExistence(timeout: 5),
+                      app.debugDescription)
+        XCTAssertFalse(episode.exists, "Changing shows should replace the episode content")
+        app.buttons["Inbox"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Inbox"].waitForExistence(timeout: 5))
+        app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(secondShow.waitForExistence(timeout: 5))
+        XCTAssertTrue(secondShow.isSelected, "Switching tabs should retain the selected show")
+    }
+
+    func testIPadLibraryVoiceOverReadsSelectedSidebarShow() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad, #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver sidebar automation requires iPadOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 15), app.debugDescription)
+        show.tap()
+        XCTAssertTrue(show.isSelected)
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        var speech: [String] = []
+        for _ in 0..<60 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("Technically Working") { break }
+        }
+        let selection = try XCTUnwrap(speech.first(where: { $0.contains("Technically Working") }),
+                                      "VoiceOver could not reach the selected show: \(speech)")
+        XCTAssertTrue(selection.localizedCaseInsensitiveContains("selected"),
+                      "VoiceOver should announce the selected show: \(speech)")
+    }
+
+    func testIPadMiniLibraryRemainsNavigableAtLargestText() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("This checks iPad Dynamic Type navigation")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "library",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
+        app.launch()
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(show.isHittable, "The show row should remain reachable at large text")
+        show.tap()
+        XCTAssertTrue(app.navigationBars["Technically Working"].waitForExistence(timeout: 5),
+                      app.debugDescription)
+    }
+
+    func testCompactLibraryCanReturnFromEpisodeToShows() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("This checks the compact iPhone navigation path")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 15), app.debugDescription)
+        show.tap()
+        let episode = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        for _ in 0..<5 where !episode.exists { app.collectionViews.firstMatch.swipeUp() }
+        XCTAssertTrue(episode.waitForExistence(timeout: 5), app.debugDescription)
+        episode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        app.buttons["Back to episodes"].tap()
+        XCTAssertTrue(app.segmentedControls["Filter episodes"].waitForExistence(timeout: 5),
+                      "Returning from details should restore the show episode list")
+        let backToShows = app.descendants(matching: .any)["BackButton"].firstMatch
+        XCTAssertTrue(backToShows.waitForExistence(timeout: 5), app.debugDescription)
+        backToShows.tap()
+        XCTAssertTrue(show.waitForExistence(timeout: 5))
     }
 
     func testEpisodeSelectionAndPlayAreSeparate() {
@@ -133,7 +271,7 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(
             format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
         )).firstMatch.waitForExistence(timeout: 15))
-        app.tabBars.buttons["Inbox"].tap()
+        app.buttons["Inbox"].firstMatch.tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(
             format: "label BEGINSWITH %@", "#169 – Apple's Price Hikes"
         )).firstMatch.waitForExistence(timeout: 15), app.debugDescription)

@@ -24,6 +24,7 @@
 		0662FA8D95240472701E2D3B /* RetryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4CF80BEF00C7F9A4E4E4D07 /* RetryPolicy.swift */; };
 		0675702E99E2C73A84C8083D /* ProductCatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF0732FD4602125E364F899 /* ProductCatalogService.swift */; };
 		06B4EDF5C7C9F56C5048E1F1 /* ShortcutsGuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5806B9CB2CFC7422DBD65FBE /* ShortcutsGuideView.swift */; };
+		06FB084209672E3A883662DA /* KeyWindowProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80EF74E7391C4B352B79DB73 /* KeyWindowProbe.swift */; };
 		0740972B7545E5C01C3177AD /* ITunesSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153E920C6B22C967CFB67F3E /* ITunesSearchService.swift */; };
 		086291174A380BA18FB9593D /* SchemaDriftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E95227EAA9F9FC318FE854FD /* SchemaDriftTests.swift */; };
 		08CE6FDC6BF27D427FFBFBC1 /* SleepTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297BEC6C00A3076AF4CC7259 /* SleepTimer.swift */; };
@@ -825,6 +826,7 @@
 		7EDFB91871F32318649D4749 /* OptionStepLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptionStepLogic.swift; sourceTree = "<group>"; };
 		80935849410681BAA8F92DEF /* AppInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppInfo.swift; sourceTree = "<group>"; };
 		80C28007ADDC6032E4430667 /* Configuration.storekit */ = {isa = PBXFileReference; path = Configuration.storekit; sourceTree = "<group>"; };
+		80EF74E7391C4B352B79DB73 /* KeyWindowProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyWindowProbe.swift; sourceTree = "<group>"; };
 		8352682C90C578F28EE2EA6F /* BookmarkShareLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkShareLogic.swift; sourceTree = "<group>"; };
 		8434BAA55ED156533D9DA16D /* QueueLineupStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueLineupStore.swift; sourceTree = "<group>"; };
 		85AEC969432D42F2B8B4314D /* PaywallLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallLogic.swift; sourceTree = "<group>"; };
@@ -2300,6 +2302,7 @@
 				60DDA12DDBBAEE44CEB0527F /* EpisodeSearchFilter.swift */,
 				90B05098E1A743F56E24D625 /* EpisodeShareItems.swift */,
 				9D01EA3695063A145B35F59E /* ExportFile.swift */,
+				80EF74E7391C4B352B79DB73 /* KeyWindowProbe.swift */,
 				D047C968CE1D5423AA6844E6 /* MailComposeView.swift */,
 				B60D9C962F88E9ED63F0A1DF /* MultiSelectBar.swift */,
 				CE96D8D6DD47BE7CDCE6D094 /* MultiSelectState.swift */,
@@ -2695,6 +2698,7 @@
 				DDE214B4D555DF97D11B0253 /* InboxScreen.swift in Sources */,
 				186179FEC6DF06C0B08AECB9 /* InboxSettingsView.swift in Sources */,
 				E5C1E65237B53A2A1C0E2D3E /* InterruptedLibraryResetScreen.swift in Sources */,
+				06FB084209672E3A883662DA /* KeyWindowProbe.swift in Sources */,
 				2EAFACE121BD284F6FA1995A /* LibraryAutomationIntents.swift in Sources */,
 				784C8B2AED7223A6ABC98B81 /* LibraryEntities.swift in Sources */,
 				85AE981C66944209CEFE10D7 /* LibraryIntentBridge.swift in Sources */,
@@ -3136,7 +3140,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 305;
+				CURRENT_PROJECT_VERSION = 306;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -3185,7 +3189,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -3260,7 +3264,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 305;
+				CURRENT_PROJECT_VERSION = 306;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -3302,7 +3306,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = CloudKitDevelopment;
 		};
@@ -3396,7 +3400,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 305;
+				CURRENT_PROJECT_VERSION = 306;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -3439,7 +3443,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};

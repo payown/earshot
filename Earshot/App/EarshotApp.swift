@@ -227,8 +227,25 @@ final class AppRuntime {
     private var processServicesStarted = false
     private var entitlementContainer: ModelContainer?
     private var boundRootServicesContainer: ModelContainer?
+    private var searchIndexContainer: ModelContainer?
+    private var searchIndexTask: Task<Void, Never>?
+    private var searchIndexRequestID: UUID?
     private var rootServiceActivationState: RootServiceActivationState = .notStarted
     var noncriticalRootMaintenanceTask: Task<Void, Never>?
+
+    /// Spotlight indexing is process-owned. A second window must not restart
+    /// the index, and closing its scene must not cancel the surviving worker.
+    func startSearchIndexIfNeeded(container: ModelContainer) {
+        guard searchIndexContainer !== container else { return }
+        searchIndexTask?.cancel()
+        searchIndexContainer = container
+        let requestID = UUID()
+        searchIndexRequestID = requestID
+        searchIndexTask = Task { @MainActor in
+            guard searchIndexRequestID == requestID else { return }
+            await LibrarySearchIndex.shared.run(container: container)
+        }
+    }
     private var launchTask: Task<Void, Never>?
     private var launchAttemptID: UUID?
     private var pendingStoreLoad: StoreLoad?
@@ -1598,7 +1615,7 @@ struct EarshotApp: App {
     #endif
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "earshot-main") {
             Group {
                 switch runtime.phase {
                 case .unavailable:
@@ -1651,7 +1668,7 @@ struct EarshotApp: App {
                             .environment(runtime.entitlements)
                             .task {
                                 guard !isRunningTests, !isScreenshotRun else { return }
-                                await LibrarySearchIndex.shared.run(container: container)
+                                runtime.startSearchIndexIfNeeded(container: container)
                             }
                             .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave).receive(on: RunLoop.main)) { _ in
                                 LibrarySearchIndex.shared.requestRefresh()

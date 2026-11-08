@@ -57,7 +57,8 @@ struct EpisodeDetailPane: View {
                         .accessibilityAddTraits(.isHeader)
                     ShowNotesContent(episode: episode)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity)
                 .padding()
             }
             .accessibilityIdentifier("episode.detail")
@@ -156,7 +157,8 @@ struct PodcastDetailPane: View {
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity)
                 .padding()
             }
             .accessibilityIdentifier("library.showDetail")

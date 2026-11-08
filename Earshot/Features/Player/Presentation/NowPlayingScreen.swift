@@ -695,6 +695,7 @@ struct NowPlayingScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+            .keyboardShortcut(.space, modifiers: [])
             .accessibilityIdentifier("player.playPause")
 
             transportButton(

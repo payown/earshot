@@ -132,6 +132,7 @@ struct SearchView<HeaderContent: View>: View {
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var query = ""
     @State private var matchedPodcasts: [Podcast] = []
@@ -157,6 +158,10 @@ struct SearchView<HeaderContent: View>: View {
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var fullPodcastDescription: PodcastDescriptionPresentation?
+    @State private var selectedSearchPodcast: Podcast?
+    @State private var selectedSearchEpisode: Episode?
+    @State private var compactSearchPodcast: Podcast?
+    @State private var compactSearchEpisode: Episode?
     private let itunes = ITunesSearchService()
 
     /// How long the query must be quiet before a directory request fires. Computed
@@ -175,12 +180,31 @@ struct SearchView<HeaderContent: View>: View {
     }
 
     var body: some View {
-        List {
+        GeometryReader { geometry in
+            let wide = scope == .library && ListDetailLayoutPolicy.usesTwoPanes(
+                width: geometry.size.width, accessibilityText: dynamicTypeSize.isAccessibilitySize
+            )
+            HStack(spacing: 0) {
+                List {
             if scope.showsPodcasts && !matchedPodcasts.isEmpty {
                 Section(header: Text("Podcasts").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedPodcasts) { podcast in
-                        NavigationLink(value: podcast) {
-                            Text(podcast.displayName)
+                        Group {
+                            if wide {
+                                Button {
+                                    selectedSearchPodcast = podcast
+                                    selectedSearchEpisode = nil
+                                } label: {
+                                    Text(podcast.displayName)
+                                }
+                                .modifier(DetailSelectionTrait(
+                                    selected: selectedSearchPodcast?.persistentModelID == podcast.persistentModelID
+                                ))
+                            } else {
+                                NavigationLink(value: podcast) {
+                                    Text(podcast.displayName)
+                                }
+                            }
                         }
                         .accessibilityLabel(PodcastRowSpeech.label(
                             title: podcast.displayName,
@@ -209,6 +233,12 @@ struct SearchView<HeaderContent: View>: View {
                                 episode: episode,
                                 order: quickActions.episodeActions
                             ),
+                            includesPodcastName: wide,
+                            onSelect: wide ? {
+                                selectedSearchEpisode = episode
+                                selectedSearchPodcast = nil
+                            } : nil,
+                            isDetailSelected: wide && selectedSearchEpisode?.persistentModelID == episode.persistentModelID,
                             performAction: { action in perform(action, for: episode) }
                         )
                     }
@@ -237,6 +267,40 @@ struct SearchView<HeaderContent: View>: View {
             // results keeps the search field and its results together; with an empty
             // query these rows naturally become the landing content.
             headerContent
+                }
+                .overlay { emptyOverlay }
+                .frame(width: wide ? geometry.size.width * 0.5 : nil)
+                .frame(maxWidth: wide ? nil : .infinity)
+                if wide {
+                    Divider()
+                    Group {
+                        if let episode = selectedSearchEpisode, !episode.isDeleted {
+                            EpisodeDetailPane(episode: episode)
+                        } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
+                            EpisodeListView(podcast: podcast)
+                        } else {
+                            ContentUnavailableView(
+                                "Select a result",
+                                systemImage: "magnifyingglass",
+                                description: Text("Choose a podcast or episode to inspect it while keeping your search results.")
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .onChange(of: wide) { oldValue, newValue in
+                if oldValue && !newValue {
+                    if let episode = selectedSearchEpisode, !episode.isDeleted {
+                        compactSearchEpisode = episode
+                    } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
+                        compactSearchPodcast = podcast
+                    }
+                } else if !oldValue && newValue {
+                    compactSearchEpisode = nil
+                    compactSearchPodcast = nil
+                }
+            }
         }
         .navigationTitle(titleOverride ?? "Search")
         .searchable(text: $query, placement: searchPlacement, prompt: searchPrompt)
@@ -258,7 +322,17 @@ struct SearchView<HeaderContent: View>: View {
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
         .sheet(item: $fullPodcastDescription) { PodcastDescriptionView(presentation: $0) }
-        .overlay { emptyOverlay }
+        .sheet(item: $compactSearchEpisode) { EpisodeDetailSheet(episode: $0) }
+        .sheet(item: $compactSearchPodcast) { podcast in
+            NavigationStack {
+                EpisodeListView(podcast: podcast)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { compactSearchPodcast = nil }
+                        }
+                    }
+            }
+        }
     }
 
     private enum LocalSection: String {
