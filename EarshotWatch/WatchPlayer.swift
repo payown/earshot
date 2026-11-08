@@ -59,7 +59,6 @@ final class WatchPlayer {
 
     func play(_ item: WatchEpisode, at requestedPosition: Double? = nil,
               announce: Bool = true, requestID: UUID = UUID()) async {
-        let request = playbackRequests.begin(requestID)
         guard let remote = URL(string: item.audioURL), ["https", "http"].contains(remote.scheme?.lowercased() ?? "") else {
             status = "This episode has no playable audio address"
             if announce { AccessibilityNotification.Announcement(status).post() }
@@ -67,6 +66,7 @@ final class WatchPlayer {
         }
         let local = item.downloadFilename.map { WatchDownloadManager.destination(for: $0) }
         let url = local.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil } ?? remote
+        let request = playbackRequests.begin(requestID)
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
