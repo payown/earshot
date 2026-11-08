@@ -33,11 +33,12 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
         let reply = WatchReplyBox(replyHandler)
         Task { @MainActor [weak self] in
             guard let self else { reply.send(["accepted": false, "reason": "Phone service unavailable"]); return }
-            reply.send(self.perform(id: id, command: command, feedURL: feed, guid: guid, position: position, rate: rate, offset: offset))
+            reply.send(await self.perform(id: id, command: command, feedURL: feed, guid: guid,
+                                          position: position, rate: rate, offset: offset))
         }
     }
 
-    private func perform(id: String, command: String, feedURL: String?, guid: String?, position: Double?, rate: Double?, offset: Int) -> [String: Any] {
+    private func perform(id: String, command: String, feedURL: String?, guid: String?, position: Double?, rate: Double?, offset: Int) async -> [String: Any] {
         guard !id.isEmpty else { return ["accepted": false, "reason": "Invalid request"] }
         if let prior = seenCommands[id] { return prior }
         guard let runtime else { return ["accepted": false, "reason": "Phone service unavailable"] }
@@ -62,9 +63,25 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
                     "hasMore": offset + page.count < subscriptions.count]
         case "toggle": player.togglePlayPause()
         case "pause": player.pause()
+        case "pauseIfEpisode":
+            guard PhonePlaybackAckPolicy.matches(player.nowPlayingEpisode, feedURL: feedURL, guid: guid) else {
+                return ["accepted": false, "reason": "Phone episode changed"]
+            }
+            player.pause()
         case "back": player.skipBack()
         case "forward": player.skipForward()
-        case "play":
+        case "prepareHandoff":
+            guard let feedURL, let guid, let container = runtime.readyContainer else {
+                return ["accepted": false, "reason": "Phone library unavailable"]
+            }
+            let descriptor = FetchDescriptor<Episode>(predicate: #Predicate {
+                $0.guid == guid && $0.podcast?.feedURL == feedURL
+            })
+            if (try? container.mainContext.fetch(descriptor).first) == nil {
+                accepted = false
+                reason = "Episode is not in the phone library"
+            }
+        case "play", "resumeIfEpisode":
             guard let feedURL, let guid, let container = runtime.readyContainer else {
                 return ["accepted": false, "reason": "Phone library unavailable"]
             }
@@ -72,8 +89,31 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
                 $0.guid == guid && $0.podcast?.feedURL == feedURL
             })
             if let episode = try? container.mainContext.fetch(descriptor).first {
+                if command == "resumeIfEpisode",
+                   !PhonePlaybackAckPolicy.matches(player.nowPlayingEpisode, feedURL: feedURL, guid: guid) {
+                    return ["accepted": false, "reason": "Phone episode changed"]
+                }
                 if let rate { player.setGlobalSpeed(rate, announce: false) }
                 player.play(episode, at: max(0, position ?? 0))
+                var confirmed = false
+                for _ in 0..<40 {
+                    guard PhonePlaybackAckPolicy.matches(player.nowPlayingEpisode, feedURL: feedURL, guid: guid),
+                          player.playbackFailureMessage == nil else { break }
+                    if PhonePlaybackAckPolicy.confirmed(player.nowPlayingEpisode, feedURL: feedURL,
+                                                        guid: guid, actuallyPlaying: player.isActuallyPlaying) {
+                        confirmed = true
+                        break
+                    }
+                    do { try await Task.sleep(for: .milliseconds(250)) }
+                    catch { break }
+                }
+                if !confirmed {
+                    if PhonePlaybackAckPolicy.matches(player.nowPlayingEpisode, feedURL: feedURL, guid: guid) {
+                        player.pause()
+                    }
+                    accepted = false
+                    reason = "Phone audio did not reach playback readiness"
+                }
             } else {
                 accepted = false
                 reason = "Episode is not in the phone library"
@@ -97,7 +137,7 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
             "version": 1,
             "owner": "phone",
             "playing": player.isPlaying,
-            "position": player.currentPositionSeconds,
+            "position": player.currentWatchSnapshotPosition,
             "rate": player.effectiveRate,
             "observedAt": Date.now.timeIntervalSince1970
         ]
@@ -106,8 +146,21 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
             result["guid"] = episode.guid
             result["feedURL"] = episode.podcast?.feedURL ?? ""
             result["audioURL"] = episode.audioURL
+            result["podcastTitle"] = episode.podcast?.title ?? "Podcast"
         }
         return result
+    }
+}
+
+enum PhonePlaybackAckPolicy {
+    static func matches(_ episode: Episode?, feedURL: String?, guid: String?) -> Bool {
+        guard let episode, let feedURL, let guid else { return false }
+        return episode.guid == guid && FeedURLIdentity.matches(episode.podcast?.feedURL ?? "", feedURL)
+    }
+
+    static func confirmed(_ episode: Episode?, feedURL: String?, guid: String?,
+                          actuallyPlaying: Bool) -> Bool {
+        actuallyPlaying && matches(episode, feedURL: feedURL, guid: guid)
     }
 }
 

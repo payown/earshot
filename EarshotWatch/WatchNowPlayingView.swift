@@ -1,5 +1,13 @@
 import SwiftUI
 
+enum WatchPlaybackDeviceStatus {
+    static func spokenText(watchPlaying: Bool, phonePlaying: Bool) -> String {
+        if watchPlaying { return "Audio is playing on Apple Watch" }
+        if phonePlaying { return "Audio is playing on iPhone" }
+        return "Audio is paused on Apple Watch"
+    }
+}
+
 struct WatchNowPlayingView: View {
     let runtime: WatchRuntime
     var body: some View {
@@ -44,6 +52,18 @@ struct WatchNowPlayingView: View {
                     Button("15 minutes") { runtime.player.setSleepTimer(minutes: 15) }
                     Button("30 minutes") { runtime.player.setSleepTimer(minutes: 30) }
                 }
+                Section("Playback device") {
+                    Text(WatchPlaybackDeviceStatus.spokenText(watchPlaying: runtime.player.isPlaying,
+                                                             phonePlaying: runtime.phone.phonePlaying))
+                    Button("Transfer to iPhone") {
+                        runtime.phone.handoffToPhone(episode: episode,
+                                                    position: runtime.player.positionSeconds,
+                                                    rate: runtime.player.rate,
+                                                    watchPlayer: runtime.player)
+                    }
+                    .disabled(!runtime.player.isPlaying)
+                    Text(runtime.phone.status)
+                }
             } else { Text("Nothing playing. Choose an episode from Library or Inbox.") }
         }
         .navigationTitle("Now Playing")
@@ -53,16 +73,15 @@ struct WatchNowPlayingView: View {
 struct WatchSeekControl: View {
     let player: WatchPlayer
     var body: some View {
-        Text("Playback position")
+        Slider(value: Binding(
+            get: { min(player.positionSeconds, max(1, player.durationSeconds)) },
+            set: { seconds in Task { await player.seek(to: seconds) } }
+        ), in: 0...max(1, player.durationSeconds), step: 30) {
+            Text("Playback position")
+        }
+            .disabled(player.durationSeconds <= 0)
             .accessibilityLabel("Playback position")
-            .accessibilityValue("\(Int(player.positionSeconds / 60)) minutes")
-            .accessibilityAdjustableAction { direction in
-                switch direction {
-                case .increment: Task { await player.seek(to: player.positionSeconds + 30) }
-                case .decrement: Task { await player.seek(to: player.positionSeconds - 30) }
-                @unknown default: break
-                }
-            }
+            .accessibilityValue("\(Int(player.positionSeconds / 60)) minutes, \(Int(player.positionSeconds) % 60) seconds")
             .accessibilityHint("Swipe up or down to seek by 30 seconds")
     }
 }

@@ -102,12 +102,22 @@ targets:
         UIBackgroundModes: [audio]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsForMedia: true
+        CFBundleURLTypes:
+          - CFBundleURLName: media.payown.earshot.watchkitapp
+            CFBundleURLSchemes: [earshot-watch]
+    entitlements:
+      path: EarshotWatch/EarshotWatch.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.media.payown.earshot.watch
     sources:
       - path: EarshotWatch
       - path: Earshot/Features/Subscriptions/Data/RSSParser.swift
       - path: Earshot/Features/Transcripts/Domain/TranscriptFormat.swift
       - path: Earshot/Core/Logging/Logger+Earshot.swift
       - path: Earshot/Core/WatchFeedSnapshot.swift
+      - path: Earshot/Core/EpisodeSummary.swift
+      - path: Earshot/Data/Persistence/CloudProjectionModels.swift
       - path: Earshot/Features/Player/Domain/SleepTimer.swift
       - path: Earshot/Features/Player/Domain/Chapter.swift
       - path: Earshot/Features/Player/Domain/ChapterParser.swift
@@ -117,8 +127,34 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         DEVELOPMENT_TEAM: "72PH974742"
         CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - target: EarshotWatchWidgets
+        embed: true
+  EarshotWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    info:
+      path: EarshotWatchWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Earshot Widgets
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: EarshotWatchWidgets/EarshotWatchWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.media.payown.earshot.watch
+    sources:
+      - path: EarshotWatchWidgets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.watchkitapp.widgets
+        DEVELOPMENT_TEAM: "72PH974742"
+        CODE_SIGN_STYLE: Automatic
+        APPLICATION_EXTENSION_API_ONLY: YES
   EarshotWatchTests:
     type: bundle.unit-test
     platform: watchOS
