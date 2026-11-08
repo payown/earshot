@@ -75,6 +75,7 @@ struct WatchNowPlayingView: View {
                 WatchPhoneSessionSection(runtime: runtime)
             } else { Text("Nothing playing. Choose an episode from Library or Inbox.") }
         }
+        .accessibilityAction(.magicTap) { runtime.performMagicTap() }
         .navigationTitle("Now Playing")
     }
 }

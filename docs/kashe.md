@@ -76,6 +76,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe compares the last words before a phone-to-watch transfer with the first
+  words on the watch, then tries VoiceOver Magic Tap to control playback
+  (Chapter 119).
+
 - Kashe asked Renata to leave the five tabs as tabs and put each list beside its
   own details on the open Duo. She checked that selecting an episode stayed
   silent until she pressed Play (Chapter 110).
@@ -3911,3 +3915,55 @@ Kashe left her phone in her work bag and opened Earshot on her watch. The interv
 She told Renata, then tried the next build. This time the watch named the interview and said it was playing on iPhone. Kashe pressed Transfer and waited for the sound to move before putting the phone away.
 
 “Tell me which one has it,” she said. “Then let me choose.”
+
+---
+
+Chapter 116 - Build 311
+
+What to try first:
+
+With VoiceOver, open Up Next on iPhone and Apple Watch. Add an episode on iPhone, then open Up Next on watch and choose Refresh Queue. Its title and podcast should appear even if it is not downloaded to the watch. Add another episode on watch, then refresh the iPhone queue; both should remain. Try a removal and reorder on each device, then separate the devices, make another queue change on each, reconnect and refresh. Removed episodes should stay removed and independent additions should survive. Transfer playback in both directions with a nonempty queue; if synchronization fails, the source should keep playing and the app should say so. Tell us the exact spoken status, episode titles, devices and OS versions, connection state and approximate time if a queue entry is missing or reappears.
+
+Kashe's story:
+
+Kashe lined up two interviews on her phone, then left it charging while she walked out with her watch. Up Next on her wrist was empty. She could still start a show, but the order she had chosen was gone.
+
+In the next build she opened Up Next and heard the interviews in order. She added one more from the watch. When she returned to the phone, all three were there.
+
+“That is the same queue,” she told Renata. “Now I can trust what plays next.”
+
+---
+
+Emergency chapters 117 and 118 shipped as the following plain test instructions while the watch-open crash was being isolated. Their exact TestFlight notes are preserved here.
+
+---
+
+Chapter 117 - Watch-open crash repair candidate
+
+Please update Earshot from TestFlight without deleting the app. With the iPhone and Apple Watch nearby, open the watch app several times, including while Earshot on iPhone is open and while it is in the background. The iPhone should remain running. Open Up Next on both devices and refresh the queue; adding an episode on either device should appear on the other without a crash. If the iPhone closes, note the exact time, whether the phone app was foregrounded, and the build number. We will inspect the device crash report.
+
+This build recompiles the paired queue validator implicated in the build 311 iPhone crash reports and rejects oversized queue responses before decoding. Build 311 was removed from public beta testing while the replacement is verified. Other watch features remain as in build 311. Physical paired-device and VoiceOver behavior still need confirmation.
+
+---
+
+Chapter 118 - Watch-open crash isolation
+
+Builds 311 and 312 crashed the iPhone when the Apple Watch app opened. Please update Earshot in place, without deleting app data, then open the watch app several times with the iPhone app foregrounded and backgrounded. The iPhone should stay running. VoiceOver users should still be able to play on the watch, control iPhone playback, and transfer the current episode. Up Next remains available locally; its immediate paired-device refresh is temporarily disabled and should say that queue changes sync through iCloud when available. Queue changes may take longer to appear on the other device. If either app closes, note the time, device, and build number so we can inspect its crash report.
+
+---
+
+Chapter 119 - Keep the same place
+
+What to try first:
+
+Update Earshot to 1.2.6 (314) on iPhone and Apple Watch without deleting either app. Start an episode on iPhone and note the position and a recognizable sentence. Transfer to Apple Watch. The watch should continue near the phone's position when the phone stops, without repeating or skipping about 30 seconds. Try again at normal and 1.5 times speed, and tell us the two positions if they differ.
+
+With VoiceOver on the watch, two-finger double tap the display on Home, Now Playing, and iPhone Control. It should play or pause the device that screen controls. The ordinary Play and Pause buttons should still work. On iPhone Control, an unavailable phone should report failure rather than claiming playback changed. Tell us the screen, what VoiceOver said, and whether audio changed once, twice, or not at all.
+
+Kashe's story:
+
+Kashe stopped an interview on her phone and started it on her watch. The speaker repeated a sentence she had heard before. She checked both positions. The numbers were close enough to look right at a glance, but the words were not.
+
+Renata asked her to try again after the update. Kashe listened for the last word before she transferred, then for the first word on the watch. After that she tried the two-finger tap she used when she didn't want to hunt for a button.
+
+“Same place, one action,” she said. “That's what I need.”

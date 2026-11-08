@@ -3872,6 +3872,39 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testPairedQueueRowsMaterializeMissingEpisodeAndIgnoreDuplicateDelivery() async throws {
+        let app = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Example Show")
+        app.mainContext.insert(podcast)
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        let remote = CloudQueueItemProjection()
+        remote.feedURL = podcast.feedURL
+        remote.episodeGUID = "watch-only"
+        remote.episodeTitle = "Watch-only episode"
+        remote.episodeAudioURL = "https://example.com/watch-only.mp3"
+        remote.sourceDeviceID = "watch"
+        remote.isQueued = true
+        remote.position = 0
+        remote.membershipUpdatedAt = Date(timeIntervalSinceNow: -60)
+        remote.modifiedAt = remote.membershipUpdatedAt
+        let row = PairedQueueContribution(remote, podcastTitle: podcast.title)
+
+        try await coordinator.acceptPairedQueueContributions([row])
+        XCTAssertEqual(try app.mainContext.fetch(FetchDescriptor<QueueItem>())
+            .compactMap { $0.episode?.guid }, ["watch-only"])
+        let imported = try await coordinator.pairedQueueContributions()
+        XCTAssertTrue(imported.contains { $0.guid == "watch-only" && $0.sourceDeviceID == "watch" })
+        try await coordinator.acceptPairedQueueContributions([row, row])
+        XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertEqual(try projection.mainContext.fetchCount(FetchDescriptor<CloudQueueItemProjection>()), 0,
+                       "Paired transport must not create duplicate CloudKit records")
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV14.self)
         return try ModelContainer(
