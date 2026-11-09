@@ -12,8 +12,8 @@ internal 314 build does not make these source merges a distributed release.
 Physical Watch, CloudKit, handoff position, VoiceOver Magic Tap, iPad and Duo
 acceptance remain open. Immediate paired Queue snapshots stay disabled in the
 later 313/314 safety path. Michael authorized a private internal candidate
-after source integration and validation; no new build has been uploaded or
-publicly distributed through that approval.
+after source integration and validation. At this source checkpoint, that new
+candidate had not been uploaded or publicly distributed.
 
 Historical 2026-11-06 record: The then-current integrated internal TestFlight build was **1.2.6 (310)** on `test/watchos-126-310`, commit `d6ecea38`. It contains the full 1.2.6 watch integration and the live paired-playback fix in PR #1046. App Store Connect build `45f0ac2e-997e-4a98-9831-8ae65f1bd8f8` was **VALID**, uploaded, and **IN_BETA_TESTING** in the existing Internal Testing Group. English Chapter 115 notes were present; `autoNotifyEnabled` was true, although the CLI reported `notified: false` because the all-builds group was already assigned. The signed IPA's phone, independent watch and widget bundles all report 1.2.6 (310), and signatures and watch entitlements verify. Hardware behavior was not verified. See `docs/watchos-playback-sync-310.md` for the report, cause and fix, and `docs/watchos-device-testing.md` for the testing steps. Later build 311 was withdrawn from public beta after the watch-open phone crash; builds 312–314 and their remaining device checks are documented in [the distribution history](watchos-distribution.md) and [the 314 quality report](watchos-playback-quality-314.md).
 
