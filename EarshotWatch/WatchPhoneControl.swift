@@ -48,6 +48,17 @@ struct WatchHandoffSourceState: Sendable {
     }
 }
 
+enum WatchPhoneHandoffReply {
+    static func stateHandler(
+        _ deliver: @escaping @MainActor @Sendable (WatchHandoffSourceState?) -> Void
+    ) -> @Sendable ([String: Any]) -> Void {
+        { @Sendable response in
+            let state = WatchHandoffSourceState(response)
+            Task { @MainActor in deliver(state) }
+        }
+    }
+}
+
 enum WatchHandoffDecision {
     static func phoneConfirmed(_ reply: [String: Any], feedURL: String, guid: String) -> Bool {
         reply["owner"] as? String == "phone" &&
@@ -495,29 +506,27 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
 
     private func requestHandoffState(library: WatchLibrary, watchPlayer: WatchPlayer) {
         status = "Checking current iPhone playback"
-        WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString, "command": "state"]) { [weak self] response in
-            let state = WatchHandoffSourceState(response)
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard let state,
-                      let episode = library.playablePhoneEpisode(feedURL: state.feedURL, guid: state.guid,
-                                                                  title: state.title,
-                                                                  podcastTitle: state.podcastTitle,
-                                                                  audioURL: state.audioURL) else {
-                    self.pending = false
-                    self.status = "iPhone playback changed or this episode is unavailable on watch. No transfer occurred."
-                    AccessibilityNotification.Announcement(self.status).post()
-                    return
-                }
-                self.startHandoffToWatch(episode, state: state, watchPlayer: watchPlayer)
+        WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString, "command": "state"],
+                                      replyHandler: WatchPhoneHandoffReply.stateHandler { [weak self] state in
+            guard let self else { return }
+            guard let state,
+                  let episode = library.playablePhoneEpisode(feedURL: state.feedURL, guid: state.guid,
+                                                              title: state.title,
+                                                              podcastTitle: state.podcastTitle,
+                                                              audioURL: state.audioURL) else {
+                self.pending = false
+                self.status = "iPhone playback changed or this episode is unavailable on watch. No transfer occurred."
+                AccessibilityNotification.Announcement(self.status).post()
+                return
             }
-        } errorHandler: { [weak self] _ in
+            self.startHandoffToWatch(episode, state: state, watchPlayer: watchPlayer)
+        }, errorHandler: { @Sendable [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.pending = false
                 self?.status = "iPhone did not confirm its playback state. No transfer occurred."
                 AccessibilityNotification.Announcement("iPhone did not confirm its playback state. No transfer occurred.").post()
             }
-        }
+        })
     }
 
     private func startHandoffToWatch(_ episode: WatchEpisode, state: WatchHandoffSourceState,
@@ -525,11 +534,12 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let requestID = UUID()
+            let episodeIdentity = episode.identity
             watchPlayer.setRate(state.rate, announce: false, persist: false)
             await watchPlayer.play(episode, at: state.anticipatedPosition(), announce: false,
                                    requestID: requestID, preciseStart: true)
             guard watchPlayer.ownsPlaybackRequest(requestID), watchPlayer.isPlaying,
-                  watchPlayer.episode?.identity == episode.identity else {
+                  watchPlayer.episode?.identity == episodeIdentity else {
                 self.pending = false
                 self.status = "Apple Watch could not start audio. iPhone continues."
                 AccessibilityNotification.Announcement(self.status).post()
@@ -545,7 +555,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             self.status = "Stopping playback on iPhone"
             WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString,
                                            "command": "pauseIfEpisode", "feedURL": state.feedURL,
-                                           "guid": state.guid]) { [weak self] response in
+                                           "guid": state.guid]) { @Sendable [weak self] response in
                 let finalPosition = state.pausedPosition(response)
                 Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -556,7 +566,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                         return
                     }
                     if let finalPosition,
-                       await watchPlayer.alignToPausedSource(finalPosition, expectedIdentity: episode.identity) {
+                       await watchPlayer.alignToPausedSource(finalPosition, expectedIdentity: episodeIdentity) {
                         self.pending = false
                         self.phonePlaying = false
                         self.status = "Playback transferred to Apple Watch"
@@ -594,7 +604,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString,
                                        "command": "resumeIfEpisode", "feedURL": state.feedURL,
                                        "guid": state.guid, "position": position,
-                                       "rate": Double(state.rate)]) { [weak self] response in
+                                       "rate": Double(state.rate)]) { @Sendable [weak self] response in
             let restored = response["accepted"] as? Bool == true &&
                 response["playing"] as? Bool == true &&
                 response["feedURL"] as? String == state.feedURL &&
@@ -607,7 +617,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                     "Watch transfer failed. Check iPhone playback before retrying."
                 AccessibilityNotification.Announcement(self.status).post()
             }
-        } errorHandler: { [weak self] _ in
+        } errorHandler: { @Sendable [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.pending = false
                 self?.status = "Watch transfer failed. Check iPhone playback before retrying."

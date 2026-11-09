@@ -388,6 +388,23 @@ final class EarshotWatchTests: XCTestCase {
                                              "feedURL": state.feedURL, "guid": state.guid,
                                              "position": 154.75]), 154.75)
     }
+
+    @MainActor
+    func testHandoffReplyFromConnectivityQueueReturnsToMainActor() async {
+        let delivered = expectation(description: "Connectivity reply reaches the main actor")
+        let handler = WatchPhoneHandoffReply.stateHandler { state in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertEqual(state?.guid, "one")
+            delivered.fulfill()
+        }
+        DispatchQueue.global(qos: .utility).async {
+            handler(["accepted": true, "owner": "phone", "playing": true,
+                     "feedURL": "https://example.com/feed", "guid": "one",
+                     "audioURL": "https://example.com/one.mp3", "position": 120.0,
+                     "rate": 1.0, "observedAt": Date.now.timeIntervalSince1970])
+        }
+        await fulfillment(of: [delivered], timeout: 5)
+    }
     @MainActor
     func testUnfollowStagesDurablePayloadBeforeDeletingPodcast() throws {
         let library = try WatchLibrary(inMemory: true)
