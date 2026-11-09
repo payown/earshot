@@ -20,6 +20,8 @@ The required repository accessibility code review found and corrected wrong-devi
 
 The final integrated watchOS 27.0 simulator run passed 26 unit and 4 UI tests with zero failures. A deterministic handoff test covers the source advancing 31.75 seconds after the first snapshot. The final iPhone unit regression passed 2,745 tests with 34 skips and zero failures, using the exclusions below. The iPhone UI regression passed 40 tests with 7 skips and zero failures. Xcode archived and exported 1.2.6 (314) with the iPhone, watch, and widget bundles all at build 314; their archive signatures verify. Xcode reported `Upload succeeded` and `Uploaded package is processing` on November 7. App Store Connect processing, internal group assignment, and test notes still require verification.
 
+Status checked November 9: App Store Connect build `c09705f8-f061-445c-84f0-c9c487403353` is now `VALID` and `IN_BETA_TESTING` in the Internal Testing Group. It is `READY_FOR_BETA_SUBMISSION` externally and has not been submitted to Public Testers. Its en-US `whatsNew` is null, so Chapter 119 was not present in live build 314 tester notes. The next private candidate should carry a new chapter in both `docs/kashe.md` and the App Store Connect notes.
+
 The first broad iPhone unit run reported failures in two tests: `CloudProjectionCoordinatorTests.testBurstOfRemoteImportNotificationsCoalescesAndStopsCleanly` and `InterruptedLibraryResetRuntimeTests.testSameAccountRecoveryCompletesBeforeNormalLaunch`. The unchanged build 313 worktree at `cfb08daad90f5d6336b5d80282eb8f4558884219` reproduced both with the dedicated iPhone 17 simulator. The baseline command was:
 
 ```bash
