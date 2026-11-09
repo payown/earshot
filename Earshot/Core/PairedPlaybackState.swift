@@ -19,10 +19,14 @@ struct PairedPlaybackState: Codable, Equatable, Sendable {
     let rate: Double
     let playing: Bool
     let observedAt: TimeInterval
+    /// When the episode, position, rate, or transport actually changed. Unlike
+    /// observedAt, this does not advance for a repeated lifecycle publication.
+    let playbackChangedAt: TimeInterval?
 
     init(owner: Owner, feedURL: String = "", guid: String = "", title: String = "",
          podcastTitle: String = "", audioURL: String = "", position: Double = 0,
-         rate: Double = 1, playing: Bool = false, observedAt: TimeInterval = Date.now.timeIntervalSince1970) {
+         rate: Double = 1, playing: Bool = false, observedAt: TimeInterval = Date.now.timeIntervalSince1970,
+         playbackChangedAt: TimeInterval? = nil) {
         version = Self.schemaVersion
         self.owner = owner
         self.feedURL = feedURL
@@ -34,6 +38,7 @@ struct PairedPlaybackState: Codable, Equatable, Sendable {
         self.rate = rate.isFinite ? min(3, max(0.5, rate)) : 1
         self.playing = playing
         self.observedAt = observedAt
+        self.playbackChangedAt = playbackChangedAt
     }
 
     var hasEpisode: Bool { !feedURL.isEmpty && !guid.isEmpty && !title.isEmpty }
@@ -47,7 +52,8 @@ struct PairedPlaybackState: Codable, Equatable, Sendable {
     func supersedes(_ previous: Self?) -> Bool {
         guard version == Self.schemaVersion, position.isFinite, position >= 0,
               rate.isFinite, (0.5...3).contains(rate), observedAt.isFinite,
-              observedAt > 0, !title.isEmpty || guid.isEmpty else { return false }
+              observedAt > 0, !title.isEmpty || guid.isEmpty,
+              playbackChangedAt.map({ $0.isFinite && $0 > 0 && $0 <= observedAt + 5 }) ?? true else { return false }
         guard let previous else { return true }
         return owner == previous.owner && observedAt > previous.observedAt
     }
@@ -75,8 +81,19 @@ struct PairedPlaybackState: Codable, Equatable, Sendable {
         guard let data = value as? Data, let state = try? JSONDecoder().decode(Self.self, from: data),
               state.version == schemaVersion, state.position.isFinite, state.position >= 0,
               state.rate.isFinite, (0.5...3).contains(state.rate),
-              state.observedAt.isFinite, state.observedAt > 0 else { return nil }
+              state.observedAt.isFinite, state.observedAt > 0,
+              state.playbackChangedAt.map({ $0.isFinite && $0 > 0 && $0 <= state.observedAt + 5 }) ?? true else { return nil }
         return state
+    }
+
+    /// A fresh transport observation is not evidence of a new playback
+    /// checkpoint. Exact position equality also preserves a seek back to zero.
+    func hasPlaybackChange(comparedWith previous: Self?) -> Bool {
+        guard let previous else { return true }
+        return !matches(feedURL: previous.feedURL, guid: previous.guid) ||
+            position != previous.position || rate != previous.rate || playing != previous.playing ||
+            audioURL != previous.audioURL || title != previous.title ||
+            podcastTitle != previous.podcastTitle
     }
 }
 
