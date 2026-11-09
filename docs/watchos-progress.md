@@ -1,10 +1,41 @@
 # Earshot Watch implementation progress
 
-Updated 2026-11-06. The integrated device build is **not ready**. This file records implementation state so work can continue without treating an intermediate simulator build as the release candidate.
+## Source integration update, 2026-11-08
+
+The dated build 309/310 notes below are retained as development history. The current
+main integration sequence brings Duo (#1052–#1053), native iPad (#1054), Watch
+widgets and first handoff (#1055), offline library and CloudKit reconciliation
+(#1056), playback and reviewed recovery fixes (#1057), then this build 310 paired
+playback slice. Build 314 crash isolation and quality fixes follow separately.
+The newest currently active public TestFlight build is 1.2.6 (305); an uploaded
+internal 314 build does not make these source merges a distributed release.
+Physical Watch, CloudKit, handoff position, VoiceOver Magic Tap, iPad and Duo
+acceptance remain open. Immediate paired Queue snapshots stay disabled in the
+later 313/314 safety path. Michael authorized source integration into main;
+TestFlight distribution has not been authorized.
+
+Updated 2026-11-06. The current integrated internal TestFlight build is **1.2.6 (310)** on `test/watchos-126-310`, commit `d6ecea38`. It contains the full 1.2.6 watch integration and the live paired-playback fix in PR #1046. App Store Connect build `45f0ac2e-997e-4a98-9831-8ae65f1bd8f8` is **VALID**, upload complete, and **IN_BETA_TESTING** in the existing Internal Testing Group. English Chapter 115 notes are present; `autoNotifyEnabled` is true, although the CLI reported `notified: false` because the all-builds group was already assigned. The signed IPA's phone, independent watch and widget bundles all report 1.2.6 (310), and signatures and watch entitlements verify. This is ready for one integrated physical-device and VoiceOver evaluation; hardware behavior is not yet verified. See `docs/watchos-playback-sync-310.md` for the report, cause and fix, and `docs/watchos-device-testing.md` for the testing steps.
+
+Build 310 simulator verification: **20 watch unit tests and 4 watch UI tests passed** on watchOS 26.5 (`/tmp/EarshotWatchLiveFinalPass.xcresult`). The full iPhone run passed **2,742 unit tests with 34 existing skips**, and **40 UI tests with 7 device-specific skips**, with zero failures (`/tmp/EarshotPhoneLiveFull.xcresult`). A focused iPhone playback/connectivity suite passed 38 tests. Three targeted iPadOS 27.2 UI tests passed, including selected-sidebar VoiceOver state and largest-text Library navigation (`/tmp/Earshot310iPadUI.xcresult`). The signed Release archive and export succeeded. Simulator results do not establish physical Watch Connectivity, background audio, Bluetooth or VoiceOver behavior.
+
+The following 309 record is retained as distribution history.
+
+Integrated candidate version: **1.2.6 (309)** on `feature/watchos-126-integration`. Commit `5d9220ae` merges the complete watch implementation at `54675578` with the latest 1.2.6 Duo/iPad source at `f34d2897`, including the post-306 Library sidebar fix. Both parents are ancestors of the merge. App Store Connect reports 1.2.5 as the current App Store version; 1.2.6 (306) was the latest development build before this integration. Apple rejected uploads 307 and 308 during validation; build **309** is now processed and valid. Build 306 was uploaded at 09:48:44 Pacific on 2026-11-06, shortly after source commit `dff6cc09` at 09:48:29; App Store Connect does not expose a source commit for this build, so its exact SHA is unverified. The earlier unsigned 307 archive and signed 307 IPA showed the iPhone, independent watch and widget bundles, but Apple rejected their watch app location. The watch Info.plist declares independent installation, background audio and the Release CloudKit gate. The earlier unsigned 1.2.5 (299) archive is historical evidence, not the current candidate.
+
+**Distribution status:** Michael accepted the updated Program License Agreement and signed into Xcode. Both watch App IDs have the approved App Group; the watch app also has the existing CloudKit container. The three App Store provisioning profiles are active. Build 307 was rejected with **90680** for embedding the watch app in `PlugIns`; XcodeGen now embeds it in `Watch`. Build 308 was rejected with **90626** for four App Intent descriptions containing “Apple”; those descriptions were corrected without changing intent identifiers or behavior. The signed **1.2.6 (309)** archive and App Store IPA contain the phone, independent watch and widget bundles under the correct paths. All signatures and watch entitlements were inspected. App Store Connect build ID `02931f5f-0fa3-462b-b152-4698f6d508b9` is **VALID**, upload state **COMPLETE**, and internal state **IN_BETA_TESTING**. The existing Internal Testing Group has access to all builds; the 309 English test notes are present and automatic notifications are enabled. This is an internal hardware evaluation build, not a public release.
 
 ## Implemented and compiled
 
-- Independent watchOS 11 target `media.payown.earshot.watchkitapp`, watch unit/UI test targets, iPhone embedding in `PlugIns`, and watch background-audio Info.plist entry.
+| Approved phase | Implementation state | Remaining release proof |
+| --- | --- | --- |
+| 1. Foundation | Watch target, independent launch, generated project and tests | Signed watch provisioning |
+| 2. Portable core and library | Shared identity/parser, local SwiftData, Library, Inbox and folders | Live CloudKit account/bootstrap |
+| 3. Independent player | Direct stream/local AVPlayer, controls, chapters, sleep and remote commands | Background, route and interruption hardware pass |
+| 4. Downloads and bookmarks | Direct validated downloads, restart/cancel/delete, local bookmarks | Offline and low-storage hardware pass |
+| 5. Device coordination | Watch Connectivity control/handoff, private projection reconciliation, offline outbox | Two-device conflict and handoff hardware pass |
+| 6. Widgets, intents, hardening | Accessory widget, watch shortcuts, code accessibility review and automated suites | Widget tap, VoiceOver, signed TestFlight processing |
+
+- Independent watchOS 11 target `media.payown.earshot.watchkitapp`, watch unit/UI test targets, iPhone embedding in `Watch`, and watch background-audio Info.plist entry.
 - Watch-local SwiftData models separate from all frozen phone schemas and the phone store. Shared phone RSS parser, chapter parser, product identifiers, logger, and sleep-timer rules are compiled into the watch target.
 - Watch UI for Home, Library, podcast/episode details, Inbox, Queue, Downloads, Bookmarks, Settings, Now Playing, and optional iPhone control. The Library can fetch an HTTPS RSS feed directly, and episode playback and downloads use watch networking and storage.
 - Watch AVPlayer with `.longFormAudio` session activation, skip/seek/speed, Podcasting 2.0 and show-note chapters, sleep timer, interruption and headphone-disconnect pause, Now Playing metadata, and remote commands.
@@ -17,15 +48,19 @@ Updated 2026-11-06. The integrated device build is **not ready**. This file reco
 
 ## Required before an integrated test build
 
-- Complete durable CloudKit/watch state reconciliation, including subscription, queue, played state, progress, bookmarks and preference conflicts. Current paired import is a bootstrap action, not full sync.
-- Harden both handoff directions with durable transaction IDs, playback readiness, timeout and crash recovery, and physical-device tests. The current request/reply flow is an early implementation, not yet a proven transactional guarantee.
-- Improve direct download progress, validation, cancellation recovery and watch background-transfer behavior; test offline playback and storage failure.
-- Expand the WidgetKit content and App Intents; verify extension activation and deep links in simulator and on device.
-- Add deterministic connectivity, download, playback and sync tests; broaden watch UI tests and iPhone regression tests. Run the required `earshot-accessibility` review and physical VoiceOver/device checks.
-- Validate universal purchase on watch hardware without changing purchase UI. Verify signed archive packaging and TestFlight distribution.
+- Validate the watch projection against a real two-device CloudKit account and extended offline conflicts. Current code handles the main state types, but schema deployment, account propagation timing, folder edits and tombstone retention still need physical integration proof. Current paired import remains an optional bootstrap path.
+- Prove both handoff directions, timeout and crash recovery on physical devices. The sender waits for audio readiness and a matching acknowledgement, but a lost acknowledgement after the other device starts can leave an ambiguous state; the UI reports this and requests reconciliation.
+- Test direct download cancellation, storage pressure and offline playback on hardware. Watch transfers use foreground `URLSession` and restart an interrupted transfer; watchOS does not guarantee unlimited background transfer execution. iPhone-to-watch selection sends a queued request and the watch downloads directly.
+- Verify widget extension activation, deep links and App Intents on device. The `widgetURL` and matching `onOpenURL` handler are present as Apple documents. `simctl openurl` against the watchOS simulator returned `LSApplicationWorkspaceErrorDomain 115`, so a widget tap has not been proven by that command.
+- Add more deterministic end-to-end sync tests where the system frameworks allow. After the 1.2.6 merge, the watch unit/UI suite passed **18 of 18** on Series 11/watchOS 26.5 and **18 of 18** on 42 mm watchOS 27.0 simulators (`/tmp/Earshot307Watch.xcresult` and `/tmp/Earshot307Watch27.xcresult`). The iPhone unit suite passed **2,705, with 34 skipped and zero failed** on iPhone 17 Pro/iOS 26.0 simulator (`/tmp/Earshot307PhoneUnits.xcresult`). The iPhone UI suite passed **33, with 7 device-specific skips and zero failed** (`/tmp/Earshot307PhoneUI.xcresult`). Dedicated iPad UI checks on iPadOS 27.2 passed **3, with 1 expected compact-iPhone skip and zero failed** (`/tmp/Earshot307iPadUI.xcresult`), including selected-sidebar VoiceOver state. An iPad mini large-text UI case passed **1 of 1** on iPadOS 27.2 (`/tmp/Earshot307iPadMiniUI.xcresult`). The two known StoreKit simulator suites were excluded by repository policy. The structured accessibility code review is in `docs/watchos-accessibility-review.md`; physical VoiceOver/device checks remain.
+- Validate universal purchase on watch hardware without changing purchase UI. Signed 309 archive, IPA packaging and internal TestFlight processing passed.
 
 ## Current testing limits
 
-The physical Apple Watch is listed by `devicectl` as unavailable. A simulator can verify compilation, installation, navigation and pure logic, but cannot prove Bluetooth routing, cellular streaming, background audio, Watch Connectivity delivery or handoff. The watch UI test now passes with the visible Now Playing link. The independent watch unit tests and both generic simulator builds have passed; broader regression testing remains.
+The physical Apple Watch is listed by `devicectl` as unavailable. A simulator can verify compilation, installation, navigation and pure logic, but cannot prove Bluetooth routing, cellular streaming, background audio, Watch Connectivity delivery or handoff. The watch unit/UI and iPhone unit suites passed after the 1.2.6 merge; build 309 reran all **18 watch tests** and **16 iPhone shortcut tests** with zero failures; independent launch UI tests also passed earlier on a 40 mm watchOS 26.5 simulator and a 42 mm watchOS 27.0 simulator. The 307 Release **watchOS Simulator** app installed and launched successfully (PID 2704). Installing the device-archive watch binary in the simulator was denied, as expected: its Mach-O platform is WATCHOS rather than WATCHOSSIMULATOR. A watch UI test earlier exposed a Swift 6 executor violation in a Watch Connectivity callback; direct Release launch exposed the unsigned CloudKit entitlement trap. Both were corrected and their affected paths reran successfully. The watch App Group and existing CloudKit container are assigned in the Developer portal, and valid App Store profiles are installed. Signed 309 packaging and TestFlight validation passed. Physical Watch Connectivity, CloudKit, Bluetooth, cellular, offline, background audio and VoiceOver behavior remain to be verified by Michael.
 
-The source work is kept in the linked worktree on `feature/watchos-architecture`. Do not upload this intermediate build or merge it to `main`.
+The build 310 candidate is kept in the linked worktree `/Users/michaelbabcock/code/earshot-watch-310-testing` on `test/watchos-126-310`; the reviewable fix is in PR #1046. Do not merge to `main` or release publicly before Michael's physical-device approval.
+
+The foundation slice is in [draft PR #1045](https://github.com/payown/earshot/pull/1045), targeted to `main` and assigned to `@payown`; its `Build and test (EarshotTests)` CI check passed. It stays unmerged. The integrated branch contains later dependent commits; follow-up PRs will be opened in slices that meet the repository's 1,500-line non-generated limit after the foundation is approved, rather than posting one oversized integration PR.
+
+The current iOS target now includes iPhone and iPad (`TARGETED_DEVICE_FAMILY = 1,2`) from the 1.2.6 development branch. The integrated watch branch preserves its scene-based native iPad support; iPad simulator and device checks are required alongside phone regression testing.

@@ -232,12 +232,12 @@ final class WatchPlayer {
     func skipBackward() async { await seek(to: positionSeconds - Double(library.skipBackward)) }
     func skipForward() async { await seek(to: positionSeconds + Double(library.skipForward)) }
 
-    func setRate(_ newRate: Float) {
+    func setRate(_ newRate: Float, announce: Bool = true, persist: Bool = true) {
         rate = min(3, max(0.5, newRate))
-        UserDefaults.standard.set(rate, forKey: "watchPlaybackRate")
+        if persist { UserDefaults.standard.set(rate, forKey: "watchPlaybackRate") }
         if isPlaying { player.rate = rate }
         publishNowPlaying()
-        AccessibilityNotification.Announcement("Speed set to \(rate.formatted()) times").post()
+        if announce { AccessibilityNotification.Announcement("Speed set to \(rate.formatted()) times").post() }
     }
 
     func nextChapter() async {

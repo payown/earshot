@@ -3895,3 +3895,19 @@ Earshot 1.2.6 now includes an independent Apple Watch podcast player alongside t
 This is one integrated hardware evaluation. With VoiceOver enabled, follow the steps in the Earshot Apple Watch device-testing guide: first use the watch without the iPhone, then test offline playback, Bluetooth, background audio, handoff, synchronization and widgets. Please report the step number, device and OS versions, exact spoken text, what audio played, and which connections were available if anything differs from the expected result. The prior 1.2.6 Duo and iPad changes remain included; the iPad Library sidebar fix after build 306 is included as well.
 
 Archive note: Build 309 reused this chapter with only its build number changed in the tester-note heading. No separate Kashe story text appears in the repository history.
+
+---
+
+Chapter 115 - Build 310
+
+What to try first:
+
+Start an episode on iPhone, then open Earshot on Apple Watch. Home should name the iPhone, podcast, episode, playback state and position. Open iPhone Control and pause, play, and skip the iPhone. Transfer to Apple Watch; the same episode should start near the same position and speed, and the iPhone should stop after confirmation. Then start an episode directly on the watch. On iPhone, open Settings > Apple Watch Playback and transfer it back. Repeat after pausing, seeking, closing an app, or taking the devices out of range. A stale session should say last reported; a failed control or transfer should say so and avoid two devices playing. With VoiceOver, note exact speech, focus, both devices' audio and positions, watchOS/iOS versions, and which connections were available.
+
+Kashe's story:
+
+Kashe left her phone in her work bag and opened Earshot on her watch. The interview she'd started in the car was missing. She could hear it from the phone, but the watch had no idea what was playing.
+
+She told Renata, then tried the next build. This time the watch named the interview and said it was playing on iPhone. Kashe pressed Transfer and waited for the sound to move before putting the phone away.
+
+“Tell me which one has it,” she said. “Then let me choose.”

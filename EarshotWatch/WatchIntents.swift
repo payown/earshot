@@ -22,7 +22,7 @@ enum WatchNavigationRequest {
 
 struct OpenWatchNowPlayingIntent: AppIntent {
     static let title: LocalizedStringResource = "Open Earshot Now Playing"
-    static let description = IntentDescription("Open the Now Playing screen on Apple Watch.")
+    static let description = IntentDescription("Open the watch Now Playing screen.")
     static var openAppWhenRun: Bool { true }
 
     func perform() async throws -> some IntentResult {
@@ -33,7 +33,7 @@ struct OpenWatchNowPlayingIntent: AppIntent {
 
 struct PauseWatchAudioIntent: AppIntent {
     static let title: LocalizedStringResource = "Pause Earshot on Apple Watch"
-    static let description = IntentDescription("Pause podcast audio playing on Apple Watch.")
+    static let description = IntentDescription("Pause podcast audio playing on the watch.")
 
     func perform() async throws -> some IntentResult {
         let paused = await MainActor.run {
@@ -50,7 +50,7 @@ struct PauseWatchAudioIntent: AppIntent {
 
 struct ResumeWatchAudioIntent: AppIntent {
     static let title: LocalizedStringResource = "Resume Earshot on Apple Watch"
-    static let description = IntentDescription("Resume the current podcast on Apple Watch.")
+    static let description = IntentDescription("Resume the current podcast on the watch.")
 
     func perform() async throws -> some IntentResult {
         let runtime = await MainActor.run { WatchRuntimeRegistry.currentOrCreate() }

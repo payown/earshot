@@ -4,7 +4,7 @@ import AppIntents
 /// possible; the watch performs and validates the actual media transfer.
 struct SendEpisodeToWatchIntent: AppIntent {
     static let title: LocalizedStringResource = "Download Episode on Apple Watch"
-    static let description = IntentDescription("Choose an Earshot episode for a direct Apple Watch download.")
+    static let description = IntentDescription("Choose an Earshot episode for a direct watch download.")
     @Parameter(title: "Episode") var episode: EpisodeEntity
 
     static var parameterSummary: some ParameterSummary {

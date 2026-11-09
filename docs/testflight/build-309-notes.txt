@@ -1,0 +1,5 @@
+Chapter 114 - Build 309
+
+Earshot 1.2.6 now includes an independent Apple Watch podcast player alongside the current iPhone Duo and native iPad experience. On Apple Watch, browse Library and Inbox, subscribe to feeds, stream directly, save episodes for offline playback, manage Queue and bookmarks, and use accessible Now Playing controls. When both devices are available, try iPhone Control and transfer playback in each direction. Earshot also offers watch complications, Smart Stack widgets, and playback shortcuts.
+
+This is one integrated hardware evaluation. With VoiceOver enabled, follow the steps in the Earshot Apple Watch device-testing guide: first use the watch without the iPhone, then test offline playback, Bluetooth, background audio, handoff, synchronization and widgets. Please report the step number, device and OS versions, exact spoken text, what audio played, and which connections were available if anything differs from the expected result. The prior 1.2.6 Duo and iPad changes remain included; the iPad Library sidebar fix after build 306 is included as well.

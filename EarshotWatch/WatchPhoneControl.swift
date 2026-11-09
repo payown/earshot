@@ -80,6 +80,14 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
     private var pending = false
     private var syncingLibrary = false
     private var seenRemoteCommands: [String: [String: Any]] = [:]
+    private weak var watchPlayer: WatchPlayer?
+    private var lastPublished: PairedPlaybackState?
+    private var lastPhoneState: PairedPlaybackState?
+    var hasPhoneEpisode: Bool { lastPhoneState?.hasEpisode == true }
+    var phoneSessionIsLive: Bool {
+        WCSession.isSupported() && WCSession.default.activationState == .activated &&
+        WCSession.default.isReachable && phoneAvailable && lastPhoneState?.isCurrent() == true
+    }
 
     override init() {
         super.init()
@@ -87,6 +95,79 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         let session = WCSession.default
         session.delegate = self
         session.activate()
+        if let state = PairedPlaybackState.decode(session.receivedApplicationContext[PairedPlaybackState.contextKey]) {
+            acceptPhoneState(state)
+        }
+    }
+
+    func observePlayer(_ player: WatchPlayer) {
+        watchPlayer = player
+        observeWatchPlayer()
+    }
+
+    private func observeWatchPlayer() {
+        guard let player = watchPlayer else { return }
+        withObservationTracking {
+            _ = player.episode
+            _ = player.isPlaying
+            _ = player.positionSeconds
+            _ = player.rate
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.observeWatchPlayer()
+                self?.publishWatchState()
+            }
+        }
+    }
+
+    private func currentWatchState() -> PairedPlaybackState {
+        guard let player = watchPlayer, let episode = player.episode else {
+            return PairedPlaybackState(owner: .watch)
+        }
+        return PairedPlaybackState(owner: .watch, feedURL: episode.feedURL, guid: episode.guid,
+                                   title: episode.title, podcastTitle: episode.podcastTitle,
+                                   audioURL: episode.audioURL, position: player.positionSeconds,
+                                   rate: Double(player.rate), playing: player.isPlaying)
+    }
+
+    private func publishWatchState(force: Bool = false) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isCompanionAppInstalled else { return }
+        let state = currentWatchState()
+        guard force || state.needsPublication(after: lastPublished), let data = state.encoded() else { return }
+        do {
+            try session.updateApplicationContext([PairedPlaybackState.contextKey: data])
+            lastPublished = state
+        } catch {
+            AppLog.player.info("Phone playback context deferred: \(error.localizedDescription, privacy: .public)")
+        }
+        if session.isReachable {
+            session.sendMessage(["version": PairedPlaybackState.schemaVersion,
+                                 "kind": "playbackState", PairedPlaybackState.contextKey: data],
+                                replyHandler: nil, errorHandler: nil)
+        }
+    }
+
+    func publishLifecycleState() { publishWatchState(force: true) }
+
+    private func acceptPhoneState(_ state: PairedPlaybackState) {
+        guard state.owner == .phone, state.supersedes(lastPhoneState) else { return }
+        lastPhoneState = state
+        phonePlaying = state.playing
+        phoneEpisodeTitle = state.title
+        phonePosition = state.position
+        phoneFeedURL = state.feedURL
+        phoneGUID = state.guid
+        phoneAudioURL = state.audioURL
+        phonePodcastTitle = state.podcastTitle
+        phoneRate = Float(state.rate)
+        phoneObservedAt = Date(timeIntervalSince1970: state.observedAt)
+        status = state.hasEpisode
+            ? (phoneAvailable && state.isCurrent()
+                ? (state.playing ? "iPhone is playing" : "iPhone is paused")
+                : "Last reported iPhone playback. Refresh before controlling it.")
+            : "No current iPhone episode. Watch playback works independently."
     }
 
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
@@ -96,6 +177,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             if available {
                 self?.refreshQuickActions()
                 self?.refresh()
+                self?.publishWatchState(force: true)
             }
         }
     }
@@ -107,9 +189,25 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             if available {
                 self?.refreshQuickActions()
                 self?.refresh()
+                self?.publishWatchState(force: true)
             }
             if !available { self?.status = "iPhone unavailable. Watch playback works independently." }
         }
+    }
+
+    nonisolated func sessionCompanionAppInstalledDidChange(_ session: WCSession) {
+        Task { @MainActor [weak self] in self?.publishWatchState(force: true) }
+    }
+
+    nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+        guard let state = PairedPlaybackState.decode(applicationContext[PairedPlaybackState.contextKey]) else { return }
+        Task { @MainActor [weak self] in self?.acceptPhoneState(state) }
+    }
+
+    nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        guard message["kind"] as? String == "playbackState",
+              let state = PairedPlaybackState.decode(message[PairedPlaybackState.contextKey]) else { return }
+        Task { @MainActor [weak self] in self?.acceptPhoneState(state) }
     }
 
     func refreshQuickActions() {
@@ -134,6 +232,8 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         let version = message["version"] as? Int ?? 0
         let id = message["id"] as? String ?? ""
         let command = message["command"] as? String ?? ""
+        let requestedFeed = message["feedURL"] as? String
+        let requestedGUID = message["guid"] as? String
         let reply = WatchControlReplyBox(replyHandler)
         Task { @MainActor [weak self] in
             guard let self, version == 1, !id.isEmpty else {
@@ -154,6 +254,15 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                 if player.episode == nil { accepted = false; reason = "Choose an episode on watch first" }
                 else { await player.toggle() }
             case "pause": player.pause()
+            case "pauseIfEpisode":
+                if let feed = requestedFeed, let guid = requestedGUID,
+                   let episode = player.episode, episode.guid == guid,
+                   FeedURLIdentity.matches(episode.feedURL, feed) {
+                    player.pause(announce: false)
+                } else {
+                    accepted = false
+                    reason = "Watch playback changed before handoff"
+                }
             case "back":
                 if !player.hasLoadedItem { accepted = false; reason = "Start an episode on watch first" }
                 else { await player.skipBackward() }
@@ -166,11 +275,18 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                                          "playing": player.isPlaying, "position": player.positionSeconds,
                                          "rate": Double(player.rate),
                                          "observedAt": Date.now.timeIntervalSince1970]
-            if let episode = player.episode { result["title"] = episode.title }
+            if let episode = player.episode {
+                result["title"] = episode.title
+                result["feedURL"] = episode.feedURL
+                result["guid"] = episode.guid
+                result["audioURL"] = episode.audioURL
+                result["podcastTitle"] = episode.podcastTitle
+            }
             if !accepted { result["reason"] = reason }
             if command != "state" {
                 self.seenRemoteCommands[id] = result
                 if self.seenRemoteCommands.count > 128 { self.seenRemoteCommands.removeAll() }
+                self.publishWatchState(force: true)
             }
             reply.send(result)
         }
@@ -210,7 +326,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         AccessibilityNotification.Announcement(status).post()
     }
 
-    func refresh() { send("state") }
+    func refresh(announce: Bool = false) { send("state", announce: announce) }
     func toggle() { send("toggle") }
     func pause() { send("pause") }
     func back() { send("back") }
@@ -529,11 +645,12 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         }
     }
 
-    private func send(_ command: String, extra: [String: Any] = [:]) {
+    private func send(_ command: String, extra: [String: Any] = [:], announce: Bool = true) {
         guard !pending else { status = "Wait for the previous iPhone request"; return }
         guard WCSession.isSupported(), WCSession.default.isReachable else {
             phoneAvailable = false
             status = "iPhone is unreachable. No control was sent."
+            if announce { AccessibilityNotification.Announcement(status).post() }
             return
         }
         pending = true
@@ -544,38 +661,33 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         message["command"] = command
         WCSession.default.sendMessage(message) { @Sendable [weak self] response in
             let accepted = response["accepted"] as? Bool ?? false
-            let playing = response["playing"] as? Bool ?? false
-            let title = response["title"] as? String ?? ""
-            let position = response["position"] as? Double ?? 0
             let reason = response["reason"] as? String ?? ""
-            let feedURL = response["feedURL"] as? String ?? ""
-            let guid = response["guid"] as? String ?? ""
-            let audioURL = response["audioURL"] as? String ?? ""
-            let podcastTitle = response["podcastTitle"] as? String ?? "Podcast"
-            let rate = response["rate"] as? Double ?? 1
-            let observedAt = response["observedAt"] as? Double ?? 0
+            let state = PairedPlaybackState(owner: .phone,
+                                            feedURL: response["feedURL"] as? String ?? "",
+                                            guid: response["guid"] as? String ?? "",
+                                            title: response["title"] as? String ?? "",
+                                            podcastTitle: response["podcastTitle"] as? String ?? "Podcast",
+                                            audioURL: response["audioURL"] as? String ?? "",
+                                            position: response["position"] as? Double ?? 0,
+                                            rate: response["rate"] as? Double ?? 1,
+                                            playing: response["playing"] as? Bool ?? false,
+                                            observedAt: response["observedAt"] as? Double ?? 0)
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.pending = false
                 self.phoneAvailable = true
-                self.phonePlaying = playing
-                self.phoneEpisodeTitle = title
-                self.phonePosition = position
-                self.phoneFeedURL = feedURL
-                self.phoneGUID = guid
-                self.phoneAudioURL = audioURL
-                self.phonePodcastTitle = podcastTitle
-                self.phoneRate = Float(rate)
-                self.phoneObservedAt = Date(timeIntervalSince1970: observedAt)
-                self.status = accepted ? (playing ? "iPhone reports playback active" : "iPhone reports playback paused") : "iPhone request failed: \(reason)"
-                AccessibilityNotification.Announcement(self.status).post()
+                self.acceptPhoneState(state)
+                if !accepted { self.status = "iPhone request failed: \(reason)" }
+                if announce { AccessibilityNotification.Announcement(self.status).post() }
             }
         } errorHandler: { @Sendable [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.pending = false
                 self?.phoneAvailable = false
                 self?.status = "iPhone did not confirm the request. Watch playback is unchanged."
-                AccessibilityNotification.Announcement("iPhone did not confirm the request. Watch playback is unchanged.").post()
+                if announce {
+                    AccessibilityNotification.Announcement("iPhone did not confirm the request. Watch playback is unchanged.").post()
+                }
             }
         }
     }
@@ -592,26 +704,44 @@ struct WatchPhoneControlView: View {
 
     var body: some View {
         List {
-            Section("iPhone playback") {
-                Text(runtime.phone.status)
-                if !runtime.phone.phoneEpisodeTitle.isEmpty {
-                    Text(runtime.phone.phoneEpisodeTitle)
-                    Text("Position \(Int(runtime.phone.phonePosition / 60)) minutes")
-                }
-                Button("Refresh iPhone state") { runtime.phone.refresh() }
-                Button(runtime.phone.phonePlaying ? "Pause on iPhone" : "Play or pause on iPhone") { runtime.phone.toggle() }
-                Button("Back on iPhone") { runtime.phone.back() }
-                Button("Forward on iPhone") { runtime.phone.forward() }
-                Button("Transfer to Apple Watch") {
-                    runtime.phone.handoffToWatch(library: runtime.library, watchPlayer: runtime.player)
-                }
-                .disabled(!runtime.phone.phonePlaying)
-            }
+            WatchPhoneSessionSection(runtime: runtime)
             Section("Library") {
                 Button("Import subscriptions from iPhone") { runtime.phone.importLibrary(into: runtime.library) }
             }
         }
         .navigationTitle("iPhone Control")
         .task { runtime.phone.refresh() }
+    }
+}
+
+struct WatchPhoneSessionSection: View {
+    let runtime: WatchRuntime
+
+    var body: some View {
+        Section("iPhone playback") {
+            Text(runtime.phone.status)
+            if runtime.phone.hasPhoneEpisode {
+                Text(runtime.phone.phoneEpisodeTitle).font(.headline).accessibilityAddTraits(.isHeader)
+                Text(runtime.phone.phonePodcastTitle)
+                Text(runtime.phone.phoneSessionIsLive
+                     ? (runtime.phone.phonePlaying ? "Playing on iPhone" : "Paused on iPhone")
+                     : "Last known iPhone session")
+                Text("Position \(Int(runtime.phone.phonePosition / 60)) minutes, \(Int(runtime.phone.phonePosition) % 60) seconds")
+                    .accessibilityLabel("iPhone playback position")
+                    .accessibilityValue("\(Int(runtime.phone.phonePosition / 60)) minutes, \(Int(runtime.phone.phonePosition) % 60) seconds")
+            }
+            Button("Refresh iPhone state") { runtime.phone.refresh(announce: true) }
+            Button(runtime.phone.phonePlaying ? "Pause on iPhone" : "Play on iPhone") { runtime.phone.toggle() }
+                .disabled(!runtime.phone.phoneSessionIsLive || !runtime.phone.hasPhoneEpisode)
+            Button("Skip back on iPhone") { runtime.phone.back() }
+                .disabled(!runtime.phone.phoneSessionIsLive || !runtime.phone.hasPhoneEpisode)
+            Button("Skip forward on iPhone") { runtime.phone.forward() }
+                .disabled(!runtime.phone.phoneSessionIsLive || !runtime.phone.hasPhoneEpisode)
+            Button("Transfer to Apple Watch") {
+                runtime.phone.handoffToWatch(library: runtime.library, watchPlayer: runtime.player)
+            }
+            .disabled(!runtime.phone.phoneSessionIsLive || !runtime.phone.phonePlaying)
+            .accessibilityHint("Starts the same episode on this watch, then asks iPhone to stop")
+        }
     }
 }

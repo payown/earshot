@@ -1730,6 +1730,9 @@ struct EarshotApp: App {
         // first speech (#470). Skipped under tests.
         .onChange(of: scenePhase) { _, phase in
             runtime.updateLaunchScenePhase(phase)
+            if phase == .active || phase == .background {
+                PhoneWatchConnectivity.shared.publishLifecycleState()
+            }
             if phase == .active { LibrarySearchIndex.shared.requestRefresh() }
             if phase != .active {
                 foregroundMaintenanceRequestID = nil

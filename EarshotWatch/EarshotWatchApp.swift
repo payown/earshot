@@ -27,6 +27,7 @@ final class WatchRuntime {
         }
         library.onLocalChange = { [weak self] in self?.scheduleSync() }
         WatchRuntimeRegistry.runtime = self
+        phone.observePlayer(player)
         phone.processPendingDownloads(library: library, downloads: downloads)
         phone.refreshQuickActions()
     }
@@ -80,8 +81,15 @@ struct WatchLaunchView: View {
         }
         .task { if runtime == nil && !launchError { open() } }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { runtime?.syncNow() }
-            if phase == .background { runtime?.player.saveForLifecycle(); runtime?.syncNow() }
+            if phase == .active {
+                runtime?.syncNow()
+                runtime?.phone.refresh()
+            }
+            if phase == .background {
+                runtime?.player.saveForLifecycle()
+                runtime?.phone.publishLifecycleState()
+                runtime?.syncNow()
+            }
         }
     }
 
@@ -90,6 +98,7 @@ struct WatchLaunchView: View {
             runtime = try WatchRuntimeRegistry.runtime ?? WatchRuntime()
             Task { await runtime?.library.updateEntitlement() }
             runtime?.syncNow()
+            runtime?.phone.refresh()
         } catch {
             launchError = true
             AppLog.data.error("Watch library open failed: \(error.localizedDescription, privacy: .public)")
@@ -101,6 +110,12 @@ struct WatchHomeView: View {
     let runtime: WatchRuntime
     @Environment(\.scenePhase) private var scenePhase
     @State private var path: [String] = []
+    private var phoneRowValue: String {
+        guard runtime.phone.hasPhoneEpisode else { return "No current iPhone episode" }
+        let position = "\(Int(runtime.phone.phonePosition / 60)) minutes, \(Int(runtime.phone.phonePosition) % 60) seconds"
+        if !runtime.phone.phoneSessionIsLive { return "Last reported position, \(position)" }
+        return "\(runtime.phone.phonePlaying ? "Playing" : "Paused"), \(position)"
+    }
     private var recentPodcasts: [WatchPodcast] {
         let watchedFeeds = runtime.library.episodes
             .filter { $0.positionSeconds > 0 }
@@ -115,8 +130,33 @@ struct WatchHomeView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                Section("iPhone playback") {
+                    NavigationLink {
+                        WatchPhoneControlView(runtime: runtime)
+                    } label: {
+                        if runtime.phone.hasPhoneEpisode {
+                            VStack(alignment: .leading) {
+                                Text(runtime.phone.phoneEpisodeTitle)
+                                Text(runtime.phone.phonePodcastTitle).font(.caption)
+                                Text(runtime.phone.phoneSessionIsLive
+                                     ? (runtime.phone.phonePlaying ? "Playing on iPhone" : "Paused on iPhone")
+                                     : "Refresh to check iPhone playback")
+                                    .font(.caption)
+                                Text("\(Int(runtime.phone.phonePosition / 60)) minutes, \(Int(runtime.phone.phonePosition) % 60) seconds")
+                                    .font(.caption)
+                            }
+                        } else {
+                            Text("No iPhone episode")
+                        }
+                    }
+                    .accessibilityLabel(runtime.phone.hasPhoneEpisode
+                                        ? "iPhone playback, \(runtime.phone.phoneEpisodeTitle), \(runtime.phone.phonePodcastTitle)"
+                                        : "iPhone playback status")
+                    .accessibilityValue(phoneRowValue)
+                    .accessibilityHint("Opens iPhone playback controls and transfer to Apple Watch")
+                }
                 if let episode = runtime.player.episode {
-                    Section("Continue Listening") {
+                    Section("Continue on Apple Watch") {
                         NavigationLink {
                             WatchNowPlayingView(runtime: runtime)
                         } label: {
