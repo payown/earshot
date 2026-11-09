@@ -118,7 +118,7 @@ final class WatchPlayer {
     }
 
     func play(_ item: WatchEpisode, at requestedPosition: Double? = nil,
-              announce: Bool = true, requestID: UUID = UUID()) async {
+              announce: Bool = true, requestID: UUID = UUID(), preciseStart: Bool = false) async {
         let local = item.downloadFilename.map { WatchDownloadManager.destination(for: $0) }
         guard let url = WatchPlaybackSource.choose(local: local, remoteAddress: item.audioURL) else {
             status = "This episode has no playable audio address"
@@ -147,8 +147,20 @@ final class WatchPlayer {
             }
             let resume = max(0, requestedPosition ?? item.positionSeconds)
             if changedEpisode || abs(positionSeconds - resume) > 2 {
-                await player.seek(to: CMTime(seconds: resume, preferredTimescale: 600))
+                let target = CMTime(seconds: resume, preferredTimescale: 600)
+                let completed: Bool
+                if preciseStart {
+                    completed = await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+                } else {
+                    completed = await player.seek(to: target)
+                }
                 guard playbackRequests.owns(request) else { return }
+                if preciseStart && !completed {
+                    isPlaying = false
+                    isBuffering = false
+                    status = "Apple Watch could not reach the handoff position. iPhone continues."
+                    return
+                }
             }
             player.defaultRate = rate
             player.play()
@@ -169,7 +181,8 @@ final class WatchPlayer {
             }
             isPlaying = true
             isBuffering = false
-            positionSeconds = resume
+            let actualPosition = player.currentTime().seconds
+            positionSeconds = actualPosition.isFinite && actualPosition >= 0 ? actualPosition : resume
             savePosition()
             status = "Playing on Apple Watch"
             if announce { AccessibilityNotification.Announcement(status).post() }

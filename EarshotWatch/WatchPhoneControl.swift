@@ -77,7 +77,14 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
     private(set) var phoneRate: Float = 1
     private(set) var phoneObservedAt: Date = .distantPast
     private(set) var status = "iPhone unavailable. Watch playback works independently."
+    private(set) var queueSyncStatus = "Queue is saved on this watch. Paired synchronization has not been checked."
+    private var queueRefreshing = false
+    private var queueRefreshRequested = false
+    private var announceQueueRefresh = false
+    private var queueGeneration = UUID()
+    private var queueWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var pending = false
+    private var pendingFeedbackAnnounced = false
     private var syncingLibrary = false
     private var seenRemoteCommands: [String: [String: Any]] = [:]
     private weak var watchPlayer: WatchPlayer?
@@ -177,6 +184,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             if available {
                 self?.refreshQuickActions()
                 self?.refresh()
+                self?.refreshQueue()
                 self?.publishWatchState(force: true)
             }
         }
@@ -189,9 +197,11 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             if available {
                 self?.refreshQuickActions()
                 self?.refresh()
+                self?.refreshQueue()
                 self?.publishWatchState(force: true)
             }
             if !available { self?.status = "iPhone unavailable. Watch playback works independently." }
+            if !available { self?.queueSyncStatus = "iPhone unavailable. Local Queue remains available." }
         }
     }
 
@@ -205,6 +215,10 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        if message["kind"] as? String == "queueChanged", message["version"] as? Int == PairedQueuePage.version {
+            Task { @MainActor [weak self] in self?.refreshQueue() }
+            return
+        }
         guard message["kind"] as? String == "playbackState",
               let state = PairedPlaybackState.decode(message[PairedPlaybackState.contextKey]) else { return }
         Task { @MainActor [weak self] in self?.acceptPhoneState(state) }
@@ -218,6 +232,111 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                   let order = response["episodeActions"] as? [String] else { return }
             Task { @MainActor in WatchRuntimeRegistry.runtime?.library.updateEpisodeActionOrder(order) }
         } errorHandler: { @Sendable _ in }
+    }
+
+    func publishQueueChanged() {
+        guard PairedQueueTransportPolicy.immediateSnapshotsEnabled else { return }
+        guard WCSession.isSupported(), WCSession.default.isReachable else { return }
+        WCSession.default.sendMessage(["version": PairedQueuePage.version, "kind": "queueChanged"],
+                                      replyHandler: nil, errorHandler: nil)
+    }
+
+    func refreshQueue(announce: Bool = false) {
+        guard PairedQueueTransportPolicy.immediateSnapshotsEnabled else {
+            queueSyncStatus = PairedQueueTransportPolicy.unavailableStatus
+            if announce { AccessibilityNotification.Announcement(queueSyncStatus).post() }
+            return
+        }
+        announceQueueRefresh = announceQueueRefresh || announce
+        guard WCSession.isSupported(), WCSession.default.isReachable else {
+            queueGeneration = UUID()
+            finishQueueRefresh("iPhone unavailable. Local Queue remains available.")
+            return
+        }
+        guard WatchRuntimeRegistry.runtime?.cloud != nil else {
+            finishQueueRefresh("Queue synchronization is unavailable. Local Queue remains available.")
+            return
+        }
+        if queueRefreshing { queueRefreshRequested = true; return }
+        queueRefreshing = true
+        queueGeneration = UUID()
+        let generation = queueGeneration
+        requestQueuePage(offset: 0, total: nil, collected: [], generation: generation)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard let self, self.queueGeneration == generation, self.queueRefreshing else { return }
+            self.finishQueueRefresh("iPhone Queue request timed out. Local Queue remains available.")
+        }
+    }
+
+    private func finishQueueRefresh(_ status: String, success: Bool = false) {
+        queueSyncStatus = status
+        if announceQueueRefresh { AccessibilityNotification.Announcement(status).post() }
+        announceQueueRefresh = false
+        queueRefreshing = false
+        queueGeneration = UUID()
+        let waiters = Array(queueWaiters.values)
+        queueWaiters.removeAll()
+        for waiter in waiters { waiter.resume(returning: success) }
+        if queueRefreshRequested {
+            queueRefreshRequested = false
+            refreshQueue()
+        }
+    }
+
+    func refreshQueueForHandoff() async -> Bool {
+        if !PairedQueueTransportPolicy.immediateSnapshotsEnabled {
+            return WCSession.isSupported() && WCSession.default.isReachable
+        }
+        guard WCSession.isSupported(), WCSession.default.isReachable else { return false }
+        let waiterID = UUID()
+        return await withCheckedContinuation { continuation in
+            queueWaiters[waiterID] = continuation
+            refreshQueue()
+        }
+    }
+
+    private func requestQueuePage(offset: Int, total: Int?, collected: [PairedQueueContribution], generation: UUID) {
+        WCSession.default.sendMessage(["version": PairedQueuePage.version, "id": UUID().uuidString,
+                                       "command": "queueSnapshot", "offset": offset]) {
+            @Sendable [weak self] response in
+            let page = (response["data"] as? Data).flatMap { data -> PairedQueuePage? in
+                guard data.count <= 65_000 else { return nil }
+                return try? JSONDecoder().decode(PairedQueuePage.self, from: data)
+            }
+            let accepted = response["accepted"] as? Bool == true
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard self.queueGeneration == generation else { return }
+                guard accepted, let page, page.isValid, page.offset == offset,
+                      page.total >= offset + page.rows.count,
+                      total == nil || page.total == total,
+                      page.nextOffset == nil || !page.rows.isEmpty else {
+                    self.finishQueueRefresh("iPhone Queue could not be verified. Local Queue is unchanged.")
+                    return
+                }
+                let rows = collected + page.rows
+                if let next = page.nextOffset {
+                    self.requestQueuePage(offset: next, total: page.total, collected: rows, generation: generation)
+                } else {
+                    do {
+                        guard let cloud = WatchRuntimeRegistry.runtime?.cloud else {
+                            self.finishQueueRefresh("Queue projection unavailable. Local Queue remains available.")
+                            return
+                        }
+                        try cloud.acceptQueueContributions(rows)
+                        self.finishQueueRefresh("Queue updated from iPhone", success: true)
+                    } catch {
+                        self.finishQueueRefresh("Queue synchronization failed. Local Queue is unchanged.")
+                    }
+                }
+            }
+        } errorHandler: { @Sendable [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard self?.queueGeneration == generation else { return }
+                self?.finishQueueRefresh("iPhone Queue is unavailable. Local Queue remains available.")
+            }
+        }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
@@ -234,6 +353,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         let command = message["command"] as? String ?? ""
         let requestedFeed = message["feedURL"] as? String
         let requestedGUID = message["guid"] as? String
+        let queueOffset = message["offset"] as? Int
         let reply = WatchControlReplyBox(replyHandler)
         Task { @MainActor [weak self] in
             guard let self, version == 1, !id.isEmpty else {
@@ -241,8 +361,26 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                 return
             }
             if let prior = self.seenRemoteCommands[id] { reply.send(prior); return }
+            if command == "queueSnapshot", !PairedQueueTransportPolicy.immediateSnapshotsEnabled {
+                reply.send(["accepted": false, "reason": "Paired Queue refresh is unavailable"])
+                return
+            }
             guard let runtime = WatchRuntimeRegistry.currentOrCreate() else {
                 reply.send(["accepted": false, "reason": "Watch player unavailable"])
+                return
+            }
+            if command == "queueSnapshot" {
+                guard let cloud = runtime.cloud,
+                      let offset = queueOffset, offset >= 0, offset <= 10_000 else {
+                    reply.send(["accepted": false, "reason": "Watch queue projection unavailable"])
+                    return
+                }
+                do {
+                    let page = PairedQueuePage(rows: try cloud.queueContributions(), offset: offset)
+                    reply.send(["accepted": true, "data": try JSONEncoder().encode(page)])
+                } catch {
+                    reply.send(["accepted": false, "reason": "Watch queue could not be read"])
+                }
                 return
             }
             let player = runtime.player
@@ -339,6 +477,23 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             return
         }
         pending = true
+        pendingFeedbackAnnounced = false
+        status = PairedQueueTransportPolicy.immediateSnapshotsEnabled
+            ? "Synchronizing Queue before transfer"
+            : "Checking iPhone playback before transfer. Queue changes sync through iCloud when available."
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard await self.refreshQueueForHandoff(), WCSession.default.isReachable else {
+                self.pending = false
+                self.status = "iPhone is unavailable. iPhone playback continues."
+                AccessibilityNotification.Announcement(self.status).post()
+                return
+            }
+            self.requestHandoffState(library: library, watchPlayer: watchPlayer)
+        }
+    }
+
+    private func requestHandoffState(library: WatchLibrary, watchPlayer: WatchPlayer) {
         status = "Checking current iPhone playback"
         WCSession.default.sendMessage(["version": 1, "id": UUID().uuidString, "command": "state"]) { [weak self] response in
             let state = WatchHandoffSourceState(response)
@@ -370,9 +525,9 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let requestID = UUID()
-            watchPlayer.setRate(state.rate)
+            watchPlayer.setRate(state.rate, announce: false, persist: false)
             await watchPlayer.play(episode, at: state.anticipatedPosition(), announce: false,
-                                   requestID: requestID)
+                                   requestID: requestID, preciseStart: true)
             guard watchPlayer.ownsPlaybackRequest(requestID), watchPlayer.isPlaying,
                   watchPlayer.episode?.identity == episode.identity else {
                 self.pending = false
@@ -480,6 +635,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             return
         }
         pending = true
+        pendingFeedbackAnnounced = false
         status = "Checking iPhone playback"
         let feedURL = episode.feedURL
         let guid = episode.guid
@@ -646,7 +802,14 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
     }
 
     private func send(_ command: String, extra: [String: Any] = [:], announce: Bool = true) {
-        guard !pending else { status = "Wait for the previous iPhone request"; return }
+        guard !pending else {
+            status = "Wait for the previous iPhone request"
+            if announce && !pendingFeedbackAnnounced {
+                pendingFeedbackAnnounced = true
+                AccessibilityNotification.Announcement(status).post()
+            }
+            return
+        }
         guard WCSession.isSupported(), WCSession.default.isReachable else {
             phoneAvailable = false
             status = "iPhone is unreachable. No control was sent."
@@ -654,6 +817,7 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
             return
         }
         pending = true
+        pendingFeedbackAnnounced = false
         status = "Contacting iPhone"
         var message = extra
         message["version"] = 1
@@ -709,6 +873,7 @@ struct WatchPhoneControlView: View {
                 Button("Import subscriptions from iPhone") { runtime.phone.importLibrary(into: runtime.library) }
             }
         }
+        .accessibilityAction(.magicTap) { runtime.performMagicTap(phoneControlScreen: true) }
         .navigationTitle("iPhone Control")
         .task { runtime.phone.refresh() }
     }

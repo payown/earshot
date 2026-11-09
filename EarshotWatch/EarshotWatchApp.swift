@@ -1,4 +1,18 @@
+import Accessibility
 import SwiftUI
+
+enum WatchMagicTapTarget: Equatable {
+    case watch, phone, none
+
+    static func choose(watchIsPlaying: Bool, watchHasEpisode: Bool,
+                       phoneIsLive: Bool, phoneHasEpisode: Bool,
+                       phoneControlScreen: Bool = false) -> Self {
+        if phoneControlScreen { return phoneIsLive && phoneHasEpisode ? .phone : .none }
+        if phoneIsLive && phoneHasEpisode && !watchIsPlaying { return .phone }
+        if watchHasEpisode { return .watch }
+        return .none
+    }
+}
 
 @MainActor
 @Observable
@@ -10,6 +24,7 @@ final class WatchRuntime {
     let cloud: WatchCloudSync?
     let cloudOpenError: String?
     private var syncTask: Task<Void, Never>?
+    private var queueSyncTask: Task<Void, Never>?
 
     init() throws {
         library = try WatchLibrary()
@@ -26,6 +41,7 @@ final class WatchRuntime {
             AppLog.data.error("Watch projection unavailable: \(error.localizedDescription, privacy: .public)")
         }
         library.onLocalChange = { [weak self] in self?.scheduleSync() }
+        library.onQueueChange = { [weak self] in self?.scheduleQueueSync() }
         WatchRuntimeRegistry.runtime = self
         phone.observePlayer(player)
         phone.processPendingDownloads(library: library, downloads: downloads)
@@ -46,6 +62,34 @@ final class WatchRuntime {
         syncTask?.cancel()
         syncTask = nil
         cloud?.reconcile()
+    }
+
+    /// VoiceOver Magic Tap follows the playback device shown in Now Playing.
+    func performMagicTap(phoneControlScreen: Bool = false) {
+        switch WatchMagicTapTarget.choose(watchIsPlaying: player.isPlaying,
+                                          watchHasEpisode: player.episode != nil,
+                                          phoneIsLive: phone.phoneSessionIsLive,
+                                          phoneHasEpisode: phone.hasPhoneEpisode,
+                                          phoneControlScreen: phoneControlScreen) {
+        case .phone: phone.toggle()
+        case .watch: Task { await player.toggle() }
+        case .none:
+            AccessibilityNotification.Announcement(phoneControlScreen
+                ? "iPhone playback is unavailable" : "Choose an episode to play").post()
+        }
+    }
+
+    private func scheduleQueueSync() {
+        queueSyncTask?.cancel()
+        queueSyncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, let self else { return }
+            syncTask?.cancel()
+            syncTask = nil
+            cloud?.reconcile()
+            phone.publishQueueChanged()
+            queueSyncTask = nil
+        }
     }
 }
 
@@ -84,6 +128,7 @@ struct WatchLaunchView: View {
             if phase == .active {
                 runtime?.syncNow()
                 runtime?.phone.refresh()
+                runtime?.phone.refreshQueue()
             }
             if phase == .background {
                 runtime?.player.saveForLifecycle()
@@ -99,6 +144,7 @@ struct WatchLaunchView: View {
             Task { await runtime?.library.updateEntitlement() }
             runtime?.syncNow()
             runtime?.phone.refresh()
+            runtime?.phone.refreshQueue()
         } catch {
             launchError = true
             AppLog.data.error("Watch library open failed: \(error.localizedDescription, privacy: .public)")
@@ -210,6 +256,7 @@ struct WatchHomeView: View {
                 }
                 if let message = runtime.library.message { Text(message) }
             }
+            .accessibilityAction(.magicTap) { runtime.performMagicTap() }
             .navigationTitle("Earshot")
             .navigationDestination(for: String.self) { destination in
                 if destination == "now-playing" { WatchNowPlayingView(runtime: runtime) }
@@ -347,8 +394,14 @@ struct WatchPlayableEpisodeRow: View {
                     playButton
                 case .queue:
                     playButton
-                        .accessibilityAction(named: "Move Up") { runtime.library.moveQueue(episode, offset: -1) }
-                        .accessibilityAction(named: "Move Down") { runtime.library.moveQueue(episode, offset: 1) }
+                        .accessibilityAction(named: "Move Up") {
+                            runtime.library.moveQueue(episode, offset: -1)
+                            afterRemoval?()
+                        }
+                        .accessibilityAction(named: "Move Down") {
+                            runtime.library.moveQueue(episode, offset: 1)
+                            afterRemoval?()
+                        }
                         .accessibilityAction(named: "Remove from Queue") {
                             runtime.library.removeFromQueue(episode)
                             afterRemoval?()
@@ -371,14 +424,25 @@ struct WatchPlayableEpisodeRow: View {
         } label: {
             WatchEpisodeLabel(episode: episode)
         }
-        .accessibilityLabel("Play \(episode.title)")
-        .accessibilityValue(episode.isPlayed ? "Played" : episode.positionSeconds > 0 ? "Partly played" : "Unplayed")
+        .accessibilityLabel(context == .queue
+                            ? "Play \(episode.title), \(episode.podcastTitle)"
+                            : "Play \(episode.title)")
+        .accessibilityValue(spokenValue)
         .accessibilityHint("Plays on Apple Watch")
         .accessibilityActions {
             ForEach(orderedActions, id: \.self) { action in
                 Button(label(for: action)) { perform(action) }
             }
         }
+    }
+
+    private var spokenValue: String {
+        let state = episode.isPlayed ? "Played" : episode.positionSeconds > 0 ? "Partly played" : "Unplayed"
+        guard context == .queue,
+              let position = runtime.library.queue.firstIndex(where: { $0.identity == episode.identity }) else {
+            return state
+        }
+        return "\(state), position \(position + 1) of \(runtime.library.queue.count)"
     }
 
     private var orderedActions: [String] {
@@ -524,6 +588,13 @@ struct WatchQueueView: View {
         List {
             Text("Up Next").font(.headline).accessibilityAddTraits(.isHeader)
                 .accessibilityFocused($focusHeading)
+            Text(runtime.phone.queueSyncStatus)
+                .accessibilityLabel("Queue synchronization")
+                .accessibilityValue(runtime.phone.queueSyncStatus)
+            Button("Refresh Queue") {
+                runtime.syncNow()
+                runtime.phone.refreshQueue(announce: true)
+            }
             ForEach(runtime.library.queue) { episode in
                 WatchPlayableEpisodeRow(runtime: runtime, episode: episode, context: .queue,
                                         afterRemoval: {
@@ -536,6 +607,7 @@ struct WatchQueueView: View {
             if runtime.library.queue.isEmpty { Text("Your queue is empty") }
         }
         .navigationTitle("Up Next")
+        .task { runtime.phone.refreshQueue() }
     }
 }
 
