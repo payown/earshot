@@ -1,7 +1,7 @@
 # Earshot Watch implementation progress
 
-Build **1.2.6 (315)** is now available to the authorized Internal Testing
-Group with Chapter 120 notes. See [the distribution record](testflight/build-315-internal.md)
+Build **1.2.6 (316)** is now available to the authorized Internal Testing
+Group with Chapter 121 notes. See [the distribution record](testflight/build-316-internal.md)
 for signed IPA, CI, group and remaining device-acceptance evidence. The dated
 source and build 309–314 history below is retained unchanged.
 
