@@ -39,6 +39,14 @@ final class EarshotWatchTests: XCTestCase {
     }
 
     func testReachableStalePhoneStateAndOppositeDeviceRequireTransferConfirmation() {
+        XCTAssertTrue(WatchPlaybackCompetitionPolicy.phoneControlTakesOwnership(command: "toggle", accepted: true))
+        XCTAssertFalse(WatchPlaybackCompetitionPolicy.phoneControlTakesOwnership(command: "toggle", accepted: false))
+        XCTAssertFalse(WatchPlaybackCompetitionPolicy.phoneControlTakesOwnership(command: "state", accepted: true))
+        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: false, watchHasEpisode: true,
+                                                   watchOwnsPlayback: false, watchCheckpoint: 100,
+                                                   phoneIsLive: true, phoneIsPlaying: true,
+                                                   phoneHasEpisode: true,
+                                                   phoneContinuationCheckpoint: 110), .phone)
         XCTAssertTrue(WatchPlaybackCompetitionPolicy.watchNeedsPhoneConfirmation(
             phoneReachable: true, phoneReportedPlaying: true, watchPlaying: false))
         XCTAssertFalse(WatchPlaybackCompetitionPolicy.watchNeedsPhoneConfirmation(

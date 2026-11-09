@@ -991,6 +991,10 @@ final class WatchPhoneControl: NSObject, WCSessionDelegate {
                 self.pending = false
                 self.phoneAvailable = true
                 self.acceptPhoneState(state)
+                if WatchPlaybackCompetitionPolicy.phoneControlTakesOwnership(command: command,
+                                                                              accepted: accepted) {
+                    WatchRuntimeRegistry.runtime?.selectPlaybackDevice(.phone)
+                }
                 if !accepted { self.status = "iPhone request failed: \(reason)" }
                 if announce { AccessibilityNotification.Announcement(self.status).post() }
             }

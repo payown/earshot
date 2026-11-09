@@ -12,6 +12,10 @@ enum WatchPlaybackCompetitionPolicy {
     static func phonePlayNeedsTransfer(watchPlaying: Bool, phonePlaying: Bool) -> Bool {
         watchPlaying && !phonePlaying
     }
+
+    static func phoneControlTakesOwnership(command: String, accepted: Bool) -> Bool {
+        accepted && command == "toggle"
+    }
 }
 
 enum WatchMagicTapTarget: Equatable {
