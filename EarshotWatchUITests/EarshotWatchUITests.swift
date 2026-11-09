@@ -54,14 +54,32 @@ final class EarshotWatchUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         for _ in 0..<4 { app.swipeDown() }
-        let upNext = app.buttons["Up Next, 0"]
+        let upNext = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Up Next")).firstMatch
         for _ in 0..<5 where !upNext.isHittable { app.swipeUp() }
         XCTAssertTrue(upNext.isHittable)
         upNext.tap()
         XCTAssertTrue(app.navigationBars["Up Next"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Queue synchronization"].exists)
-        XCTAssertTrue(app.buttons["Refresh Queue"].exists)
+        let refresh = app.buttons["Refresh Queue"]
+        for _ in 0..<5 where !refresh.exists { app.swipeUp() }
+        XCTAssertTrue(refresh.exists)
         // Queue contents can arrive from a paired simulator or persisted store.
         // Navigation and the explicit refresh action remain deterministic.
+    }
+
+    @MainActor
+    func testDownloadsNavigationRemainsAvailable() {
+        let app = XCUIApplication()
+        app.launch()
+        for _ in 0..<4 { app.swipeDown() }
+        let downloads = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Downloads")).firstMatch
+        for _ in 0..<12 where !downloads.exists {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        }
+        XCTAssertTrue(downloads.waitForExistence(timeout: 5))
+        guard downloads.exists else { return }
+        downloads.tap()
+        XCTAssertTrue(app.navigationBars["Downloads"].waitForExistence(timeout: 5))
     }
 }
