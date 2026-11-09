@@ -363,11 +363,14 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
                     do {
                         guard let runtime = self.runtime,
                               try await runtime.acceptPairedQueueContributions(rows) else {
+                        guard self.queueGeneration == generation else { return }
                             self.finishQueueRefresh("Queue projection unavailable. iPhone Queue remains available.")
                             return
                         }
+                    guard self.queueGeneration == generation else { return }
                         self.finishQueueRefresh("Queue updated from Apple Watch", success: true)
                     } catch {
+                    guard self.queueGeneration == generation else { return }
                         self.finishQueueRefresh("Watch Queue synchronization failed. iPhone Queue remains available.")
                     }
                 }

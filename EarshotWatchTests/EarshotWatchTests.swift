@@ -383,10 +383,10 @@ final class EarshotWatchTests: XCTestCase {
         XCTAssertEqual(state.anticipatedPosition(now: 1_002), 123, accuracy: 0.001)
         XCTAssertNil(WatchHandoffSourceState(snapshot, now: 1_020))
         XCTAssertNil(state.pausedPosition(["accepted": true, "owner": "phone", "playing": false,
-                                           "feedURL": state.feedURL, "guid": "another", "position": 140.0]))
+                                           "feedURL": state.feedURL, "guid": "another", "position": 154.75]))
         XCTAssertEqual(state.pausedPosition(["accepted": true, "owner": "phone", "playing": false,
                                              "feedURL": state.feedURL, "guid": state.guid,
-                                             "position": 140.0]), 140)
+                                             "position": 154.75]), 154.75)
     }
     @MainActor
     func testUnfollowStagesDurablePayloadBeforeDeletingPodcast() throws {

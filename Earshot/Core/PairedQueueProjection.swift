@@ -70,7 +70,8 @@ struct PairedQueueContribution: Codable, Sendable, Equatable {
               (chapterURL?.count ?? 0) <= 8_192,
               (transcriptURL?.count ?? 0) <= 8_192 else { return false }
         let latestAllowedUpdate = Date.now.addingTimeInterval(300)
-        return modifiedAt <= latestAllowedUpdate && membershipUpdatedAt <= latestAllowedUpdate
+        return modifiedAt <= latestAllowedUpdate && membershipUpdatedAt <= latestAllowedUpdate &&
+            (deletedAt.map { $0 <= latestAllowedUpdate } ?? true)
     }
 
     /// Merge clocks independently. A delayed order update cannot revive a
@@ -108,7 +109,7 @@ struct PairedQueueContribution: Codable, Sendable, Equatable {
             if row.episodeAudioURL == nil { row.episodeAudioURL = audioURL }
         }
         if let deletedAt, deletedAt > (row.deletedAt ?? .distantPast),
-           deletedAt >= max(incomingMembership, modifiedAt) {
+           deletedAt >= max(row.membershipUpdatedAt, row.modifiedAt) {
             row.deletedAt = deletedAt
         } else if membershipChanged || orderChanged {
             row.deletedAt = nil

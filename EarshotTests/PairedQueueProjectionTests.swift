@@ -39,6 +39,32 @@ final class PairedQueueProjectionTests: XCTestCase {
         XCTAssertEqual(current.position, 4)
     }
 
+    func testOlderTombstoneCannotDeleteNewerQueuedRow() {
+        let current = CloudQueueItemProjection()
+        current.feedURL = "https://example.com/feed"
+        current.episodeGUID = "one"
+        current.sourceDeviceID = "watch"
+        current.isQueued = true
+        current.membershipUpdatedAt = Date(timeIntervalSinceNow: -10)
+        current.modifiedAt = current.membershipUpdatedAt
+
+        let stale = CloudQueueItemProjection()
+        stale.feedURL = current.feedURL
+        stale.episodeGUID = current.episodeGUID
+        stale.sourceDeviceID = current.sourceDeviceID
+        stale.isQueued = false
+        stale.membershipUpdatedAt = Date(timeIntervalSinceNow: -100)
+        stale.modifiedAt = stale.membershipUpdatedAt
+        stale.deletedAt = Date(timeIntervalSinceNow: -50)
+
+        PairedQueueContribution(stale).merge(into: current)
+        XCTAssertTrue(current.isQueued)
+        XCTAssertNil(current.deletedAt)
+
+        stale.deletedAt = Date(timeIntervalSinceNow: 600)
+        XCTAssertFalse(PairedQueueContribution(stale).isValid)
+    }
+
     func testPagedTransportRejectsInvalidOrOversizedRows() throws {
         let rows = (0..<45).map { index -> PairedQueueContribution in
             let row = CloudQueueItemProjection()
