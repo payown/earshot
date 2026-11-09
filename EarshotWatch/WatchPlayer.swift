@@ -39,6 +39,17 @@ enum WatchResumePosition {
     }
 }
 
+enum WatchResumeEpisode {
+    static func choose(from episodes: [WatchEpisode], savedIdentity: String?) -> WatchEpisode? {
+        if let savedIdentity,
+           let saved = episodes.first(where: { $0.identity == savedIdentity && !$0.isPlayed }) {
+            return saved
+        }
+        return episodes.filter { !$0.isPlayed && $0.positionSeconds > 0 }
+            .max(by: { $0.updatedAt < $1.updatedAt })
+    }
+}
+
 enum WatchPlaybackSource {
     static func choose(local: URL?, remoteAddress: String) -> URL? {
         if let local, FileManager.default.fileExists(atPath: local.path) { return local }
@@ -85,9 +96,9 @@ final class WatchPlayer {
         self.library = library
         let savedRate = UserDefaults.standard.float(forKey: "watchPlaybackRate")
         if (0.5...3).contains(savedRate) { rate = savedRate }
-        if let resumable = library.episodes
-            .filter({ !$0.isPlayed && $0.positionSeconds > 0 })
-            .max(by: { $0.updatedAt < $1.updatedAt }) {
+        if let resumable = WatchResumeEpisode.choose(
+            from: library.episodes,
+            savedIdentity: UserDefaults.standard.string(forKey: "watchCurrentEpisodeIdentity")) {
             episode = resumable
             positionSeconds = resumable.positionSeconds
             durationSeconds = Double(resumable.durationSeconds ?? 0)
@@ -203,6 +214,7 @@ final class WatchPlayer {
             }
             isPlaying = true
             isBuffering = false
+            UserDefaults.standard.set(item.identity, forKey: "watchCurrentEpisodeIdentity")
             onConfirmedPlayback?()
             setRemotePlaybackEnabled(true)
             let actualPosition = player.currentTime().seconds

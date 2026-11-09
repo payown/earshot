@@ -66,6 +66,20 @@ final class EarshotWatchTests: XCTestCase {
     }
 
     @MainActor
+    func testPausedWatchEpisodeAtZeroRemainsResumableAfterRestart() throws {
+        let library = try WatchLibrary(inMemory: true)
+        let episode = WatchEpisode(feedURL: "https://example.com/feed", guid: "at-zero",
+                                   title: "Beginning", podcastTitle: "Show",
+                                   audioURL: "https://example.com/zero.mp3")
+        library.context.insert(episode)
+        library.persist()
+        XCTAssertEqual(WatchResumeEpisode.choose(from: library.episodes,
+                                                savedIdentity: episode.identity)?.identity,
+                       episode.identity)
+        XCTAssertNil(WatchResumeEpisode.choose(from: library.episodes, savedIdentity: nil))
+    }
+
+    @MainActor
     func testPhoneContinuationPersistsZeroSeekAndRejectsStaleDuplicateAndInvalidMedia() throws {
         let suite = "WatchContinuationTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
