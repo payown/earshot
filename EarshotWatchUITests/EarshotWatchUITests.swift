@@ -17,14 +17,23 @@ final class EarshotWatchUITests: XCTestCase {
     }
 
     @MainActor
-    func testPhoneControlRemainsReachableWithoutPhone() {
+    func testUnifiedPlaybackScreenRetainsPhoneControlsWithoutPhone() {
         let app = XCUIApplication()
         app.launch()
         let phone = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "iPhone playback")).firstMatch
         XCTAssertTrue(phone.waitForExistence(timeout: 10))
         phone.tap()
-        XCTAssertTrue(app.navigationBars["iPhone Control"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Refresh iPhone state"].exists)
+        XCTAssertTrue(app.navigationBars["Now Playing"].waitForExistence(timeout: 5))
+        let iPhoneSelector = app.buttons["iPhone controls"]
+        for _ in 0..<8 where !iPhoneSelector.exists { app.swipeDown() }
+        XCTAssertTrue(iPhoneSelector.exists)
+        XCTAssertTrue(app.staticTexts["No iPhone episode available"].exists)
+        let refresh = app.buttons["Refresh iPhone state"]
+        for _ in 0..<16 where !refresh.exists {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.68))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
+        }
+        XCTAssertTrue(refresh.exists)
         let transfer = app.buttons["Transfer to Apple Watch"]
         for _ in 0..<8 where !transfer.isHittable {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))

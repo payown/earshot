@@ -1,14 +1,41 @@
 import Accessibility
 import SwiftUI
 
+enum WatchPlaybackDevice: String, Equatable { case watch, phone }
+
+enum WatchPlaybackCompetitionPolicy {
+    static func watchNeedsPhoneConfirmation(phoneReachable: Bool, phoneReportedPlaying: Bool,
+                                            watchPlaying: Bool) -> Bool {
+        phoneReachable && phoneReportedPlaying && !watchPlaying
+    }
+
+    static func phonePlayNeedsTransfer(watchPlaying: Bool, phonePlaying: Bool) -> Bool {
+        watchPlaying && !phonePlaying
+    }
+}
+
 enum WatchMagicTapTarget: Equatable {
-    case watch, phone, none
+    case watch, phone, continuePhoneOnWatch, none
 
     static func choose(watchIsPlaying: Bool, watchHasEpisode: Bool,
-                       phoneIsLive: Bool, phoneHasEpisode: Bool,
-                       phoneControlScreen: Bool = false) -> Self {
+                       watchOwnsPlayback: Bool, watchCheckpoint: TimeInterval?,
+                       phoneIsLive: Bool, phoneIsPlaying: Bool, phoneHasEpisode: Bool,
+                       phoneContinuationCheckpoint: TimeInterval?,
+                       phoneControlScreen: Bool = false, watchControlScreen: Bool = false) -> Self {
         if phoneControlScreen { return phoneIsLive && phoneHasEpisode ? .phone : .none }
-        if phoneIsLive && phoneHasEpisode && !watchIsPlaying { return .phone }
+        if watchControlScreen {
+            if phoneIsLive && phoneIsPlaying && !watchIsPlaying { return .none }
+            if watchHasEpisode { return .watch }
+            return phoneContinuationCheckpoint != nil ? .continuePhoneOnWatch : .none
+        }
+        if watchIsPlaying { return .watch }
+        if phoneIsLive && phoneIsPlaying && watchOwnsPlayback { return .none }
+        if phoneIsLive && phoneIsPlaying && phoneHasEpisode { return .phone }
+        if let phoneContinuationCheckpoint,
+           !watchHasEpisode || phoneContinuationCheckpoint > (watchCheckpoint ?? 0) {
+            return .continuePhoneOnWatch
+        }
+        if watchOwnsPlayback && watchHasEpisode { return .watch }
         if watchHasEpisode { return .watch }
         return .none
     }
@@ -23,6 +50,8 @@ final class WatchRuntime {
     let phone: WatchPhoneControl
     let cloud: WatchCloudSync?
     let cloudOpenError: String?
+    private(set) var playbackDevice = WatchPlaybackDevice(
+        rawValue: UserDefaults.standard.string(forKey: "watchPlaybackDevice") ?? "watch") ?? .watch
     private var syncTask: Task<Void, Never>?
     private var queueSyncTask: Task<Void, Never>?
 
@@ -43,7 +72,9 @@ final class WatchRuntime {
         library.onLocalChange = { [weak self] in self?.scheduleSync() }
         library.onQueueChange = { [weak self] in self?.scheduleQueueSync() }
         WatchRuntimeRegistry.runtime = self
+        if playbackDevice == .phone { player.relinquishRemotePlayback() }
         phone.observePlayer(player)
+        player.onConfirmedPlayback = { [weak self] in self?.selectPlaybackDevice(.watch) }
         phone.processPendingDownloads(library: library, downloads: downloads)
         phone.refreshQuickActions()
     }
@@ -64,18 +95,74 @@ final class WatchRuntime {
         cloud?.reconcile()
     }
 
-    /// VoiceOver Magic Tap follows the playback device shown in Now Playing.
-    func performMagicTap(phoneControlScreen: Bool = false) {
+    func selectPlaybackDevice(_ device: WatchPlaybackDevice) {
+        playbackDevice = device
+        UserDefaults.standard.set(device.rawValue, forKey: "watchPlaybackDevice")
+    }
+
+    var watchResumeNeedsTransfer: Bool {
+        WatchPlaybackCompetitionPolicy.watchNeedsPhoneConfirmation(
+            phoneReachable: phone.phoneIsReachable, phoneReportedPlaying: phone.phonePlaying,
+            watchPlaying: player.isPlaying)
+    }
+
+    var defaultPlaybackScreen: WatchPlaybackDevice {
         switch WatchMagicTapTarget.choose(watchIsPlaying: player.isPlaying,
                                           watchHasEpisode: player.episode != nil,
+                                          watchOwnsPlayback: playbackDevice == .watch,
+                                          watchCheckpoint: player.episode?.positionUpdatedAt.timeIntervalSince1970,
                                           phoneIsLive: phone.phoneSessionIsLive,
+                                          phoneIsPlaying: phone.phonePlaying,
                                           phoneHasEpisode: phone.hasPhoneEpisode,
-                                          phoneControlScreen: phoneControlScreen) {
+                                          phoneContinuationCheckpoint: phone.savedContinuation?.checkpointAt) {
+        case .phone, .continuePhoneOnWatch: return .phone
+        case .watch, .none: return playbackDevice
+        }
+    }
+
+    func playOnWatch(_ episode: WatchEpisode, at position: Double? = nil) async {
+        guard !watchResumeNeedsTransfer else {
+            AccessibilityNotification.Announcement("Check current iPhone playback, then transfer or continue on Apple Watch.").post()
+            return
+        }
+        await player.play(episode, at: position)
+    }
+
+    func toggleWatch() async {
+        guard !watchResumeNeedsTransfer else {
+            AccessibilityNotification.Announcement("Check current iPhone playback, then transfer or continue on Apple Watch.").post()
+            return
+        }
+        await player.toggle()
+    }
+
+    /// The explicit Watch choice survives pause, navigation, and fresh phone
+    /// transport updates. A phone continuation can be resumed on Watch offline.
+    func performMagicTap(phoneControlScreen: Bool = false, watchControlScreen: Bool = false) {
+        if phone.isPending {
+            AccessibilityNotification.Announcement("Wait for the current transfer or iPhone request").post()
+            return
+        }
+        switch WatchMagicTapTarget.choose(watchIsPlaying: player.isPlaying,
+                                          watchHasEpisode: player.episode != nil,
+                                          watchOwnsPlayback: playbackDevice == .watch,
+                                          watchCheckpoint: player.episode?.positionUpdatedAt.timeIntervalSince1970,
+                                          phoneIsLive: phone.phoneSessionIsLive,
+                                          phoneIsPlaying: phone.phonePlaying,
+                                          phoneHasEpisode: phone.hasPhoneEpisode,
+                                          phoneContinuationCheckpoint: phone.savedContinuation?.checkpointAt,
+                                          phoneControlScreen: phoneControlScreen,
+                                          watchControlScreen: watchControlScreen) {
         case .phone: phone.toggle()
-        case .watch: Task { await player.toggle() }
+        case .watch: Task { await toggleWatch() }
+        case .continuePhoneOnWatch:
+            phone.continueOnWatch(library: library, watchPlayer: player)
         case .none:
-            AccessibilityNotification.Announcement(phoneControlScreen
-                ? "iPhone playback is unavailable" : "Choose an episode to play").post()
+            let message = phoneControlScreen ? "iPhone playback is unavailable" :
+                (phone.phoneSessionIsLive && phone.phonePlaying
+                    ? "iPhone is playing. Use Transfer to Apple Watch first."
+                    : "Choose an episode to play")
+            AccessibilityNotification.Announcement(message).post()
         }
     }
 
@@ -157,9 +244,9 @@ struct WatchHomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var path: [String] = []
     private var phoneRowValue: String {
-        guard runtime.phone.hasPhoneEpisode else { return "No current iPhone episode" }
-        let position = "\(Int(runtime.phone.phonePosition / 60)) minutes, \(Int(runtime.phone.phonePosition) % 60) seconds"
-        if !runtime.phone.phoneSessionIsLive { return "Last reported position, \(position)" }
+        guard let state = runtime.phone.displayedPhoneState, state.hasEpisode else { return "No current iPhone episode" }
+        let position = "\(Int(state.position / 60)) minutes, \(Int(state.position) % 60) seconds"
+        if runtime.phone.displayUsesSavedCheckpoint { return "Saved iPhone position, \(position). Current iPhone state unverified" }
         return "\(runtime.phone.phonePlaying ? "Playing" : "Paused"), \(position)"
     }
     private var recentPodcasts: [WatchPodcast] {
@@ -178,17 +265,17 @@ struct WatchHomeView: View {
             List {
                 Section("iPhone playback") {
                     NavigationLink {
-                        WatchPhoneControlView(runtime: runtime)
+                        WatchNowPlayingView(runtime: runtime, initialDevice: .phone)
                     } label: {
-                        if runtime.phone.hasPhoneEpisode {
+                        if let state = runtime.phone.displayedPhoneState, state.hasEpisode {
                             VStack(alignment: .leading) {
-                                Text(runtime.phone.phoneEpisodeTitle)
-                                Text(runtime.phone.phonePodcastTitle).font(.caption)
-                                Text(runtime.phone.phoneSessionIsLive
-                                     ? (runtime.phone.phonePlaying ? "Playing on iPhone" : "Paused on iPhone")
-                                     : "Refresh to check iPhone playback")
+                                Text(state.title)
+                                Text(state.podcastTitle).font(.caption)
+                                Text(runtime.phone.displayUsesSavedCheckpoint
+                                     ? "Saved iPhone checkpoint; current state unverified"
+                                     : (runtime.phone.phonePlaying ? "Playing on iPhone" : "Paused on iPhone"))
                                     .font(.caption)
-                                Text("\(Int(runtime.phone.phonePosition / 60)) minutes, \(Int(runtime.phone.phonePosition) % 60) seconds")
+                                Text("\(Int(state.position / 60)) minutes, \(Int(state.position) % 60) seconds")
                                     .font(.caption)
                             }
                         } else {
@@ -196,7 +283,7 @@ struct WatchHomeView: View {
                         }
                     }
                     .accessibilityLabel(runtime.phone.hasPhoneEpisode
-                                        ? "iPhone playback, \(runtime.phone.phoneEpisodeTitle), \(runtime.phone.phonePodcastTitle)"
+                                        ? "iPhone playback, \(runtime.phone.displayedPhoneState?.title ?? ""), \(runtime.phone.displayedPhoneState?.podcastTitle ?? "")"
                                         : "iPhone playback status")
                     .accessibilityValue(phoneRowValue)
                     .accessibilityHint("Opens iPhone playback controls and transfer to Apple Watch")
@@ -231,7 +318,6 @@ struct WatchHomeView: View {
                     NavigationLink("Downloads, \(runtime.library.downloads.count)") { WatchDownloadsView(runtime: runtime) }
                     NavigationLink("Bookmarks, \(runtime.library.bookmarks.count)") { WatchBookmarksView(runtime: runtime) }
                     NavigationLink("Settings") { WatchSettingsView(runtime: runtime) }
-                    NavigationLink("iPhone Control") { WatchPhoneControlView(runtime: runtime) }
                 }
                 if let conflicts = runtime.cloud?.conflicts, !conflicts.isEmpty {
                     Section("Synchronization") {
@@ -256,7 +342,7 @@ struct WatchHomeView: View {
                 }
                 if let message = runtime.library.message { Text(message) }
             }
-            .accessibilityAction(.magicTap) { runtime.performMagicTap() }
+            .watchMagicTap(runtime)
             .navigationTitle("Earshot")
             .navigationDestination(for: String.self) { destination in
                 if destination == "now-playing" { WatchNowPlayingView(runtime: runtime) }
@@ -296,6 +382,9 @@ struct WatchLibraryView: View {
                 Button("Subscribe") { Task { await runtime.library.subscribe(address) } }
                     .disabled(address.isEmpty || runtime.library.isBusy)
             }
+            Button("Import subscriptions from iPhone") {
+                runtime.phone.importLibrary(into: runtime.library)
+            }
             Section("Your podcasts") {
                 ForEach(runtime.library.podcasts.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) }) { podcast in
                     NavigationLink(podcast.title) { WatchPodcastView(runtime: runtime, podcast: podcast) }
@@ -311,6 +400,7 @@ struct WatchLibraryView: View {
                 }
             }
         }
+        .watchMagicTap(runtime)
         .searchable(text: $search, prompt: "Find a podcast")
         .navigationTitle("Library")
     }
@@ -329,6 +419,7 @@ struct WatchFolderView: View {
             }
             if folder.members.isEmpty { Text("No podcasts in this folder") }
         }
+        .watchMagicTap(runtime)
         .navigationTitle(folder.name)
     }
 }
@@ -348,6 +439,7 @@ struct WatchPodcastView: View {
             Button("Refresh podcast") { Task { await runtime.library.refresh(feedURL: podcast.feedURL) } }
             Button("Unfollow podcast", role: .destructive) { confirmingUnfollow = true }
         }
+        .watchMagicTap(runtime)
         .navigationTitle(podcast.title)
         .task {
             if !runtime.library.episodes.contains(where: { $0.feedURL == podcast.feedURL }) {
@@ -420,7 +512,7 @@ struct WatchPlayableEpisodeRow: View {
 
     private var playButton: some View {
         Button {
-            Task { await runtime.player.play(episode) }
+            Task { await runtime.playOnWatch(episode) }
         } label: {
             WatchEpisodeLabel(episode: episode)
         }
@@ -468,7 +560,7 @@ struct WatchPlayableEpisodeRow: View {
 
     private func perform(_ action: String) {
         switch action {
-        case "playNow": Task { await runtime.player.play(episode) }
+        case "playNow": Task { await runtime.playOnWatch(episode) }
         case "addToQueueTop", "addToQueueFront": runtime.library.enqueue(episode, next: true)
         case "addToQueueBottom": runtime.library.enqueue(episode, next: false)
         case "download":
@@ -499,7 +591,7 @@ struct WatchEpisodeView: View {
                 Text(episode.downloadFilename == nil ? "Available to stream" : "Downloaded to this watch")
             }
             Section("Actions") {
-                Button("Play on Apple Watch") { Task { await runtime.player.play(episode) } }
+                Button("Play on Apple Watch") { Task { await runtime.playOnWatch(episode) } }
                 Button("Play Next") { runtime.library.enqueue(episode, next: true) }
                 Button("Play Later") { runtime.library.enqueue(episode, next: false) }
                 Button(episode.isPlayed ? "Mark Unplayed" : "Mark Played") { runtime.library.markPlayed(episode, played: !episode.isPlayed) }
@@ -530,6 +622,7 @@ struct WatchEpisodeView: View {
             }
             if let error = runtime.downloads.errorByID[episode.identity] ?? episode.downloadError { Text("Download error: \(error)") }
         }
+        .watchMagicTap(runtime)
         .navigationTitle("Episode")
     }
 
@@ -577,6 +670,7 @@ struct WatchInboxView: View {
             }
             if visibleEpisodes.isEmpty { Text(showAllUnplayed ? "No unplayed episodes" : "No new episodes") }
         }
+        .watchMagicTap(runtime)
         .navigationTitle("Inbox")
     }
 }
@@ -606,6 +700,7 @@ struct WatchQueueView: View {
             }
             if runtime.library.queue.isEmpty { Text("Your queue is empty") }
         }
+        .watchMagicTap(runtime)
         .navigationTitle("Up Next")
         .task { runtime.phone.refreshQueue() }
     }
@@ -650,6 +745,7 @@ struct WatchDownloadsView: View {
                 Text("No downloaded episodes")
             }
         }
+        .watchMagicTap(runtime)
         .navigationTitle("Downloads")
     }
 }
@@ -664,7 +760,7 @@ struct WatchBookmarksView: View {
             ForEach(runtime.library.bookmarks) { bookmark in
                 Button("\(bookmark.episodeTitle), \(Int(bookmark.positionSeconds)) seconds") {
                     if let episode = runtime.library.episodes.first(where: { $0.identity == bookmark.episodeIdentity }) {
-                        Task { await runtime.player.play(episode, at: bookmark.positionSeconds) }
+                        Task { await runtime.playOnWatch(episode, at: bookmark.positionSeconds) }
                     } else {
                         runtime.library.report("This bookmarked episode is not available on Apple Watch")
                     }
@@ -679,6 +775,7 @@ struct WatchBookmarksView: View {
             }
             if runtime.library.bookmarks.isEmpty { Text("No bookmarks") }
         }
+        .watchMagicTap(runtime)
         .navigationTitle("Bookmarks")
     }
 }
@@ -702,6 +799,17 @@ struct WatchSettingsView: View {
                 }
             }
         }
+        .watchMagicTap(runtime)
         .navigationTitle("Settings")
+    }
+}
+
+extension View {
+    func watchMagicTap(_ runtime: WatchRuntime, phoneControlScreen: Bool = false,
+                       watchControlScreen: Bool = false) -> some View {
+        accessibilityAction(.magicTap) {
+            runtime.performMagicTap(phoneControlScreen: phoneControlScreen,
+                                    watchControlScreen: watchControlScreen)
+        }
     }
 }
