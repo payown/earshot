@@ -3991,3 +3991,21 @@ Kashe put her phone down and opened Earshot on her watch. The phone stayed open.
 At lunch, Renata handed her the iPad. Kashe moved from her Library to the show beside it, chose an episode, and waited. Silence, until she pressed Play. She smiled at that. Choice should sound like choice.
 
 Later, with both hands full, she used the two-finger tap on her watch. The interview paused once. “There,” she said. “Now let me see if it keeps doing that tomorrow.”
+
+---
+
+Chapter 121 - Keep the transfer open
+
+What to try first:
+
+Update Earshot to 1.2.6 (316) on both iPhone and Apple Watch without deleting either app or your library. In iPhone TestFlight, check that the companion Watch app finishes updating and says Open.
+
+Start an episode on iPhone and note its position and a recognizable sentence. On Apple Watch, open Earshot, choose iPhone Control, then Transfer to Apple Watch. The Watch app should stay open, begin the same episode near the phone's final position, and ask the phone to stop only after Watch audio starts. Repeat three times at normal speed and at 1.5 times speed, including with Earshot on iPhone in the background. If the Watch returns to its face, note the exact time and send the newest EarshotWatch crash report. Tell us the last words heard on iPhone, the first words heard on Watch, both positions, and whether one or both devices played.
+
+With VoiceOver, try the two-finger double tap on Watch Home, Now Playing, and iPhone Control. Each screen should play or pause the device it controls once. This build repairs the transfer crash path; moving an episode while the phone is paused still requires starting phone playback first. Immediate paired Queue refresh remains disabled after the earlier iPhone crash, while Queue changes can sync through iCloud when available.
+
+Kashe's story:
+
+Kashe had heard the interview stop when Earshot vanished from her watch. Her phone kept talking, but the next sentence never reached her wrist. She saved the time, updated both apps, and asked Renata to listen beside her.
+
+"Let's hear where it lands," Kashe said. She noted the last words from the phone, touched Transfer on the watch, and waited for the first words there. A button could say the transfer worked. The next sentence would tell her whether it really had.
