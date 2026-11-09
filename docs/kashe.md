@@ -76,6 +76,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe tests the combined Duo, iPad, and Watch build in place. She listens for
+  the words across a phone-to-watch transfer, uses VoiceOver Magic Tap once,
+  and checks that choosing an iPad episode stays silent until Play (Chapter 120).
+
 - Kashe compares the last words before a phone-to-watch transfer with the first
   words on the watch, then tries VoiceOver Magic Tap to control playback
   (Chapter 119).
@@ -3967,3 +3971,23 @@ Kashe stopped an interview on her phone and started it on her watch. The speaker
 Renata asked her to try again after the update. Kashe listened for the last word before she transferred, then for the first word on the watch. After that she tried the two-finger tap she used when she didn't want to hunt for a button.
 
 “Same place, one action,” she said. “That's what I need.”
+
+---
+
+Chapter 120 - Build 315
+
+What to try first:
+
+This private 1.2.6 build brings the iPhone Duo, native iPad, and Apple Watch work together. Update in place on iPhone and watch without deleting your library. With VoiceOver on, open Earshot on the watch several times while the phone app is open and in the background. The phone should stay open and your Queue and saved place should remain.
+
+Start an episode on iPhone. Note the time and a recognizable sentence, then transfer to Apple Watch. The watch should continue close to the phone's final position, without repeating or skipping about 30 seconds. Repeat at normal and 1.5 times speed, and transfer back to iPhone. On Watch Home, Now Playing, and iPhone Control, try VoiceOver's two-finger double tap. Each gesture should play or pause the device that screen controls once. Report the screen, exact spoken words, both positions, and what audio changed.
+
+Try a watch download and playback away from the phone, then reconnect and check progress and Queue on both devices. Immediate paired Queue refresh remains disabled after the earlier phone crash; Queue changes should sync through iCloud when available and may take longer. On iPad, move between Library and podcast details with VoiceOver, select an episode before pressing Play, and check that focus and playback stay predictable. On iPhone Duo, fold and unfold while browsing and playing. Please include device and OS versions, build number, exact speech, and connection state with any problem.
+
+Kashe's story:
+
+Kashe put her phone down and opened Earshot on her watch. The phone stayed open. She found the interview where she left it, listened to the end of a sentence, and moved it to her wrist. This time she waited for the next words instead of watching the clock.
+
+At lunch, Renata handed her the iPad. Kashe moved from her Library to the show beside it, chose an episode, and waited. Silence, until she pressed Play. She smiled at that. Choice should sound like choice.
+
+Later, with both hands full, she used the two-finger tap on her watch. The interview paused once. “There,” she said. “Now let me see if it keeps doing that tomorrow.”

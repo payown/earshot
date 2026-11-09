@@ -1,0 +1,13 @@
+Chapter 116 - Build 311
+
+What to try first:
+
+With VoiceOver, open Up Next on iPhone and Apple Watch. Add an episode on iPhone, then open Up Next on watch and choose Refresh Queue. Its title and podcast should appear even if it is not downloaded to the watch. Add another episode on watch, then refresh the iPhone queue; both should remain. Try a removal and reorder on each device, then separate the devices, make another queue change on each, reconnect and refresh. Removed episodes should stay removed and independent additions should survive. Transfer playback in both directions with a nonempty queue; if synchronization fails, the source should keep playing and the app should say so. Tell us the exact spoken status, episode titles, devices and OS versions, connection state and approximate time if a queue entry is missing or reappears.
+
+Kashe's story:
+
+Kashe lined up two interviews on her phone, then left it charging while she walked out with her watch. Up Next on her wrist was empty. She could still start a show, but the order she had chosen was gone.
+
+In the next build she opened Up Next and heard the interviews in order. She added one more from the watch. When she returned to the phone, all three were there.
+
+“That is the same queue,” she told Renata. “Now I can trust what plays next.”

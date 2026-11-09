@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added the independent Apple Watch app foundation with watch-local library, direct feed and audio access, playback, downloads, and watchOS test targets. Full integration and device testing continue on the watch feature branch.
+- Native iPad Library and podcast detail navigation, iPhone Duo layouts, and the independent Apple Watch app now share the main source. The watch can browse and download directly, play offline, show complications and shortcuts, and control or transfer iPhone playback. Paired-device and VoiceOver behavior still require physical acceptance before public distribution.
 
 - Now Playing's More options includes Share episode link, separate from exporting the audio file.
 
