@@ -1,12 +1,13 @@
 # Earshot Watch implementation progress
 
-## Source integration update, 2026-11-08
+## Source integration update, 2026-11-09
 
 The dated build 309/310 notes below are retained as development history. The current
-main integration sequence brings Duo (#1052–#1053), native iPad (#1054), Watch
-widgets and first handoff (#1055), offline library and CloudKit reconciliation
-(#1056), playback and reviewed recovery fixes (#1057), then this build 310 paired
-playback slice. Build 314 crash isolation and quality fixes follow separately.
+main integration sequence now includes Duo (#1052–#1053), native iPad (#1054),
+Watch widgets and first handoff (#1055), offline library and CloudKit
+reconciliation (#1056), playback and reviewed recovery fixes (#1057), paired
+playback and Queue (#1058), and build 313/314 crash isolation, handoff alignment,
+and Magic Tap (#1059).
 The newest currently active public TestFlight build is 1.2.6 (305); an uploaded
 internal 314 build does not make these source merges a distributed release.
 Physical Watch, CloudKit, handoff position, VoiceOver Magic Tap, iPad and Duo

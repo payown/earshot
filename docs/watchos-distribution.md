@@ -5,8 +5,8 @@ build 309 instructions below are historical; they are not a current upload plan.
 Build 314 archive and upload evidence is in
 [the build 314 quality report](watchos-playback-quality-314.md). Verify live App
 Store Connect processing and group assignment before describing any build as
-available to testers. The combined Duo, iPad and Watch source is being
-integrated through reviewed PRs; a new internal candidate has not been uploaded.
+available to testers. The combined Duo, iPad and Watch source is merged into
+main; a new internal candidate has not been uploaded at this checkpoint.
 
 Earshot **1.2.6 (309)** is the internal evaluation candidate from `feature/watchos-126-integration` for App Store Connect app `6770760602`, **Internal Testing Group** only. Do not submit for public review or merge before Michael's physical-device approval.
 
