@@ -17,9 +17,36 @@ struct WatchPlaybackRequestGate {
     func owns(_ request: UUID) -> Bool { current == request }
 }
 
+struct WatchSeekGate {
+    private var pending: UUID?
+    var isPending: Bool { pending != nil }
+    mutating func begin() -> UUID {
+        let id = UUID()
+        pending = id
+        return id
+    }
+    mutating func finish(_ id: UUID) -> Bool {
+        guard pending == id else { return false }
+        pending = nil
+        return true
+    }
+    mutating func invalidate() { pending = nil }
+}
+
 enum WatchResumePosition {
     static func select(hasLoadedItem: Bool, cached: Double, persisted: Double) -> Double {
         hasLoadedItem ? cached : persisted
+    }
+}
+
+enum WatchResumeEpisode {
+    static func choose(from episodes: [WatchEpisode], savedIdentity: String?) -> WatchEpisode? {
+        if let savedIdentity,
+           let saved = episodes.first(where: { $0.identity == savedIdentity && !$0.isPlayed }) {
+            return saved
+        }
+        return episodes.filter { !$0.isPlayed && $0.positionSeconds > 0 }
+            .max(by: { $0.updatedAt < $1.updatedAt })
     }
 }
 
@@ -47,7 +74,9 @@ final class WatchPlayer {
     private var sleepDeadline: Date?
     private var notificationTokens: [NSObjectProtocol] = []
     private var playbackRequests = WatchPlaybackRequestGate()
+    private var seekGate = WatchSeekGate()
     private let library: WatchLibrary
+    var onConfirmedPlayback: (() -> Void)?
 
     private(set) var episode: WatchEpisode?
     private(set) var isPlaying = false
@@ -67,9 +96,9 @@ final class WatchPlayer {
         self.library = library
         let savedRate = UserDefaults.standard.float(forKey: "watchPlaybackRate")
         if (0.5...3).contains(savedRate) { rate = savedRate }
-        if let resumable = library.episodes
-            .filter({ !$0.isPlayed && $0.positionSeconds > 0 })
-            .max(by: { $0.updatedAt < $1.updatedAt }) {
+        if let resumable = WatchResumeEpisode.choose(
+            from: library.episodes,
+            savedIdentity: UserDefaults.standard.string(forKey: "watchCurrentEpisodeIdentity")) {
             episode = resumable
             positionSeconds = resumable.positionSeconds
             durationSeconds = Double(resumable.durationSeconds ?? 0)
@@ -126,6 +155,9 @@ final class WatchPlayer {
             return
         }
         let request = playbackRequests.begin(requestID)
+        seekGate.invalidate()
+        isBuffering = true
+        status = "Starting playback on Apple Watch"
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
@@ -148,13 +180,14 @@ final class WatchPlayer {
             let resume = max(0, requestedPosition ?? item.positionSeconds)
             if changedEpisode || abs(positionSeconds - resume) > 2 {
                 let target = CMTime(seconds: resume, preferredTimescale: 600)
+                let seekID = seekGate.begin()
                 let completed: Bool
                 if preciseStart {
                     completed = await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
                 } else {
                     completed = await player.seek(to: target)
                 }
-                guard playbackRequests.owns(request) else { return }
+                guard playbackRequests.owns(request), seekGate.finish(seekID) else { return }
                 if preciseStart && !completed {
                     isPlaying = false
                     isBuffering = false
@@ -181,6 +214,9 @@ final class WatchPlayer {
             }
             isPlaying = true
             isBuffering = false
+            UserDefaults.standard.set(item.identity, forKey: "watchCurrentEpisodeIdentity")
+            onConfirmedPlayback?()
+            setRemotePlaybackEnabled(true)
             let actualPosition = player.currentTime().seconds
             positionSeconds = actualPosition.isFinite && actualPosition >= 0 ? actualPosition : resume
             savePosition()
@@ -191,6 +227,7 @@ final class WatchPlayer {
         } catch {
             guard playbackRequests.owns(request) else { return }
             isPlaying = false
+            isBuffering = false
             status = "Could not start watch playback: \(error.localizedDescription)"
             if announce { AccessibilityNotification.Announcement(status).post() }
             AppLog.player.error("Watch playback failed: \(error.localizedDescription, privacy: .public)")
@@ -199,8 +236,10 @@ final class WatchPlayer {
 
     func pause(announce: Bool = true) {
         playbackRequests.invalidate()
+        seekGate.invalidate()
         player.pause()
         isPlaying = false
+        isBuffering = false
         status = "Paused on Apple Watch"
         if announce { AccessibilityNotification.Announcement(status).post() }
         savePosition()
@@ -211,9 +250,12 @@ final class WatchPlayer {
     func alignToPausedSource(_ seconds: Double, expectedIdentity: String) async -> Bool {
         guard seconds.isFinite, seconds >= 0, isPlaying, episode?.identity == expectedIdentity else { return false }
         let request = playbackRequests.current
+        let seekID = seekGate.begin()
         let aligned = await player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
                                         toleranceBefore: .zero, toleranceAfter: .zero)
-        guard aligned, playbackRequests.owns(request), episode?.identity == expectedIdentity else { return false }
+        guard seekGate.finish(seekID) else { return false }
+        guard aligned, playbackRequests.owns(request),
+              episode?.identity == expectedIdentity else { return false }
         let actual = player.currentTime().seconds
         guard actual.isFinite, abs(actual - seconds) <= 2 else { return false }
         positionSeconds = actual
@@ -226,7 +268,7 @@ final class WatchPlayer {
     var currentPlaybackRequest: UUID { playbackRequests.current }
 
     func toggle() async {
-        if isPlaying { pause() }
+        if isPlaying || isBuffering { pause() }
         else if let episode {
             await play(episode, at: WatchResumePosition.select(
                 hasLoadedItem: hasLoadedItem, cached: positionSeconds, persisted: episode.positionSeconds))
@@ -236,8 +278,13 @@ final class WatchPlayer {
     func seek(to seconds: Double) async {
         let upper = durationSeconds > 0 ? durationSeconds : Double.greatestFiniteMagnitude
         let target = min(max(0, seconds), upper)
-        await player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
-        positionSeconds = target
+        let request = playbackRequests.current
+        let seekID = seekGate.begin()
+        let completed = await player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+        guard seekGate.finish(seekID) else { return }
+        guard completed, playbackRequests.owns(request) else { return }
+        let actual = player.currentTime().seconds
+        positionSeconds = actual.isFinite && actual >= 0 ? actual : target
         savePosition()
         publishNowPlaying()
     }
@@ -320,7 +367,7 @@ final class WatchPlayer {
     }
 
     private func timeDidChange(_ seconds: Double) {
-        guard seconds.isFinite, seconds >= 0 else { return }
+        guard !seekGate.isPending, seconds.isFinite, seconds >= 0 else { return }
         positionSeconds = seconds
         let duration = player.currentItem?.duration.seconds ?? 0
         if duration.isFinite, duration > 0 { durationSeconds = duration }
@@ -404,13 +451,42 @@ final class WatchPlayer {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
+    /// A confirmed transfer gives the phone the system media surface. Ordinary
+    /// Watch pause leaves it intact so remote Play and Magic Tap can resume.
+    func relinquishRemotePlayback() {
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        setRemotePlaybackEnabled(false)
+    }
+
+    private func setRemotePlaybackEnabled(_ enabled: Bool) {
+        let center = MPRemoteCommandCenter.shared()
+        center.playCommand.isEnabled = enabled
+        center.pauseCommand.isEnabled = enabled
+        center.togglePlayPauseCommand.isEnabled = enabled
+        center.skipForwardCommand.isEnabled = enabled
+        center.skipBackwardCommand.isEnabled = enabled
+        center.changePlaybackPositionCommand.isEnabled = enabled
+    }
+
     private func configureRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            guard self != nil else { return .commandFailed }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let runtime = WatchRuntimeRegistry.runtime, runtime.player === self {
+                    await runtime.toggleWatch()
+                } else { await self.toggle() }
+            }
+            return .success
+        }
         center.playCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
             Task { @MainActor [weak self] in
                 guard let self, let episode = self.episode else { return }
-                await self.play(episode, at: self.positionSeconds)
+                if let runtime = WatchRuntimeRegistry.runtime, runtime.player === self {
+                    await runtime.playOnWatch(episode, at: self.positionSeconds)
+                } else { await self.play(episode, at: self.positionSeconds) }
             }
             return .success
         }

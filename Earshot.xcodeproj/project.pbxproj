@@ -137,6 +137,7 @@
 		3CD00397784D509C20CC76A3 /* SkipSilenceRemovalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C13AC03D8E2F4DB285678051 /* SkipSilenceRemovalTests.swift */; };
 		3DA541CA557082ADCED13D06 /* QueueLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4728275D0F503536DAC8C87F /* QueueLogicTests.swift */; };
 		3E713ACABFA585AB82186DEE /* ActiveDownloadInvariantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF1D936A21E8268D3DC6AAD3 /* ActiveDownloadInvariantTests.swift */; };
+		3FB9E6027338DD06CD729BC5 /* WatchContinuation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F035567F9E1EF6A102D4900 /* WatchContinuation.swift */; };
 		4039E19B6B18FBECDD20F03D /* AudioProcessingTapFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EA1393CF9F58DA5447E7895 /* AudioProcessingTapFactory.swift */; };
 		406BAFF749CF48C03557264D /* PodcastSubscriptionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92F5C58A196766B3E469943 /* PodcastSubscriptionStateTests.swift */; };
 		41AFCC8DA6210A4533048FBD /* QueueRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28A65FBFCB276A5A5134554C /* QueueRepositoryTests.swift */; };
@@ -638,6 +639,7 @@
 		0D2B3B5179CB07407BC8C98D /* EarshotURLSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotURLSession.swift; sourceTree = "<group>"; };
 		0D404C59CC052B4721EF162F /* SearchLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchLogic.swift; sourceTree = "<group>"; };
 		0EBE4F963BE24E3EFDE7E7C3 /* EntitlementFactMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementFactMapperTests.swift; sourceTree = "<group>"; };
+		0F035567F9E1EF6A102D4900 /* WatchContinuation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchContinuation.swift; sourceTree = "<group>"; };
 		0FA9D5BBD889383C2707CD87 /* PlaybackAudioLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackAudioLogic.swift; sourceTree = "<group>"; };
 		0FAE84EA17DC1E88FAFAA276 /* NotificationRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRouter.swift; sourceTree = "<group>"; };
 		0FE27CD01A5744AAA59582D6 /* EpisodeShareItemsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeShareItemsTests.swift; sourceTree = "<group>"; };
@@ -1923,6 +1925,7 @@
 				C2E1834EB22E0899FA34104B /* EarshotWatchApp.swift */,
 				09EAC5E3CF1222E400D1A937 /* Info.plist */,
 				4FDE165A147117BE3E30CFC2 /* WatchCloudSync.swift */,
+				0F035567F9E1EF6A102D4900 /* WatchContinuation.swift */,
 				5A8A620D0B635E88DABBAF8F /* WatchDownloadManager.swift */,
 				5463882BBCA80078BCC4D491 /* WatchIntents.swift */,
 				77F457298FB99CE5A1C62F42 /* WatchLibrary.swift */,
@@ -2681,6 +2684,7 @@
 				02AE1B9708A0518C8F1F283B /* SleepTimer.swift in Sources */,
 				28DADF6E931D5692A6AF5D11 /* TranscriptFormat.swift in Sources */,
 				E585EB131591E6E6686CACA5 /* WatchCloudSync.swift in Sources */,
+				3FB9E6027338DD06CD729BC5 /* WatchContinuation.swift in Sources */,
 				C8C8186136FFB4F1E17C7347 /* WatchDownloadManager.swift in Sources */,
 				D0BA7918029DEA0B08856675 /* WatchFeedSnapshot.swift in Sources */,
 				D90DB4DBBC371B25B094735F /* WatchIntents.swift in Sources */,
@@ -3301,7 +3305,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 316;
+				CURRENT_PROJECT_VERSION = 317;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -3445,7 +3449,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 316;
+				CURRENT_PROJECT_VERSION = 317;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -3601,7 +3605,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 316;
+				CURRENT_PROJECT_VERSION = 317;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

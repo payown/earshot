@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Apple Watch VoiceOver Magic Tap now keeps Watch playback selected after pause across its screens. Now Playing has one device selector, and a paused or disconnected iPhone episode can continue from its last verified checkpoint using Watch audio or an existing download. A live transfer still waits for the receiving device and source pause acknowledgements.
+
 - Episode sharing supplies a single audio URL to Share Sheet shortcuts, with the title kept in preview metadata instead of a separate input item.
 
 - Cold-launch download checks run off the main thread, initial tab preferences are reused, and repeated tab badge updates are combined to reduce navigation stalls.
