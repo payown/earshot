@@ -1,5 +1,10 @@
 # Paired queue synchronization, 1.2.6 (311)
 
+Historical build 311 behavior. Builds 311 and 312 caused a physical iPhone
+invalid-page crash when the watch opened; build 313 isolated this immediate
+paired snapshot path. It remains disabled in the current integrated source.
+See [the build 313 report](watchos-crash-313.md) for the active safety behavior.
+
 ## Listener report and code finding
 
 Michael reported on physical Apple Watch build 309 that the watch queue did not appear to match the iPhone queue. He has not yet checked this behavior in build 310. StartTesting item `c704f1ae-d6bf-43d1-ac69-b784f3a6191b` remains open for hardware acceptance.
