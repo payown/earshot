@@ -93,6 +93,10 @@ final class EpisodeListDataSourceTests: XCTestCase {
             XCTAssertEqual(data.episodes.count, 210)
             XCTAssertTrue(previouslyVisible.isSubset(of: Set(data.episodes.map(\.persistentModelID))))
             XCTAssertTrue(data.hasMore)
+            data.loadMore(filter: .all, sort: sort, searchText: "")
+            XCTAssertEqual(data.episodes.count, 260)
+            XCTAssertEqual(Set(data.episodes.map(\.persistentModelID)).count, 260)
+            XCTAssertFalse(data.hasMore)
         }
     }
 
