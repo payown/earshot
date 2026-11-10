@@ -2685,7 +2685,14 @@ final class PlayerService {
     /// (#736). Prevents losing progress on a crash now that the ~5s tick no
     /// longer writes to the store.
     private func resumePosition(for episode: Episode) -> Int {
-        max(episode.positionSeconds, livePosition(for: episode) ?? 0)
+        let identity = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        let lastPlayingID = settings?.rawValue(SettingsKey.lastPlayingEpisodeID)
+        // The live tick is crash recovery for the last loaded episode only. A
+        // completed or replaced episode can still have an older keyed tick in
+        // UserDefaults; it must not override a later saved zero on replay.
+        let ownsLivePosition = lastPlayingID == identity || lastPlayingID == episode.guid
+        guard ownsLivePosition else { return episode.positionSeconds }
+        return max(episode.positionSeconds, livePosition(for: episode) ?? 0)
     }
 
     private func resumePosition(for item: PersonalAudioItem) -> Double {

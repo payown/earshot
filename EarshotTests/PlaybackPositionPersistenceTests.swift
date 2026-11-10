@@ -55,11 +55,33 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         episode.positionSeconds = 10 // durable value from the last anchor
         try? ctx.save()
         setLive(episode, 50)         // fresher tick value just before a "crash"
+        AppSettingsStore(context: ctx).setRawValue(
+            DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
+            for: SettingsKey.lastPlayingEpisodeID
+        )
 
         player.load(episode)         // paused restore, as at launch
 
         XCTAssertEqual(Int(player.currentPositionSeconds), 50,
                        "restore must resume at the fresher live position, not the stale durable 10")
+    }
+
+    func test_restore_legacyLastPlayingIDStillUsesLivePosition() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+
+        let episode = makeEpisode(ctx)
+        episode.positionSeconds = 10
+        try? ctx.save()
+        setLive(episode, 50)
+        AppSettingsStore(context: ctx).setRawValue(episode.guid, for: SettingsKey.lastPlayingEpisodeID)
+
+        player.load(episode)
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 50,
+                       "legacy last-playing identifiers still retain crash-recovery progress")
     }
 
     /// The live position is keyed to a specific episode, so it must NOT bleed into
