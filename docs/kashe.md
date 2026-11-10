@@ -4049,3 +4049,21 @@ Kashe opened the watch before leaving the house. Three places had offered to tak
 She opened the controls, changed the speed, and returned to the same spot in the list. Later she looked at the phone's controls while the interview played on her watch. Nothing moved until she chose Transfer. She waited for the answer before she put the phone away.
 
 “Show me where I am,” she told Renata. “Let me decide when to move.”
+
+---
+
+Chapter 124 - The page that stayed
+
+What to try first:
+
+Update Earshot to internal 1.2.6 (319) in place, without deleting the app or your library. Open a podcast with a long episode history. In its episode list, use Show 100 more until Load 10 older episodes appears. Note an episode near the bottom, then load older episodes. The expanded list should remain available instead of returning to its first 100 rows. With VoiceOver, check that focus stays on the Load control if you waited there, or on the episode you moved to while the request ran. Try both chronological orders. If a podcast exposes no older history, use another long-running show. Tell us the episode and where focus or the visible list landed if it jumps.
+
+Across the podcast list, Downloads, folder runs, app icon badge setting, and Shortcuts, check that episode status says Played or Unplayed consistently. Unplayed still includes an episode you started but have not marked played. On an episode row or Now Playing, audio without a completed download should say “Not downloaded. Plays using an internet connection.” when it has an online source. A failed download should still say “Download failed.” If no online source is available, it must not promise streaming. Test with and without a connection, and tell us the exact words you hear.
+
+The Watch playback and simpler Now Playing layout from build 318 remain in this candidate. As a quick regression check, start playback directly on Watch and use VoiceOver's two-finger double tap to pause and resume it. On iPad, open a podcast from Library and switch back; on iPhone Duo, browse and return to the same episode. Report any changed playback target, lost place, crash, or unexpected focus move with the device, OS, and build number.
+
+Kashe's story:
+
+Kashe was working backward through an old language series. She opened another hundred episodes, found the one she wanted, and asked for ten more from the publisher. The list used to fold back under her finger. This time the episode stayed where she could find it.
+
+Renata asked whether it had been played. “Partly,” Kashe said. “I haven't marked it played yet.” The list called it Unplayed, just as the action did. On another row, Earshot told her the audio was not downloaded and needed the internet. She saved that one before leaving the house.
