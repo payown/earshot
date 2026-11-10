@@ -92,7 +92,7 @@ final class LibraryPlaybackBridge {
         }
         let store = await SearchContentStore.make(container: container)
         guard let record = try await store.unheardEpisode(forShowID: showID, oldest: choice == .oldest) else {
-            throw ShortcutControlError(message: "No stored unheard episode is available for this podcast.")
+            throw ShortcutControlError(message: "No stored unplayed episode is available for this podcast.")
         }
         if action == .play { try playResolved(record, runtime: runtime, container: container, requiredShowID: showID) }
         else {

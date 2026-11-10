@@ -78,7 +78,7 @@ For example, 19 Inbox episodes and 9 Downloads means 19 episodes are available t
 
 First, open Download activity. Check for downloading, waiting for Wi-Fi, or failed episodes. Retry failures if appropriate. Check that you completed the Download N episodes confirmation and requested any deferred batches.
 
-Next, check the search, folder, and All or Unheard filter in Downloads. Those controls can hide completed files. Also check Delete downloads when done and whether you previously used Clear inbox, cleared downloads, marked episodes played, or removed them from Queue. With Delete downloads when done on, clearing Inbox can explain why previously downloaded audio is no longer in Downloads.
+Next, check the search, folder, and All or Unplayed filter in Downloads. Unplayed includes an episode you started but have not marked played. Those controls can hide completed files. Also check Delete downloads when done and whether you previously used Clear inbox, cleared downloads, marked episodes played, or removed them from Queue. With Delete downloads when done on, clearing Inbox can explain why previously downloaded audio is no longer in Downloads.
 
 If requests remain stuck or fail again, use Settings, Help & About, Send Feedback. Include the app version and build, affected podcast and episode names, the states shown in Download activity, roughly when you requested them, whether Wi-Fi-only is on, and whether individual retries work. These details help distinguish a server or connection problem from an app problem.
 

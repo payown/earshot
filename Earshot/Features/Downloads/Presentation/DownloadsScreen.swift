@@ -70,7 +70,7 @@ struct DownloadsScreen: View {
     // Session-local folder scope, matching Inbox: nil means All folders and a
     // selected folder includes podcasts filed anywhere in its subtree.
     @State private var selectedFolderID: PersistentIdentifier?
-    // Focus targets for the rotor "Mark as played" under the Unheard filter,
+    // Focus targets for the rotor "Mark as played" under the Unplayed filter,
     // where the marked download leaves the visible list (#641, mirroring the
     // #579 fix on EpisodeListView): the neighbor row, or the empty-filter state
     // when the last unheard download was just marked.

@@ -678,7 +678,7 @@ struct FolderDetailScreen: View {
                     } label: {
                         Label("Add all to queue", systemImage: "text.badge.plus")
                     }
-                    NavigationLink("Play unheard oldest first") {
+                    NavigationLink("Play unplayed oldest first") {
                         FolderRunScreen(folder: folder)
                     }
                     NavigationLink("Folder run status") { FolderRunScreen() }

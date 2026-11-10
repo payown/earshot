@@ -45,12 +45,12 @@ enum SavedPodcastEpisodeChoice: String, AppEnum {
     case queueFirst, newest, oldest
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Podcast episode choice")
     static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [
-        .queueFirst: "Queue first, then newest unheard", .newest: "Newest unheard", .oldest: "Oldest unheard"
+        .queueFirst: "Queue first, then newest unplayed", .newest: "Newest unplayed", .oldest: "Oldest unplayed"
     ]
 }
 struct PlayUnheardPodcastIntent: AudioPlaybackIntent {
-    static let title: LocalizedStringResource = "Play an Unheard Podcast Episode in Earshot"
-    static let description = IntentDescription("Chooses an unheard episode already stored for a followed podcast. Queue first prefers a queued episode, then the newest stored unheard episode. Does not fetch missing publisher history.")
+    static let title: LocalizedStringResource = "Play an Unplayed Podcast Episode in Earshot"
+    static let description = IntentDescription("Chooses an unplayed episode already stored for a followed podcast. Queue first prefers a queued episode, then the newest stored unplayed episode. Does not fetch missing publisher history.")
     @Parameter(title: "Podcast") var podcast: PodcastEntity
     @Parameter(title: "Action", default: .play) var action: DirectoryEpisodeAction
     @Parameter(title: "Choose", default: .queueFirst) var choice: SavedPodcastEpisodeChoice
