@@ -15,6 +15,9 @@ struct WatchNowPlayingView: View {
     let runtime: WatchRuntime
     @State private var selectedDevice: WatchPlaybackDevice
     @State private var manuallySelectedDevice = false
+    @AccessibilityFocusState private var focusedOption: WatchPlaybackOption?
+
+    private enum WatchPlaybackOption: Hashable { case speed, chapters, sleep }
 
     init(runtime: WatchRuntime, initialDevice: WatchPlaybackDevice? = nil) {
         self.runtime = runtime
@@ -70,34 +73,24 @@ struct WatchNowPlayingView: View {
                     WatchSeekControl(player: runtime.player)
                     Text("Elapsed \(Int(runtime.player.positionSeconds / 60)) minutes. Remaining \(Int(max(0, runtime.player.durationSeconds - runtime.player.positionSeconds) / 60)) minutes")
                 }
-                Section("Speed") {
-                    ForEach([0.75, 1, 1.25, 1.5, 2], id: \.self) { speed in
-                        Button("\(speed.formatted()) times") { runtime.player.setRate(Float(speed)) }
-                            .accessibilityAddTraits(runtime.player.rate == Float(speed) ? .isSelected : [])
+                Section("More playback controls") {
+                    NavigationLink("Playback speed") {
+                        WatchPlaybackSpeedView(runtime: runtime)
+                            .onDisappear { focusedOption = .speed }
                     }
-                }
-                if !runtime.player.chapters.isEmpty {
-                    Section("Chapters") {
-                        if let index = runtime.player.currentChapterIndex {
-                            Text("Current chapter: \(runtime.player.chapters[index].title)")
+                    .accessibilityFocused($focusedOption, equals: .speed)
+                    if !runtime.player.chapters.isEmpty {
+                        NavigationLink("Chapters") {
+                            WatchChaptersView(runtime: runtime)
+                                .onDisappear { focusedOption = .chapters }
                         }
-                        Button("Previous chapter") { Task { await runtime.player.previousChapter() } }
-                        Button("Next chapter") { Task { await runtime.player.nextChapter() } }
-                        ForEach(runtime.player.chapters) { chapter in
-                            Button("\(chapter.title), \(Int(chapter.startTime / 60)) minutes") {
-                                Task { await runtime.player.seek(to: chapter.startTime) }
-                            }
-                            .accessibilityAddTraits(runtime.player.currentChapterIndex
-                                .map { runtime.player.chapters[$0].startTime == chapter.startTime } == true
-                                ? .isSelected : [])
-                        }
+                        .accessibilityFocused($focusedOption, equals: .chapters)
                     }
-                }
-                Section("Sleep timer") {
-                    Text(runtime.player.sleepDescription)
-                    Button("Off") { runtime.player.setSleepTimer(minutes: nil) }
-                    Button("15 minutes") { runtime.player.setSleepTimer(minutes: 15) }
-                    Button("30 minutes") { runtime.player.setSleepTimer(minutes: 30) }
+                    NavigationLink("Sleep timer") {
+                        WatchSleepTimerView(runtime: runtime)
+                            .onDisappear { focusedOption = .sleep }
+                    }
+                    .accessibilityFocused($focusedOption, equals: .sleep)
                 }
                 Section("Audio destination") {
                     Text("Audio route: \(runtime.player.routeDescription)")
@@ -127,6 +120,57 @@ struct WatchNowPlayingView: View {
         .onChange(of: runtime.phone.savedContinuation?.checkpointAt) { _, _ in
             if !manuallySelectedDevice { selectedDevice = runtime.defaultPlaybackScreen }
         }
+    }
+}
+
+struct WatchPlaybackSpeedView: View {
+    let runtime: WatchRuntime
+    var body: some View {
+        List {
+            ForEach([0.75, 1, 1.25, 1.5, 2], id: \.self) { speed in
+                Button("\(speed.formatted()) times") { runtime.player.setRate(Float(speed)) }
+                    .accessibilityAddTraits(runtime.player.rate == Float(speed) ? .isSelected : [])
+            }
+        }
+        .watchMagicTap(runtime, watchControlScreen: true)
+        .navigationTitle("Playback speed")
+    }
+}
+
+struct WatchChaptersView: View {
+    let runtime: WatchRuntime
+    var body: some View {
+        List {
+            if let index = runtime.player.currentChapterIndex {
+                Text("Current chapter: \(runtime.player.chapters[index].title)")
+            }
+            Button("Previous chapter") { Task { await runtime.player.previousChapter() } }
+            Button("Next chapter") { Task { await runtime.player.nextChapter() } }
+            ForEach(runtime.player.chapters) { chapter in
+                Button("\(chapter.title), \(Int(chapter.startTime / 60)) minutes") {
+                    Task { await runtime.player.seek(to: chapter.startTime) }
+                }
+                .accessibilityAddTraits(runtime.player.currentChapterIndex
+                    .map { runtime.player.chapters[$0].startTime == chapter.startTime } == true
+                    ? .isSelected : [])
+            }
+        }
+        .watchMagicTap(runtime, watchControlScreen: true)
+        .navigationTitle("Chapters")
+    }
+}
+
+struct WatchSleepTimerView: View {
+    let runtime: WatchRuntime
+    var body: some View {
+        List {
+            Text(runtime.player.sleepDescription)
+            Button("Off") { runtime.player.setSleepTimer(minutes: nil) }
+            Button("15 minutes") { runtime.player.setSleepTimer(minutes: 15) }
+            Button("30 minutes") { runtime.player.setSleepTimer(minutes: 30) }
+        }
+        .watchMagicTap(runtime, watchControlScreen: true)
+        .navigationTitle("Sleep timer")
     }
 }
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Apple Watch Home now has one Now Playing summary for the episode, playback state, device and position. Playback speed, chapters and sleep timer have short screens reachable from Now Playing. Device selection still only changes the controls being viewed; transfers remain explicit.
+
 ### Fixed
 
 - Apple Watch VoiceOver Magic Tap now keeps Watch playback selected after pause across its screens. Now Playing has one device selector, and a paused or disconnected iPhone episode can continue from its last verified checkpoint using Watch audio or an existing download. A live transfer still waits for the receiving device and source pause acknowledgements.
