@@ -2,16 +2,47 @@ import XCTest
 
 final class EarshotWatchUITests: XCTestCase {
     @MainActor
+    func testPlaybackSpeedScreenRetainsSelectedChoice() {
+        let app = playbackOptionsApp("-watchUITestSpeedScreen")
+        XCTAssertTrue(app.navigationBars["Playback speed"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["1 times"].exists)
+    }
+
+    @MainActor
+    func testChaptersScreenRetainsCurrentChapterAndActions() {
+        let app = playbackOptionsApp("-watchUITestChaptersScreen")
+        XCTAssertTrue(app.navigationBars["Chapters"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Current chapter: Interview"].exists)
+        XCTAssertTrue(app.buttons["Previous chapter"].exists)
+        XCTAssertTrue(app.buttons["Next chapter"].exists)
+    }
+
+    @MainActor
+    func testSleepTimerScreenRetainsDescriptionAndChoices() {
+        let app = playbackOptionsApp("-watchUITestSleepScreen")
+        XCTAssertTrue(app.navigationBars["Sleep timer"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Sleep timer off"].exists)
+        XCTAssertTrue(app.buttons["15 minutes"].exists)
+    }
+
+    @MainActor
+    private func playbackOptionsApp(_ screen: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-watchUITestPlaybackOptions", screen]
+        app.launch()
+        return app
+    }
+
+    @MainActor
     func testIndependentHomeOpens() {
         let app = XCUIApplication()
         app.launch()
         XCTAssertTrue(app.navigationBars["Earshot"].waitForExistence(timeout: 10))
-        let phone = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "iPhone playback")).firstMatch
-        XCTAssertTrue(phone.exists)
-        XCTAssertFalse(phone.value as? String == "")
-        let nowPlaying = app.buttons["Now Playing"]
+        let nowPlaying = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Now Playing,")).firstMatch
         XCTAssertTrue(nowPlaying.exists)
-        XCTAssertEqual(nowPlaying.label, "Now Playing")
+        XCTAssertTrue(nowPlaying.label.contains("No episode"))
+        XCTAssertTrue((nowPlaying.value as? String ?? "").contains("Nothing playing"))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "iPhone playback")).firstMatch.exists)
         nowPlaying.tap()
         XCTAssertTrue(app.staticTexts["Nothing playing. Choose an episode from Library or Inbox."].waitForExistence(timeout: 5))
     }
@@ -20,13 +51,14 @@ final class EarshotWatchUITests: XCTestCase {
     func testUnifiedPlaybackScreenRetainsPhoneControlsWithoutPhone() {
         let app = XCUIApplication()
         app.launch()
-        let phone = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "iPhone playback")).firstMatch
-        XCTAssertTrue(phone.waitForExistence(timeout: 10))
-        phone.tap()
+        let nowPlaying = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Now Playing,")).firstMatch
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 10))
+        nowPlaying.tap()
         XCTAssertTrue(app.navigationBars["Now Playing"].waitForExistence(timeout: 5))
         let iPhoneSelector = app.buttons["iPhone controls"]
         for _ in 0..<8 where !iPhoneSelector.exists { app.swipeDown() }
         XCTAssertTrue(iPhoneSelector.exists)
+        iPhoneSelector.tap()
         XCTAssertTrue(app.staticTexts["No iPhone episode available"].exists)
         let refresh = app.buttons["Refresh iPhone state"]
         for _ in 0..<16 where !refresh.exists {

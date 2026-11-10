@@ -4,6 +4,18 @@ import WatchConnectivity
 @testable import EarshotWatch
 
 final class EarshotWatchTests: XCTestCase {
+    func testHomePhoneSummaryDistinguishesLiveSavedAndUnreachablePositions() {
+        XCTAssertEqual(WatchHomePlaybackSummary.phoneValue(position: 0, playing: false,
+            usesSavedCheckpoint: true, isLive: false),
+            "Saved iPhone position, 0 minutes, 0 seconds. Current iPhone state unverified.")
+        XCTAssertEqual(WatchHomePlaybackSummary.phoneValue(position: 125, playing: true,
+            usesSavedCheckpoint: false, isLive: false),
+            "Last reported iPhone playback, 2 minutes, 5 seconds. Current iPhone state unverified.")
+        XCTAssertEqual(WatchHomePlaybackSummary.phoneValue(position: 125, playing: false,
+            usesSavedCheckpoint: false, isLive: true),
+            "Paused on iPhone, 2 minutes, 5 seconds")
+    }
+
     func testMagicTapRetainsWatchOwnershipAndUsesLatestPausedContinuation() {
         func choose(watchPlaying: Bool = false, watchEpisode: Bool = true,
                     watchOwns: Bool = false, watchAt: Double? = 100,
