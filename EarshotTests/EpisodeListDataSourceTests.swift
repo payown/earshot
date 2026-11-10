@@ -65,6 +65,37 @@ final class EpisodeListDataSourceTests: XCTestCase {
         XCTAssertTrue(data.hasMore)
     }
 
+    func testOlderFeedInsertionKeepsExpandedPageInBothSortOrders() throws {
+        for sort in [EpisodeSortOrder.latestFirst, .latestLast] {
+            let (context, podcast) = try fixture(count: 250)
+            let data = source(context, podcast)
+            data.resetAndLoad(filter: .all, sort: sort, searchText: "")
+            data.loadMore(filter: .all, sort: sort, searchText: "")
+            let previouslyVisible = Set(data.episodes.map(\.persistentModelID))
+            XCTAssertEqual(previouslyVisible.count, 200)
+
+            let earlier = Date(timeIntervalSince1970: 1_699_999_000)
+            for index in 0..<10 {
+                let episode = Episode(
+                    guid: "older-\(index)", title: "Older \(index)",
+                    audioURL: "https://example.com/older-\(index).mp3",
+                    pubDate: earlier.addingTimeInterval(TimeInterval(index))
+                )
+                episode.podcast = podcast
+                context.insert(episode)
+            }
+            try context.save()
+
+            data.reloadKeepingLoadedLimit(
+                filter: .all, sort: sort, searchText: "", insertedEpisodeCount: 10
+            )
+
+            XCTAssertEqual(data.episodes.count, 210)
+            XCTAssertTrue(previouslyVisible.isSubset(of: Set(data.episodes.map(\.persistentModelID))))
+            XCTAssertTrue(data.hasMore)
+        }
+    }
+
     func testSelectAllIdentitiesIncludeUnloadedPagesAndHonorFilter() async throws {
         let (context, podcast) = try fixture(count: 225)
         let data = source(context, podcast)
