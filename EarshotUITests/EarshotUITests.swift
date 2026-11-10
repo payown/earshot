@@ -448,7 +448,7 @@ final class EarshotUITests: XCTestCase {
         for _ in 0..<4 where !appearance.isHittable { app.swipeUp() }
         XCTAssertTrue(appearance.waitForExistence(timeout: 5), app.debugDescription)
         appearance.tap()
-        let toggle = app.switches["Badge downloaded unheard episodes"].firstMatch
+        let toggle = app.switches["Badge downloaded unplayed episodes"].firstMatch
         for _ in 0..<6 where !toggle.isHittable { app.swipeUp() }
         XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(toggle.value as? String, "0")
@@ -614,11 +614,11 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(folder.waitForExistence(timeout: 5), app.debugDescription)
         folder.tap()
         app.buttons["Folder listening actions"].tap()
-        app.buttons["Play unheard oldest first"].firstMatch.tap()
+        app.buttons["Play unplayed oldest first"].firstMatch.tap()
         let prepare = app.buttons["Check feeds and prepare"].firstMatch
         XCTAssertTrue(prepare.waitForExistence(timeout: 5))
         prepare.tap()
-        let confirmation = app.staticTexts["Play 60 unheard episodes from Backlog test, oldest first?"].firstMatch
+        let confirmation = app.staticTexts["Play 60 unplayed episodes from Backlog test, oldest first?"].firstMatch
         XCTAssertTrue(confirmation.waitForExistence(timeout: 20))
         let deferPlayback = app.buttons["Not now"].firstMatch
         XCTAssertTrue(deferPlayback.waitForExistence(timeout: 5), app.debugDescription)
