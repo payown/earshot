@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Compact "Downloaded / Downloading / Streaming" badge for episode rows and the
+/// Compact "Downloaded / Downloading / Not downloaded" badge for episode rows and the
 /// Now Playing surface (#513). Always icon + text + colour — never colour alone
 /// and never icon alone — so a user can tell, at the point they decide to play,
-/// whether the audio is local or will stream, without relying on colour
+/// whether the audio is local or not downloaded, without relying on colour
 /// perception.
 ///
 /// Purely decorative for VoiceOver: the spoken state is already folded into the

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Apple Watch Home now has one Now Playing summary for the episode, playback state, device and position. Playback speed, chapters and sleep timer have short screens reachable from Now Playing. Device selection still only changes the controls being viewed; transfers remain explicit.
 
+- Episode filters, folder runs, badges and Shortcuts consistently use Played and Unplayed. Episode rows explain when audio is not downloaded and playback needs an internet connection.
+
 ### Fixed
 
 - Apple Watch VoiceOver Magic Tap now keeps Watch playback selected after pause across its screens. Now Playing has one device selector, and a paused or disconnected iPhone episode can continue from its last verified checkpoint using Watch audio or an existing download. A live transfer still waits for the receiving device and source pause acknowledgements.
@@ -60,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Silence trimming now compacts silent passages during playback, with a global setting and per-podcast override. Saved episode positions remain in the original media timeline. (#570)
 
 ### Changed
+
+- Episode filters, folder runs, badges and Shortcuts consistently use Played and Unplayed. Episode rows say “Stream to play” when audio is not downloaded.
 
 - Consolidated player menus and header, with predictable playback controls near the middle of the screen between scrolling episode content and details. Playback position stays above enlarged transport controls; audio destination and Show notes stay side by side below. Preserved artwork actions and enlarged slider interaction areas; unavailable notes stay in place. (#951)
 

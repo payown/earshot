@@ -1006,6 +1006,7 @@ private struct QueueRow: View {
             isPlayed: episode.isPlayed,
             pubDate: episode.pubDate,
             downloadState: episode.downloadStatus,
+            audioURL: episode.audioURL,
             isNowPlaying: isNowPlaying,
             contextDetail: position.flatMap { position in
                 total.map { "position \(position) of \($0)" }

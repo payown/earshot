@@ -17,6 +17,7 @@ enum EpisodeRowLabel {
         isPlayed: Bool,
         pubDate: Date?,
         downloadState: DownloadStatus? = nil,
+        audioURL: String? = nil,
         isNowPlaying: Bool = false,
         contextDetail: String? = nil,
         details: EpisodeSpokenDetails = EpisodeSpokenDetails()
@@ -40,12 +41,12 @@ enum EpisodeRowLabel {
             parts.append(pubDate.formatted(date: .abbreviated, time: .omitted))
         }
         // Downloaded / streaming state, last so the user always hears — before
-        // choosing Play — whether the audio is local or will stream (#513). Folded
+        // choosing Play — whether the audio is local or needs a stream (#513). Folded
         // into this single comma-joined label so it's part of the one row element,
         // never a separate VoiceOver stop. Omitted entirely when a caller passes
         // nil (e.g. surfaces that don't carry the state).
         if details.includesDownloadStatus, let downloadState {
-            parts.append(spokenDownloadState(downloadState))
+            parts.append(spokenDownloadState(downloadState, audioURL: audioURL))
         }
         return parts.joined(separator: ", ")
     }
@@ -57,16 +58,28 @@ enum EpisodeRowLabel {
     /// - ``DownloadStatus/pending`` → `"Waiting for Wi-Fi"` (parked by the
     ///   Wi-Fi-only gate, not transferring — saying "Downloading" here was a lie
     ///   that hid why nothing was happening, #576)
-    /// - ``DownloadStatus/failed`` → `"Download failed. Streams when played"`
-    /// - ``DownloadStatus/none`` → `"Streams when played"`
-    static func spokenDownloadState(_ status: DownloadStatus) -> String {
+    /// - ``DownloadStatus/failed`` → `"Download failed. Plays using an internet connection."`
+    ///   when an online audio source exists; otherwise `"Download failed"`
+    /// - ``DownloadStatus/none`` → `"Not downloaded. Plays using an internet connection."`
+    ///   when an online audio source exists; otherwise `"Not downloaded"`.
+    /// A failed or missing URL must not promise online playback.
+    static func spokenDownloadState(_ status: DownloadStatus, audioURL: String? = nil) -> String {
         switch status {
         case .downloaded: return "Downloaded"
         case .downloading: return "Downloading"
         case .pending: return "Waiting for Wi-Fi"
-        case .none: return "Streams when played"
-        case .failed: return "Download failed. Streams when played"
+        case .none:
+            return hasStreamSource(audioURL)
+                ? "Not downloaded. Plays using an internet connection." : "Not downloaded"
+        case .failed:
+            return hasStreamSource(audioURL)
+                ? "Download failed. Plays using an internet connection." : "Download failed"
         }
+    }
+
+    private static func hasStreamSource(_ audioURL: String?) -> Bool {
+        guard let audioURL, let url = URL(string: audioURL) else { return false }
+        return ["http", "https"].contains(url.scheme?.lowercased() ?? "") && url.host != nil
     }
 
     /// Pure data for the compact visible download/streaming badge (#513): an SF
@@ -90,7 +103,7 @@ enum EpisodeRowLabel {
         case .failed:
             return DownloadBadge(systemImage: "exclamationmark.circle", text: "Download failed")
         case .none:
-            return DownloadBadge(systemImage: "dot.radiowaves.up.forward", text: "Streaming")
+            return DownloadBadge(systemImage: "dot.radiowaves.up.forward", text: "Not downloaded")
         }
     }
 

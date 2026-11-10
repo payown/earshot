@@ -522,7 +522,7 @@ struct NowPlayingScreen: View {
     private var titleAccessibilityLabel: String {
         let title = player.currentTitle ?? ""
         guard let status = player.nowPlayingEpisode?.downloadStatus else { return title }
-        return "\(title), \(EpisodeRowLabel.spokenDownloadState(status))"
+        return "\(title), \(EpisodeRowLabel.spokenDownloadState(status, audioURL: player.nowPlayingEpisode?.audioURL))"
     }
 
     // MARK: Current chapter (#508, #509, #515)
