@@ -180,6 +180,19 @@ final class EpisodeRowLabelTests: XCTestCase {
         )
         XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.none, audioURL: ""), "Not downloaded")
         XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.failed, audioURL: "file:///tmp/audio.mp3"), "Download failed")
+        XCTAssertEqual(
+            EpisodeRowLabel.spokenDownloadState(.none, audioURL: "http://example.com/episode.mp3"),
+            "Not downloaded. Plays using an internet connection."
+        )
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.none, audioURL: "ftp://example.com/audio"), "Not downloaded")
+    }
+
+    func testOnlineAvailabilityIsPartOfOneEpisodeRowLabel() {
+        let label = EpisodeRowLabel.label(
+            episodeTitle: "Episode", podcastName: nil, isPlayed: false, pubDate: nil,
+            downloadState: .none, audioURL: "https://example.com/episode.mp3"
+        )
+        XCTAssertEqual(label, "Episode, Not downloaded. Plays using an internet connection.")
     }
 
     func testLabelAppendsDownloadStateLast() {
