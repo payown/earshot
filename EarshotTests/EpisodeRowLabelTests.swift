@@ -190,7 +190,7 @@ final class EpisodeRowLabelTests: XCTestCase {
     func testOnlineAvailabilityIsPartOfOneEpisodeRowLabel() {
         let label = EpisodeRowLabel.label(
             episodeTitle: "Episode", podcastName: nil, isPlayed: false, pubDate: nil,
-            downloadState: .none, audioURL: "https://example.com/episode.mp3"
+            downloadState: DownloadStatus.none, audioURL: "https://example.com/episode.mp3"
         )
         XCTAssertEqual(label, "Episode, Not downloaded. Plays using an internet connection.")
     }
