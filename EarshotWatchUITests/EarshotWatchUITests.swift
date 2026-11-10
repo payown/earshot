@@ -2,6 +2,38 @@ import XCTest
 
 final class EarshotWatchUITests: XCTestCase {
     @MainActor
+    func testPlaybackSpeedScreenRetainsSelectedChoice() {
+        let app = playbackOptionsApp("-watchUITestSpeedScreen")
+        XCTAssertTrue(app.navigationBars["Playback speed"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["1 times"].exists)
+    }
+
+    @MainActor
+    func testChaptersScreenRetainsCurrentChapterAndActions() {
+        let app = playbackOptionsApp("-watchUITestChaptersScreen")
+        XCTAssertTrue(app.navigationBars["Chapters"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Current chapter: Interview"].exists)
+        XCTAssertTrue(app.buttons["Previous chapter"].exists)
+        XCTAssertTrue(app.buttons["Next chapter"].exists)
+    }
+
+    @MainActor
+    func testSleepTimerScreenRetainsDescriptionAndChoices() {
+        let app = playbackOptionsApp("-watchUITestSleepScreen")
+        XCTAssertTrue(app.navigationBars["Sleep timer"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Sleep timer off"].exists)
+        XCTAssertTrue(app.buttons["15 minutes"].exists)
+    }
+
+    @MainActor
+    private func playbackOptionsApp(_ screen: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-watchUITestPlaybackOptions", screen]
+        app.launch()
+        return app
+    }
+
+    @MainActor
     func testIndependentHomeOpens() {
         let app = XCUIApplication()
         app.launch()

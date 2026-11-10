@@ -216,7 +216,21 @@ struct WatchLaunchView: View {
 
     var body: some View {
         Group {
-            if let runtime { WatchHomeView(runtime: runtime) }
+            if let runtime {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-watchUITestSpeedScreen") {
+                    NavigationStack { WatchPlaybackSpeedView(runtime: runtime) }
+                } else if ProcessInfo.processInfo.arguments.contains("-watchUITestChaptersScreen") {
+                    NavigationStack { WatchChaptersView(runtime: runtime) }
+                } else if ProcessInfo.processInfo.arguments.contains("-watchUITestSleepScreen") {
+                    NavigationStack { WatchSleepTimerView(runtime: runtime) }
+                } else {
+                    WatchHomeView(runtime: runtime)
+                }
+                #else
+                WatchHomeView(runtime: runtime)
+                #endif
+            }
             else if launchError {
                 ScrollView {
                     Text("Earshot could not open its watch library. Your saved data is still on this watch.")
@@ -242,6 +256,11 @@ struct WatchLaunchView: View {
     private func open() {
         do {
             runtime = try WatchRuntimeRegistry.runtime ?? WatchRuntime()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-watchUITestPlaybackOptions") {
+                runtime?.player.loadUITestEpisode()
+            }
+            #endif
             Task { await runtime?.library.updateEntitlement() }
             runtime?.syncNow()
             runtime?.phone.refresh()

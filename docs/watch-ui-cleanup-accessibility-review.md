@@ -15,8 +15,9 @@ secondary navigation names, and focus-return semantics for this cleanup.
 
 Code review found no new unlabeled icon controls, empty accessibility values,
 drag-only actions, or changes to iPhone tab order, purchase UI, or Quick Actions.
-Simulator Watch tests verify the single Home link and navigation to iPhone
-controls. They cannot establish VoiceOver focus timing, paired audio behavior,
-or secondary-screen accessibility with a real episode; those remain hardware
-acceptance gates. The repository's prior watch review and device checklist
-remain applicable.
+Simulator Watch tests verify the single Home link, navigation to iPhone
+controls, and the speed, chapters, and sleep timer screens with a deterministic
+Debug-only episode fixture. They cannot establish VoiceOver focus timing or
+paired audio behavior with a real episode; those remain hardware acceptance
+gates. The repository's prior watch review and device checklist remain
+applicable.
