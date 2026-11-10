@@ -80,7 +80,7 @@ struct EpisodeListView: View {
     @AccessibilityFocusState private var focusSelectButton: Bool
     @AccessibilityFocusState private var focusEmbeddedBackButton: Bool
 
-    // Focus targets for the rotor "Mark as played" under the Unheard filter,
+    // Focus targets for the rotor "Mark as played" under the Unplayed filter,
     // where the marked row leaves the visible list (#579): the neighbor row, or
     // the empty-filter state when the last unheard episode was just marked.
     // Mirrors the Inbox's neighbor-focus wiring.
@@ -234,7 +234,7 @@ struct EpisodeListView: View {
                                 }
                             } header: {
                                 Text(filter == .unheard
-                                     ? "^[\(matchingCount) unheard episode](inflect: true)"
+                                     ? "^[\(matchingCount) unplayed episode](inflect: true)"
                                      : "^[\(matchingCount) episode](inflect: true)")
                                     .accessibilityFocused($focusResultsHeading)
                             }
@@ -877,7 +877,7 @@ struct EpisodeListView: View {
     /// Offers a one-tap switch to All rather than leaving a blank list.
     private var emptyFilterState: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("No unheard episodes")
+            Text("No unplayed episodes")
                 .font(.headline)
                 // Focus lands here when the rotor mark-played removes the last
                 // unheard row (#579), so VoiceOver isn't orphaned on a vanished
