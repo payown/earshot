@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Malformed podcast feeds now log only an XML error code and parse position, keeping publisher-provided text out of public diagnostics.
+
 - Episode sharing supplies a single audio URL to Share Sheet shortcuts, with the title kept in preview metadata instead of a separate input item.
 
 - Cold-launch download checks run off the main thread, initial tab preferences are reused, and repeated tab badge updates are combined to reduce navigation stalls.
