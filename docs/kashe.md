@@ -4113,7 +4113,7 @@ Chapter 127 - A place found in Search
 
 What to try first:
 
-Update Earshot to internal 1.2.6 (323) in place, without deleting the app or your library. This build supersedes internal 322. In Library, use Search your library to find an episode that is in Inbox and another you added to Queue. Each local episode result should be one VoiceOver stop and say one status before its title: “Now Playing” for the loaded episode, including when paused; otherwise “In Queue” or “In Inbox.” Open a podcast from Search and check the same status in its episode list. Add Podcast's directory search is unchanged.
+Update Earshot to internal 1.2.6 (323) in place, without deleting the app or your library. This build supersedes internal 322. In Library, use Search your library to find an episode that is in Inbox and another you added to Queue. Each local episode result should be one VoiceOver stop and say one status before its title: “Now Playing” for the loaded episode, including when paused; otherwise “Queued” or “In Inbox.” Open a podcast from Search and check the same status in its episode list. Add Podcast's directory search is unchanged.
 
 In Settings, open Quick Actions. The Episode and Queue choices that configure download actions should say “Download / Remove Download” in both Enabled and Available lists. Add or remove that choice and listen to the confirmation. On an actual episode, the action should still say “Download” when audio is absent or “Remove download” when it is saved. This changes the setting's name, not the download behavior or your saved choices.
 
@@ -4121,6 +4121,6 @@ Check the Library episode rows from Chapter 126 as well: move an episode between
 
 Kashe's story:
 
-Kashe remembered part of an interview title but not where she had put it. She searched her library and found the episode marked “In Queue.” The next result still said “In Inbox.” She opened the show, paused the episode already loaded, and heard “Now Playing” when she found it again.
+Kashe remembered part of an interview title but not where she had put it. She searched her library and found the episode marked “Queued.” The next result still said “In Inbox.” She opened the show, paused the episode already loaded, and heard “Now Playing” when she found it again.
 
 Renata then showed her the Download choice in Quick Actions settings. Its longer name explained that the same choice could add or remove a saved file. When Kashe returned to an episode, the action still named the one thing it would do right then.
