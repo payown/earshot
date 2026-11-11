@@ -6,16 +6,19 @@ struct EpisodeListView: View {
     let podcast: Podcast
     let showsBackToShows: Bool
     let onPlayRequest: ((Episode) -> Void)?
+    let showsPlacementStatus: Bool
     private let nonPlayedBatchLimit = 1_000
 
     init(
         podcast: Podcast,
         showsBackToShows: Bool = true,
-        onPlayRequest: ((Episode) -> Void)? = nil
+        onPlayRequest: ((Episode) -> Void)? = nil,
+        showsPlacementStatus: Bool = false
     ) {
         self.podcast = podcast
         self.showsBackToShows = showsBackToShows
         self.onPlayRequest = onPlayRequest
+        self.showsPlacementStatus = showsPlacementStatus
     }
 
     @Environment(\.modelContext) private var context
@@ -107,7 +110,8 @@ struct EpisodeListView: View {
     }
 
     private func isInInbox(_ episode: Episode) -> Bool {
-        EpisodePlacementStatus.isInInbox(
+        guard showsPlacementStatus else { return false }
+        return EpisodePlacementStatus.isInInbox(
             status: episode.status, dismissed: episode.inboxDismissed,
             catalogOnly: podcast.isCatalogOnly, inboxIncluded: podcast.inboxIncluded,
             inboxExcluded: podcast.inboxExcluded, optInOnly: settings.inboxOptInOnly
@@ -569,7 +573,7 @@ struct EpisodeListView: View {
         if selection.isSelecting {
             EpisodeSelectableRow(
                 episode: episode,
-                isQueued: queuedEpisodeIDs.contains(episode.persistentModelID),
+                isQueued: showsPlacementStatus && queuedEpisodeIDs.contains(episode.persistentModelID),
                 isInInbox: isInInbox(episode),
                 isSelected: selection.isSelected(episode.persistentModelID),
                 onToggle: { selection.toggle(episode.persistentModelID) }
@@ -597,7 +601,7 @@ struct EpisodeListView: View {
                     }
                 },
                 isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
-                isQueued: queuedEpisodeIDs.contains(episode.persistentModelID),
+                isQueued: showsPlacementStatus && queuedEpisodeIDs.contains(episode.persistentModelID),
                 isInInbox: isInInbox(episode),
                 performAction: { action in perform(action, for: episode) }
             )
@@ -605,7 +609,7 @@ struct EpisodeListView: View {
     }
 
     private func refreshQueueMembership() {
-        guard isEpisodeListVisible else { return }
+        guard showsPlacementStatus, isEpisodeListVisible else { return }
         queueMembershipTask?.cancel()
         let request = UUID()
         queueMembershipRequest = request
