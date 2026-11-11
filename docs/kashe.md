@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe opens the Apple Watch Downloads list on her phone before a walk and
+  returns to it while choosing an interview (Chapter 125).
+
 - Kashe tests the combined Duo, iPad, and Watch build in place. She listens for
   the words across a phone-to-watch transfer, uses VoiceOver Magic Tap once,
   and checks that choosing an iPad episode stays silent until Play (Chapter 120).
@@ -4067,3 +4070,21 @@ Kashe's story:
 Kashe was working backward through an old language series. She opened another hundred episodes, found the one she wanted, and asked for ten more from the publisher. The list used to fold back under her finger. This time the episode stayed where she could find it.
 
 Renata asked whether it had been played. “Partly,” Kashe said. “I haven't marked it played yet.” The list called it Unplayed, just as the action did. On another row, Earshot told her the audio was not downloaded and needed the internet. She saved that one before leaving the house.
+
+---
+
+Chapter 125 - The list that stayed open
+
+What to try first:
+
+Update Earshot to internal 1.2.6 (321) on iPhone and Apple Watch without deleting either app or your library. On iPhone, open Settings, then Apple Watch Downloads. With VoiceOver, find your followed podcasts, go Back, and open Apple Watch Downloads again. The iPhone should stay open both times. Choose a podcast and an episode, then activate “Download [episode title] on Apple Watch.” If the request is queued, check Downloads on Watch for progress. If the Watch is not ready, Earshot should say the episode was not queued. If the iPhone closes, send the time, the last control you activated, your device and OS, and the newest Earshot crash report.
+
+On iPhone, replay an episode already marked Played, especially one you had reached near its end. Confirm that audio starts and does not immediately stop. Pause and resume, then try marking it Unplayed and playing again. Try a different episode with a saved position away from the beginning; that position should remain available. If playback is silent, stops, or crashes, send the episode title, position, actions, device, OS and build number.
+
+On a wide iPad running iPadOS 26.0, find “Search your library” in the navigation drawer. Search for a podcast, open a result, go Back, edit the query, and open another result. Check that Search stays reachable with VoiceOver and that switching results does not close Earshot. The same Search path passed simulator checks on iPadOS 26.5 and 27.2; physical VoiceOver focus and window-resize behavior still need your assessment. Watch playback handoff remains a separate open test and is not claimed fixed by this build.
+
+Kashe's story:
+
+Kashe opened the Apple Watch Downloads list on her phone to save an interview for a walk. Before, Earshot had vanished as soon as she entered. This time she found the show, returned to Settings, and opened the list again. It stayed long enough for her to choose the episode and hear whether the Watch accepted the request.
+
+Later she revisited an interview she had already finished. The old ending no longer pulled her straight to silence. She heard the beginning, paused at a sentence she wanted to keep, and knew where to return.
