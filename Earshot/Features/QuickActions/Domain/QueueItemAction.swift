@@ -15,6 +15,12 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
+    /// The settings row describes both outcomes; the Queue action itself still
+    /// uses the episode's current download state.
+    var settingsLabel: String {
+        self == .download ? "Download / Remove Download" : label
+    }
+
     var label: String {
         switch self {
         case .playNow: return "Play now"
