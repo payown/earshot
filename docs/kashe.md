@@ -4088,3 +4088,21 @@ Kashe's story:
 Kashe opened the Apple Watch Downloads list on her phone to save an interview for a walk. Before, Earshot had vanished as soon as she entered. This time she found the show, returned to Settings, and opened the list again. It stayed long enough for her to choose the episode and hear whether the Watch accepted the request.
 
 Later she revisited an interview she had already finished. The old ending no longer pulled her straight to silence. She heard the beginning, paused at a sentence she wanted to keep, and knew where to return.
+
+---
+
+Chapter 126 - Where the episode waits
+
+What to try first:
+
+Update Earshot to internal 1.2.6 (322) on iPhone without deleting the app or your library. In Library, open a podcast with episodes in Inbox and Queue. With VoiceOver, move through its episode rows. Each row should remain one stop and say one placement before the title: “Now Playing” for the loaded episode, even when paused; otherwise “In Queue” or “In Inbox” where applicable. Played and download information should still follow the title. The same short words appear beside the episode visually.
+
+From that podcast, add an Inbox episode to the end of Queue. Hear the existing confirmation, then check that its row changes to “In Queue” without jumping away. Remove it from Queue and check the row again. Try a finished episode kept in Queue, an excluded or dismissed Inbox episode, and the Select episodes mode. On a long show, load more episodes, scroll, return, and check that the status and VoiceOver position remain sensible. Send the episode, exact words, actions, device, OS and build number if a badge is wrong, focus moves unexpectedly, or the list slows down.
+
+This build also restores StoreKit suites in automated CI and keeps feed-parser and background-refresh error details out of public diagnostics. These changes do not alter purchases or listening data. Apple Watch handoff and Paul's reported Watch reachability still need separate physical testing; this build does not claim to resolve them.
+
+Kashe's story:
+
+Kashe was choosing the next interview from a long show. She added one episode to Queue, then returned to the show. The row now said “In Queue” before its title. Another still waited in Inbox. She paused the interview already loaded in the player; its row kept saying “Now Playing,” so she knew which one would resume.
+
+Renata asked whether the badges made the list longer to hear. Kashe moved to the next row. One stop, one place, then the familiar played and download details. She could decide what to hear next without opening each episode to find where it had gone.
