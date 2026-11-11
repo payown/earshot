@@ -11,6 +11,29 @@ final class EarshotUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    func testWatchDownloadPickerOpensTwiceWithoutCrashing() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 15), app.debugDescription)
+        settings.tap()
+
+        let pickerLink = app.buttons["Apple Watch Downloads"]
+        XCTAssertTrue(pickerLink.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<2 {
+            pickerLink.tap()
+            let pickerBar = app.navigationBars["Apple Watch Downloads"]
+            XCTAssertTrue(pickerBar.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.buttons["Our Perspective"].waitForExistence(timeout: 5),
+                          "The picker should list followed shows after loading")
+            XCTAssertTrue(app.buttons["Technically Working"].exists)
+            pickerBar.buttons["BackButton"].tap()
+            XCTAssertTrue(pickerLink.waitForExistence(timeout: 5))
+        }
+    }
+
     func testIPadExposesNewWindowAction() throws {
         guard UIDevice.current.userInterfaceIdiom == .pad else {
             throw XCTSkip("Multiple windows are an iPad feature")
