@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Malformed podcast feeds now log only an XML error code and parse position, keeping publisher-provided text out of public diagnostics.
+
 - Opening Apple Watch Downloads on iPhone no longer crashes while loading the followed podcast list.
 
 - Apple Watch VoiceOver Magic Tap now keeps Watch playback selected after pause across its screens. Now Playing has one device selector, and a paused or disconnected iPhone episode can continue from its last verified checkpoint using Watch audio or an existing download. A live transfer still waits for the receiving device and source pause acknowledgements.
