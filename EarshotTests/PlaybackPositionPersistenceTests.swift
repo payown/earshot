@@ -27,11 +27,13 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         let key = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
         UserDefaults.standard.set(key, forKey: PlayerService.LivePositionKey.episode)
         UserDefaults.standard.set(seconds, forKey: PlayerService.LivePositionKey.seconds)
+        UserDefaults.standard.set(Date.now, forKey: PlayerService.LivePositionKey.updatedAt)
     }
 
     private nonisolated func clearLive() {
         UserDefaults.standard.removeObject(forKey: PlayerService.LivePositionKey.episode)
         UserDefaults.standard.removeObject(forKey: PlayerService.LivePositionKey.seconds)
+        UserDefaults.standard.removeObject(forKey: PlayerService.LivePositionKey.updatedAt)
     }
 
     override nonisolated func tearDown() {
@@ -39,6 +41,7 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         // isolation from this nonisolated override.
         UserDefaults.standard.removeObject(forKey: PlayerService.LivePositionKey.episode)
         UserDefaults.standard.removeObject(forKey: PlayerService.LivePositionKey.seconds)
+        UserDefaults.standard.removeObject(forKey: PlayerService.LivePositionKey.updatedAt)
         super.tearDown()
     }
 
@@ -82,6 +85,68 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
 
         XCTAssertEqual(Int(player.currentPositionSeconds), 50,
                        "legacy last-playing identifiers still retain crash-recovery progress")
+    }
+
+    func test_restore_ignoresOlderSameEpisodeTickAfterRemoteCompletion() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+
+        let episode = makeEpisode(ctx)
+        setLive(episode, 198)
+        let identity = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        AppSettingsStore(context: ctx).setRawValue(identity, for: SettingsKey.lastPlayingEpisodeID)
+        episode.isPlayed = true
+        episode.positionSeconds = 0
+        episode.playedAt = Date.now.addingTimeInterval(10)
+        try? ctx.save()
+
+        player.load(episode)
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 0)
+    }
+
+    func test_restore_keepsNewerHandoffCheckpointAfterCompletion() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+
+        let episode = makeEpisode(ctx)
+        episode.isPlayed = true
+        episode.positionSeconds = 0
+        episode.playedAt = Date.now.addingTimeInterval(-10)
+        // Handoff can write a new live checkpoint even when periodic ticks
+        // for an already played episode are suppressed.
+        setLive(episode, 32)
+        let identity = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        AppSettingsStore(context: ctx).setRawValue(identity, for: SettingsKey.lastPlayingEpisodeID)
+        try? ctx.save()
+
+        player.load(episode)
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 32)
+    }
+
+    func test_restore_ignoresUndatedLegacyTickAfterCompletion() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+
+        let episode = makeEpisode(ctx)
+        setLive(episode, 198)
+        UserDefaults.standard.removeObject(forKey: PlayerService.LivePositionKey.updatedAt)
+        let identity = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        AppSettingsStore(context: ctx).setRawValue(identity, for: SettingsKey.lastPlayingEpisodeID)
+        episode.isPlayed = true
+        episode.positionSeconds = 0
+        try? ctx.save()
+
+        player.load(episode)
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 0)
     }
 
     /// The live position is keyed to a specific episode, so it must NOT bleed into
