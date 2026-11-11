@@ -54,6 +54,8 @@ struct EpisodeRow: View {
     private let performSupplementalAction: (EpisodeRowSupplementalAction) -> Void
     private let onSelect: (() -> Void)?
     private let isDetailSelected: Bool
+    private let isQueued: Bool
+    private let isInInbox: Bool
     /// Whether the row names its podcast, visually and in the VoiceOver label.
     /// True in mixed-show lists (Inbox, Downloads) where the user can't otherwise
     /// tell which show an episode belongs to (#535); false (default) in
@@ -71,6 +73,8 @@ struct EpisodeRow: View {
         includesPodcastName: Bool = false,
         onSelect: (() -> Void)? = nil,
         isDetailSelected: Bool = false,
+        isQueued: Bool = false,
+        isInInbox: Bool = false,
         performAction: @escaping (EpisodeAction) -> Void,
         performSupplementalAction: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
     ) {
@@ -82,6 +86,8 @@ struct EpisodeRow: View {
         self.includesPodcastName = includesPodcastName
         self.onSelect = onSelect
         self.isDetailSelected = isDetailSelected
+        self.isQueued = isQueued
+        self.isInInbox = isInInbox
     }
 
     @ViewBuilder
@@ -181,7 +187,10 @@ struct EpisodeRow: View {
         Button {
             runPrimary()
         } label: {
-            EpisodeRowContent(episode: episode, includesPodcastName: includesPodcastName)
+            EpisodeRowContent(
+                episode: episode, includesPodcastName: includesPodcastName,
+                isQueued: isQueued, isInInbox: isInInbox
+            )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }
@@ -233,6 +242,8 @@ struct EpisodeRow: View {
             audioURL: episode.audioURL,
             // "Now Playing" leads the spoken label (Item 2).
             isNowPlaying: isNowPlaying,
+            isQueued: isQueued,
+            isInInbox: isInInbox,
             details: settings.episodeSpokenDetails
         )
     }
@@ -262,6 +273,8 @@ struct EpisodeRowContent: View {
     @Environment(PlayerService.self) private var player
     let episode: Episode
     var includesPodcastName = false
+    var isQueued = false
+    var isInInbox = false
 
     var body: some View {
         if episode.isDeleted {
@@ -295,8 +308,10 @@ struct EpisodeRowContent: View {
                 // visually, matching the "Now Playing" prefix VoiceOver speaks.
                 // Hidden from VoiceOver here — the row is one element and the
                 // spoken state rides in the wrapper's single accessibilityLabel.
-                if isNowPlaying {
-                    Label("Now Playing", systemImage: "waveform")
+                if let placement = EpisodePlacementStatus.resolve(
+                    isNowPlaying: isNowPlaying, isQueued: isQueued, isInInbox: isInInbox
+                ) {
+                    Label(placement.label, systemImage: placement.symbol)
                         .labelStyle(.titleAndIcon)
                         .font(.caption)
                         .foregroundStyle(Color.accentColor)
