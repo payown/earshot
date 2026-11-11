@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Podcast episode rows in Library now show one placement badge: Now Playing, In Queue, or In Inbox, in that order. VoiceOver speaks the same status before the episode title while keeping the existing played and download details.
+
 - Apple Watch Home now has one Now Playing summary for the episode, playback state, device and position. Playback speed, chapters and sleep timer have short screens reachable from Now Playing. Device selection still only changes the controls being viewed; transfers remain explicit.
 
 - Episode filters, folder runs, badges and Shortcuts consistently use Played and Unplayed. Episode rows explain when audio is not downloaded and playback needs an internet connection.

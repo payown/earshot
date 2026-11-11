@@ -356,6 +356,26 @@ final class EarshotUITests: XCTestCase {
                        "Each shared episode row should be one VoiceOver stop: \(speech)")
     }
 
+    func testLibraryEpisodeRowsExposeInboxAndQueuePlacementInOneLabel() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let inbox = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "In Inbox, #169 – Apple's Price Hikes"
+        )).firstMatch
+        XCTAssertTrue(inbox.waitForExistence(timeout: 15), app.debugDescription)
+        let queued = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "In Queue, #166 – If You Used a Passkey"
+        )).firstMatch
+        // The List is lazy; #166 starts below the visible #169 row.
+        for _ in 0..<4 where !queued.exists {
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(queued.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(queued.label.contains("In Inbox"), "Queue placement should win over Inbox")
+    }
+
     func testInboxVoiceOverHasOneStopPerEpisode() throws {
         guard #available(iOS 27.0, *) else {
             throw XCTSkip("VoiceOver UI automation requires iOS 27")

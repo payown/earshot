@@ -327,4 +327,49 @@ final class EpisodeRowLabelTests: XCTestCase {
         XCTAssertEqual(EpisodeRowLabel.downloadBadge(.failed),
                        EpisodeRowLabel.DownloadBadge(systemImage: "exclamationmark.circle", text: "Download failed"))
     }
+
+    func testLibraryPlacementPriorityAndOneSpokenPrefix() {
+        XCTAssertEqual(EpisodePlacementStatus.resolve(isNowPlaying: true, isQueued: true, isInInbox: true), .nowPlaying)
+        XCTAssertEqual(EpisodePlacementStatus.resolve(isNowPlaying: false, isQueued: true, isInInbox: true), .inQueue)
+        XCTAssertEqual(EpisodePlacementStatus.resolve(isNowPlaying: false, isQueued: false, isInInbox: true), .inInbox)
+        XCTAssertNil(EpisodePlacementStatus.resolve(isNowPlaying: false, isQueued: false, isInInbox: false))
+
+        let queued = EpisodeRowLabel.label(
+            episodeTitle: "Episode", podcastName: nil, isPlayed: true, pubDate: nil,
+            downloadState: .downloaded, isQueued: true, isInInbox: true
+        )
+        XCTAssertEqual(queued, "In Queue, Episode, Played, Downloaded")
+        let playing = EpisodeRowLabel.label(
+            episodeTitle: "Episode", podcastName: nil, isPlayed: false, pubDate: nil,
+            isNowPlaying: true, isQueued: true, isInInbox: true
+        )
+        XCTAssertEqual(playing, "Now Playing, Episode")
+        let inbox = EpisodeRowLabel.label(
+            episodeTitle: "Episode", podcastName: nil, isPlayed: false, pubDate: nil,
+            isInInbox: true
+        )
+        XCTAssertEqual(inbox, "In Inbox, Episode")
+    }
+
+    func testLibraryInboxPlacementRespectsEpisodeAndShowSettings() {
+        func included(
+            _ status: EpisodeStatus = .newEpisode, dismissed: Bool = false,
+            catalogOnly: Bool = false, included: Bool = false,
+            excluded: Bool = false, optInOnly: Bool = false
+        ) -> Bool {
+            EpisodePlacementStatus.isInInbox(
+                status: status, dismissed: dismissed, catalogOnly: catalogOnly,
+                inboxIncluded: included, inboxExcluded: excluded, optInOnly: optInOnly
+            )
+        }
+        XCTAssertTrue(included())
+        XCTAssertFalse(included(.inQueue))
+        XCTAssertFalse(included(.played))
+        XCTAssertFalse(included(dismissed: true))
+        XCTAssertFalse(included(catalogOnly: true))
+        XCTAssertFalse(included(excluded: true))
+        XCTAssertTrue(included(included: true, excluded: true))
+        XCTAssertFalse(included(optInOnly: true))
+        XCTAssertTrue(included(included: true, optInOnly: true))
+    }
 }
