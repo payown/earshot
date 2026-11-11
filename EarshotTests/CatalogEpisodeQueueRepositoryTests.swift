@@ -381,6 +381,32 @@ final class CatalogEpisodeQueueRepositoryTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Bookmark>()), 1)
     }
 
+    func testRemovingCompletedCatalogQueueItemKeepsPlayedState() async throws {
+        _ = TestStore.freshContext()
+        let value = preview(guid: "completed")
+        let repository = CatalogEpisodeQueueRepository(container: TestStore.container)
+        let added = await repository.add(value)
+        XCTAssertEqual(added, .success(.added))
+        let edit = freshAssertionContext()
+        let episode = try XCTUnwrap(edit.fetch(FetchDescriptor<Episode>()).first)
+        episode.isPlayed = true
+        episode.playedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try edit.save()
+
+        let result = await repository.remove(CatalogEpisodeIdentity(
+            feedURL: value.podcastFeedURL, guid: value.id
+        ))
+
+        XCTAssertEqual(result, .success(.removed))
+        let context = freshAssertionContext()
+        let retained = try XCTUnwrap(context.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertNil(retained.queueItem)
+        XCTAssertEqual(retained.status, .played)
+        XCTAssertEqual(retained.playedAt, Date(timeIntervalSince1970: 1_700_000_000))
+        XCTAssertTrue(retained.inboxDismissed)
+        XCTAssertTrue(EpisodeListFilter.unheard.apply(to: [retained]).isEmpty)
+    }
+
     func testRemoveDeletesCompletedDownloadOnlyAfterCommit() async throws {
         _ = TestStore.freshContext()
         let repository = CatalogEpisodeQueueRepository(container: TestStore.container)
