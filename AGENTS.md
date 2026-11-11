@@ -9,8 +9,8 @@
 
 ## Tests and StoreKit
 
-- On this host under Xcode 26.6, `PaywallViewModelTests` and `ProductCatalogServiceTests` fail with `SKInternalErrorDomain Code=3` through both CLI and Xcode IDE runners. This is the corrected 2026-07-18 finding tracked by #679, not a product regression; CI skips both suites.
-- Exclude them from local runs with `-skip-testing:EarshotTests/PaywallViewModelTests -skip-testing:EarshotTests/ProductCatalogServiceTests`. Verify StoreKit purchases with Sandbox on a physical device.
+- On this host under Xcode 26.6, `PaywallViewModelTests` and `ProductCatalogServiceTests` failed with `SKInternalErrorDomain Code=3` through both CLI and Xcode IDE runners. This is the corrected 2026-07-18 finding tracked by #679, not a product regression. Under Xcode 27.2, both suites passed on iOS 26.0 and 26.5 simulators and run in CI again. The framework may still emit nonfatal Code=3 diagnostics.
+- Under Xcode 26.6, exclude them from local runs with `-skip-testing:EarshotTests/PaywallViewModelTests -skip-testing:EarshotTests/ProductCatalogServiceTests`. Verify StoreKit purchases with Sandbox on a physical device.
 
 ## Worktrees, reviews, and protected scope
 
