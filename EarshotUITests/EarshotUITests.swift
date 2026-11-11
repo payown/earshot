@@ -366,7 +366,7 @@ final class EarshotUITests: XCTestCase {
         )).firstMatch
         XCTAssertTrue(inbox.waitForExistence(timeout: 15), app.debugDescription)
         let queued = app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "In Queue, #166 – If You Used a Passkey"
+            format: "label BEGINSWITH %@", "Queued, #166 – If You Used a Passkey"
         )).firstMatch
         // The List is lazy; #166 starts below the visible #169 row.
         for _ in 0..<4 where !queued.exists {
@@ -396,7 +396,7 @@ final class EarshotUITests: XCTestCase {
         field.tap()
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Price Hikes".count) + "Passkey")
         let queued = app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "In Queue, #166 – If You Used a Passkey"
+            format: "label BEGINSWITH %@", "Queued, #166 – If You Used a Passkey"
         )).firstMatch
         XCTAssertTrue(queued.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertFalse(queued.label.contains("In Inbox"), "The Queue takes priority in Search")
