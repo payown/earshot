@@ -30,7 +30,7 @@ enum EpisodePlacementStatus: Equatable {
     var label: String {
         switch self {
         case .nowPlaying: "Now Playing"
-        case .inQueue: "In Queue"
+        case .inQueue: "Queued"
         case .inInbox: "In Inbox"
         }
     }

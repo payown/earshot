@@ -338,7 +338,7 @@ final class EpisodeRowLabelTests: XCTestCase {
             episodeTitle: "Episode", podcastName: nil, isPlayed: true, pubDate: nil,
             downloadState: .downloaded, isQueued: true, isInInbox: true
         )
-        XCTAssertEqual(queued, "In Queue, Episode, Played, Downloaded")
+        XCTAssertEqual(queued, "Queued, Episode, Played, Downloaded")
         let playing = EpisodeRowLabel.label(
             episodeTitle: "Episode", podcastName: nil, isPlayed: false, pubDate: nil,
             isNowPlaying: true, isQueued: true, isInInbox: true
