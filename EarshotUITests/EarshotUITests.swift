@@ -97,36 +97,75 @@ final class EarshotUITests: XCTestCase {
         guard UIDevice.current.userInterfaceIdiom == .pad else {
             throw XCTSkip("Search detail columns require an iPad layout")
         }
-        let os = ProcessInfo.processInfo.operatingSystemVersion
-        if os.majorVersion == 26 && os.minorVersion == 0 {
-            throw XCTSkip("iPadOS 26.0 simulator aborts in UIKit SearchBar when switching results")
-        }
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
         app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        guard window.frame.width >= 800 else {
+            throw XCTSkip("Search detail columns require a window at least 800 points wide")
+        }
         let searchButton = app.buttons["Search your library"]
         XCTAssertTrue(searchButton.waitForExistence(timeout: 15), app.debugDescription)
         searchButton.tap()
-        let field = app.searchFields.firstMatch
+        let field = app.searchFields["Search your library"]
         XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
         field.tap()
         field.typeText("e")
-        let firstShow = app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "Technically Working"
-        )).firstMatch
-        let secondShow = app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "Our Perspective"
-        )).firstMatch
-        XCTAssertTrue(firstShow.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(secondShow.exists)
-        firstShow.tap()
+        let firstResult = app.buttons["Technically Working, Michael Babcock & Damashe Thomas"]
+        let secondSidebarShow = app.buttons["Our Perspective, 2 unplayed episodes, Kolby & Michael"]
+        XCTAssertTrue(firstResult.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(secondSidebarShow.exists)
+        firstResult.tap()
         let firstEpisode = app.buttons.matching(NSPredicate(
             format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
         )).firstMatch
         XCTAssertTrue(firstEpisode.waitForExistence(timeout: 5), app.debugDescription)
-        secondShow.tap()
-        XCTAssertTrue(secondShow.isSelected, "The new podcast result should be selected")
-        XCTAssertFalse(firstEpisode.exists, "Switching search results must replace the episode data source")
+        secondSidebarShow.tap()
+        XCTAssertTrue(secondSidebarShow.isSelected, "The sidebar selection should switch podcasts")
+        XCTAssertTrue(firstEpisode.waitForNonExistence(timeout: 5),
+                      "Switching shows must replace the episode data source")
+    }
+
+    func testIPadSearchQueryRestoresAfterPodcastDetail() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Search detail navigation requires an iPad layout")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        guard window.frame.width >= 800 else {
+            throw XCTSkip("Search detail navigation requires a window at least 800 points wide")
+        }
+        app.buttons["Search your library"].tap()
+        let field = app.searchFields["Search your library"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        field.tap()
+        field.typeText("e")
+        let firstResult = app.buttons.matching(NSPredicate(
+            format: "label == %@", "Technically Working, Michael Babcock & Damashe Thomas"
+        )).firstMatch
+        XCTAssertTrue(firstResult.waitForExistence(timeout: 10), app.debugDescription)
+        firstResult.tap()
+        let detailBar = app.navigationBars["Technically Working"]
+        XCTAssertTrue(detailBar.waitForExistence(timeout: 5), app.debugDescription)
+        detailBar.buttons["BackButton"].tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(field.isHittable, "Back should restore the Library search field")
+        XCTAssertEqual(field.value as? String, "e", "Back should preserve the Library query")
+        field.tap()
+        field.typeText(XCUIKeyboardKey.delete.rawValue + "pers")
+        XCTAssertEqual(field.value as? String, "pers", "The restored Library query should be editable")
+        XCTAssertTrue(firstResult.waitForNonExistence(timeout: 5),
+                      "Editing the query should remove the old result")
+        let secondResult = app.buttons.matching(NSPredicate(
+            format: "label == %@", "Our Perspective, Kolby & Michael"
+        )).firstMatch
+        XCTAssertTrue(secondResult.waitForExistence(timeout: 5), app.debugDescription)
+        secondResult.tap()
+        XCTAssertTrue(app.navigationBars["Our Perspective"].waitForExistence(timeout: 5))
     }
 
     func testIPadLibraryVoiceOverReadsSelectedSidebarShow() throws {

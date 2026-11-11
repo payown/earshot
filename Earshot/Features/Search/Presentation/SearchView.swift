@@ -133,6 +133,7 @@ struct SearchView<HeaderContent: View>: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var query = ""
     @State private var matchedPodcasts: [Podcast] = []
@@ -402,6 +403,12 @@ struct SearchView<HeaderContent: View>: View {
 
     private var searchPlacement: SearchFieldPlacement {
         switch (scope, usesCompactLanding) {
+        case (.library, _) where horizontalSizeClass == .regular:
+            // iPadOS 26.0 can abort in UISearchBar while its automatic placement
+            // moves between navigation items as a wide detail result changes.
+            // Keep the field in a stable drawer in regular-width Library search;
+            // compact iPhone layouts retain their existing automatic placement.
+            return .navigationBarDrawer(displayMode: .always)
         case (.addPodcast, true):
             return .navigationBarDrawer(displayMode: .always)
         default:
