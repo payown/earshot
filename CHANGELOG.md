@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Podcast episode rows in Library and Library Search now show one placement badge: Now Playing, Queued, or In Inbox, in that order. VoiceOver speaks the same status before the episode title while keeping the existing played and download details.
-- Auto-queue count-cap eviction now keeps a completed episode Played when removing its Queue item, so it does not return to the Unplayed filter.
+- Auto-queue count-cap eviction and catalog Queue removal now keep a completed episode Played when removing its Queue item, so it does not return to the Unplayed filter.
 - Quick Actions settings names the configurable Episode and Queue download choice “Download / Remove Download”; episode actions still say “Download” or “Remove download” for the actual state.
 
 - Apple Watch Home now has one Now Playing summary for the episode, playback state, device and position. Playback speed, chapters and sleep timer have short screens reachable from Now Playing. Device selection still only changes the controls being viewed; transfers remain explicit.

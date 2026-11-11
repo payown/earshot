@@ -4119,7 +4119,7 @@ In Settings, open Quick Actions. The Episode and Queue choices that configure do
 
 Check the Library episode rows from Chapter 126 as well: move an episode between Inbox and Queue, try a paused Now Playing episode, and return to Search. If a status is stale, a row becomes two VoiceOver stops, the search field or focus moves unexpectedly, or an action has the wrong name, send the exact words, episode, actions, device, OS and build number. Watch handoff and Paul's Watch reachability remain separate open tests; this build does not claim to resolve them.
 
-If a podcast limits its auto-queued episodes, finish one that stays in Queue, then refresh after a newer episode arrives. The finished episode should stay Played when the cap removes it from Queue. This prevents a new reversal; already reversed episodes are not guessed back to Played. If one reappears under Unplayed, send its title, podcast, Queue setting and refresh steps.
+In Settings > Playback, turn on Keep finished episodes in Queue. For a podcast with auto-queue and a count cap, finish an episode, then refresh after a newer one arrives. Eviction should leave it Played, not Unplayed. Catalog Queue removal also keeps Played. Past reversals are not guessed back; mark those Played once. Send the title, show and steps if one returns.
 
 Kashe's story:
 
