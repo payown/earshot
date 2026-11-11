@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Replaying an episode no longer uses an older crash-recovery position left by a different playback session.
+
 - Episode sharing supplies a single audio URL to Share Sheet shortcuts, with the title kept in preview metadata instead of a separate input item.
 
 - Cold-launch download checks run off the main thread, initial tab preferences are reused, and repeated tab badge updates are combined to reduce navigation stalls.
