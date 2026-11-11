@@ -38,7 +38,10 @@ private struct LibrarySplitLayout<Sidebar: View>: View {
                 Group {
                     if let selectedPodcast,
                    PersistentModelLifetime.podcastExists(selectedPodcast.persistentModelID, in: context) {
-                    EpisodeListView(podcast: selectedPodcast, showsBackToShows: false)
+                    EpisodeListView(
+                        podcast: selectedPodcast, showsBackToShows: false,
+                        showsPlacementStatus: true
+                    )
                         .id(selectedPodcast.persistentModelID)
                 } else {
                     ContentUnavailableView(
