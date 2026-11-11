@@ -138,6 +138,10 @@ struct SearchView<HeaderContent: View>: View {
     @State private var query = ""
     @State private var matchedPodcasts: [Podcast] = []
     @State private var matchedEpisodes: [Episode] = []
+    @State private var queuedEpisodeIDs: Set<PersistentIdentifier> = []
+    @State private var queueMembershipTask: Task<Void, Never>?
+    @State private var queueMembershipRequest = UUID()
+    @State private var isSearchVisible = false
     @State private var matchedBookmarks: [Bookmark] = []
     @State private var podcastLimit = LocalSearchScanPolicy.resultPageSize
     @State private var episodeLimit = LocalSearchScanPolicy.resultPageSize
@@ -196,7 +200,7 @@ struct SearchView<HeaderContent: View>: View {
                         if let episode = selectedSearchEpisode, !episode.isDeleted {
                             EpisodeDetailPane(episode: episode)
                         } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
-                            EpisodeListView(podcast: podcast)
+                            EpisodeListView(podcast: podcast, showsPlacementStatus: scope == .library)
                                 .id(podcast.persistentModelID)
                         } else {
                             ContentUnavailableView(
@@ -233,9 +237,23 @@ struct SearchView<HeaderContent: View>: View {
             scheduleLocalSearch(for: newValue)
             if scope.showsDirectory { scheduleDirectorySearch(for: newValue) }
         }
+        .onAppear {
+            isSearchVisible = true
+            refreshQueueMembership()
+        }
         .onDisappear {
+            isSearchVisible = false
+            queueMembershipTask?.cancel()
             directoryTask?.cancel()
             localSearchTask?.cancel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotQueueDidChange)
+            .receive(on: DispatchQueue.main)) { _ in
+            refreshQueueMembership()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)
+            .receive(on: DispatchQueue.main)) { _ in
+            refreshQueueMembership()
         }
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
             .receive(on: DispatchQueue.main)) { note in
@@ -255,7 +273,9 @@ struct SearchView<HeaderContent: View>: View {
                 compactSearchPodcast = nil
             }
         }
-        .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
+        .navigationDestination(for: Podcast.self) {
+            EpisodeListView(podcast: $0, showsPlacementStatus: scope == .library)
+        }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
@@ -272,7 +292,7 @@ struct SearchView<HeaderContent: View>: View {
                 EpisodeListView(podcast: podcast, onPlayRequest: { episode in
                     pendingPodcastSheetPlayID = episode.persistentModelID
                     compactSearchPodcast = nil
-                })
+                }, showsPlacementStatus: scope == .library)
                     .id(podcast.persistentModelID)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
@@ -338,6 +358,8 @@ struct SearchView<HeaderContent: View>: View {
                                 selectedSearchPodcast = nil
                             } : nil,
                             isDetailSelected: wide && selectedSearchEpisode?.persistentModelID == episode.persistentModelID,
+                            isQueued: queuedEpisodeIDs.contains(episode.persistentModelID),
+                            isInInbox: isInInbox(episode),
                             performAction: { action in perform(action, for: episode) }
                         )
                     }
@@ -516,6 +538,28 @@ struct SearchView<HeaderContent: View>: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityHint("Double tap to play from the bookmarked spot")
+    }
+
+    private func isInInbox(_ episode: Episode) -> Bool {
+        guard scope == .library, let podcast = episode.podcast else { return false }
+        return EpisodePlacementStatus.isInInbox(
+            status: episode.status, dismissed: episode.inboxDismissed,
+            catalogOnly: podcast.isCatalogOnly, inboxIncluded: podcast.inboxIncluded,
+            inboxExcluded: podcast.inboxExcluded, optInOnly: settings.inboxOptInOnly
+        )
+    }
+
+    private func refreshQueueMembership() {
+        guard scope == .library, isSearchVisible else { return }
+        queueMembershipTask?.cancel()
+        let request = UUID()
+        queueMembershipRequest = request
+        let container = context.container
+        queueMembershipTask = Task { @MainActor in
+            guard let ids = try? await EpisodeQueueMembershipSnapshot.load(in: container),
+                  !Task.isCancelled, queueMembershipRequest == request else { return }
+            queuedEpisodeIDs = ids
+        }
     }
 
     private func perform(_ action: EpisodeAction, for episode: Episode) {
