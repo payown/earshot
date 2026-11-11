@@ -6,16 +6,19 @@ struct EpisodeListView: View {
     let podcast: Podcast
     let showsBackToShows: Bool
     let onPlayRequest: ((Episode) -> Void)?
+    let showsPlacementStatus: Bool
     private let nonPlayedBatchLimit = 1_000
 
     init(
         podcast: Podcast,
         showsBackToShows: Bool = true,
-        onPlayRequest: ((Episode) -> Void)? = nil
+        onPlayRequest: ((Episode) -> Void)? = nil,
+        showsPlacementStatus: Bool = false
     ) {
         self.podcast = podcast
         self.showsBackToShows = showsBackToShows
         self.onPlayRequest = onPlayRequest
+        self.showsPlacementStatus = showsPlacementStatus
     }
 
     @Environment(\.modelContext) private var context
@@ -70,6 +73,9 @@ struct EpisodeListView: View {
     /// Store-backed page state. It owns only the requested models and never
     /// touches the potentially 45,000-row `podcast.episodes` inverse.
     @State private var episodeList: EpisodeListDataSource?
+    @State private var queuedEpisodeIDs: Set<PersistentIdentifier> = []
+    @State private var queueMembershipTask: Task<Void, Never>?
+    @State private var queueMembershipRequest = UUID()
     @State private var searchReloadTask: Task<Void, Never>?
     @State private var episodeStateReloadTask: Task<Void, Never>?
     @State private var isBulkEpisodeMutation = false
@@ -101,6 +107,15 @@ struct EpisodeListView: View {
     /// happen in the store before these models enter view state.
     private var visibleEpisodes: [Episode] {
         (episodeList?.episodes ?? []).filter { !$0.isDeleted && $0.modelContext == context }
+    }
+
+    private func isInInbox(_ episode: Episode) -> Bool {
+        guard showsPlacementStatus else { return false }
+        return EpisodePlacementStatus.isInInbox(
+            status: episode.status, dismissed: episode.inboxDismissed,
+            catalogOnly: podcast.isCatalogOnly, inboxIncluded: podcast.inboxIncluded,
+            inboxExcluded: podcast.inboxExcluded, optInOnly: settings.inboxOptInOnly
+        )
     }
 
     /// Count of unplayed episodes across the WHOLE podcast, not just the
@@ -273,8 +288,14 @@ struct EpisodeListView: View {
                 }
             }
         }
-        .onAppear { isEpisodeListVisible = true }
-        .onDisappear { isEpisodeListVisible = false }
+        .onAppear {
+            isEpisodeListVisible = true
+            refreshQueueMembership()
+        }
+        .onDisappear {
+            isEpisodeListVisible = false
+            queueMembershipTask?.cancel()
+        }
         .task(id: podcast.feedURL) {
             sortOrder = AppSettingsStore(context: context).episodeSortOrder(forFeedURL: podcast.feedURL)
             filter = AppSettingsStore(context: context).episodeListFilter(forFeedURL: podcast.feedURL)
@@ -314,7 +335,12 @@ struct EpisodeListView: View {
                 dismiss()
             } else {
                 reloadEpisodePage()
+                refreshQueueMembership()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotQueueDidChange)
+            .receive(on: DispatchQueue.main)) { _ in
+            refreshQueueMembership()
         }
         .onReceive(NotificationCenter.default.publisher(for: .earshotEpisodeUserStateDidChange)
             .receive(on: DispatchQueue.main)) { note in
@@ -547,6 +573,8 @@ struct EpisodeListView: View {
         if selection.isSelecting {
             EpisodeSelectableRow(
                 episode: episode,
+                isQueued: showsPlacementStatus && queuedEpisodeIDs.contains(episode.persistentModelID),
+                isInInbox: isInInbox(episode),
                 isSelected: selection.isSelected(episode.persistentModelID),
                 onToggle: { selection.toggle(episode.persistentModelID) }
             )
@@ -573,8 +601,23 @@ struct EpisodeListView: View {
                     }
                 },
                 isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
+                isQueued: showsPlacementStatus && queuedEpisodeIDs.contains(episode.persistentModelID),
+                isInInbox: isInInbox(episode),
                 performAction: { action in perform(action, for: episode) }
             )
+        }
+    }
+
+    private func refreshQueueMembership() {
+        guard showsPlacementStatus, isEpisodeListVisible else { return }
+        queueMembershipTask?.cancel()
+        let request = UUID()
+        queueMembershipRequest = request
+        let container = context.container
+        queueMembershipTask = Task { @MainActor in
+            guard let ids = try? await EpisodeQueueMembershipSnapshot.load(in: container),
+                  !Task.isCancelled, queueMembershipRequest == request else { return }
+            queuedEpisodeIDs = ids
         }
     }
 
@@ -1110,5 +1153,19 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+/// One value-only Queue snapshot per Library screen refresh. Resolve persistent
+/// episode identities off the main actor; recycled rows only read a Set and
+/// never fault a QueueItem relationship or run a store fetch during VoiceOver
+/// focus movement. Queue notifications replace the snapshot after saves.
+enum EpisodeQueueMembershipSnapshot {
+    @concurrent
+    static func load(in container: ModelContainer) async throws -> Set<PersistentIdentifier> {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let items = try context.fetch(FetchDescriptor<QueueItem>())
+        return Set(items.compactMap { $0.episode?.persistentModelID })
     }
 }

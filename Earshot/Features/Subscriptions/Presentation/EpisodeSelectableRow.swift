@@ -20,6 +20,8 @@ struct EpisodeSelectableRow: View {
     /// (Inbox) so the spoken label names the show, false in single-show lists
     /// (a podcast's episode list).
     var includesPodcastName = false
+    var isQueued = false
+    var isInInbox = false
     let isSelected: Bool
     let onToggle: () -> Void
 
@@ -33,7 +35,10 @@ struct EpisodeSelectableRow: View {
                 accessibilityValue: accessibilityValue,
                 onToggle: onToggle
             ) {
-                EpisodeRowContent(episode: episode, includesPodcastName: includesPodcastName)
+                EpisodeRowContent(
+                    episode: episode, includesPodcastName: includesPodcastName,
+                    isQueued: isQueued, isInInbox: isInInbox
+                )
             }
         }
     }
@@ -57,6 +62,8 @@ struct EpisodeSelectableRow: View {
             downloadState: episode.downloadStatus,
             audioURL: episode.audioURL,
             isNowPlaying: isNowPlaying,
+            isQueued: isQueued,
+            isInInbox: isInInbox,
             details: settings.episodeSpokenDetails
         )
     }

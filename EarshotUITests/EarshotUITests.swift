@@ -356,6 +356,69 @@ final class EarshotUITests: XCTestCase {
                        "Each shared episode row should be one VoiceOver stop: \(speech)")
     }
 
+    func testLibraryEpisodeRowsExposeInboxAndQueuePlacementInOneLabel() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let inbox = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "In Inbox, #169 – Apple's Price Hikes"
+        )).firstMatch
+        XCTAssertTrue(inbox.waitForExistence(timeout: 15), app.debugDescription)
+        let queued = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Queued, #166 – If You Used a Passkey"
+        )).firstMatch
+        // The List is lazy; #166 starts below the visible #169 row.
+        for _ in 0..<4 where !queued.exists {
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(queued.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(queued.label.contains("In Inbox"), "Queue placement should win over Inbox")
+    }
+
+    func testLibrarySearchEpisodeResultsExposePlacementInOneRow() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let searchButton = app.buttons["Search your library"]
+        XCTAssertTrue(searchButton.waitForExistence(timeout: 15), app.debugDescription)
+        searchButton.tap()
+        let field = app.searchFields["Search your library"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        field.tap()
+        field.typeText("Price Hikes")
+        let inbox = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "In Inbox, #169 – Apple's Price Hikes"
+        )).firstMatch
+        XCTAssertTrue(inbox.waitForExistence(timeout: 15), app.debugDescription)
+
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Price Hikes".count) + "Passkey")
+        let queued = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Queued, #166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(queued.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(queued.label.contains("In Inbox"), "The Queue takes priority in Search")
+    }
+
+    func testQuickActionsDownloadSettingNamesBothOutcomes() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        let settingsTab = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 15), app.debugDescription)
+        settingsTab.tap()
+        let quickActions = app.buttons["Quick Actions"]
+        for _ in 0..<5 where !quickActions.isHittable { app.swipeUp() }
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 5), app.debugDescription)
+        quickActions.tap()
+        let download = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Download / Remove Download, enabled"
+        ))
+        XCTAssertTrue(download.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+    }
+
     func testInboxVoiceOverHasOneStopPerEpisode() throws {
         guard #available(iOS 27.0, *) else {
             throw XCTSkip("VoiceOver UI automation requires iOS 27")
