@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Episode filters, folder runs, badges and Shortcuts consistently use Played and Unplayed. Episode rows explain when audio is not downloaded and playback needs an internet connection.
+
 ### Fixed
 
 - Loading older podcast episodes keeps the current expanded episode list and browsing position available.
@@ -54,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Silence trimming now compacts silent passages during playback, with a global setting and per-podcast override. Saved episode positions remain in the original media timeline. (#570)
 
 ### Changed
+
+- Episode filters, folder runs, badges and Shortcuts consistently use Played and Unplayed. Episode rows say “Stream to play” when audio is not downloaded.
 
 - Consolidated player menus and header, with predictable playback controls near the middle of the screen between scrolling episode content and details. Playback position stays above enlarged transport controls; audio destination and Show notes stay side by side below. Preserved artwork actions and enlarged slider interaction areas; unavailable notes stay in place. (#951)
 

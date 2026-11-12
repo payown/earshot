@@ -1,6 +1,6 @@
 import Foundation
 
-/// Whether a podcast's episode list shows every episode or only unheard ones.
+/// Whether a podcast's episode list shows every episode or only unplayed ones.
 ///
 /// Pure and SwiftData-free so the filtering rule is unit-testable without a
 /// model context, and reusable by binge playback (#488), whose play set follows
@@ -8,7 +8,8 @@ import Foundation
 /// the `podcast_filter_<feedURL>` ``AppSetting`` key (#489); the absent key falls
 /// back to ``unheard``.
 enum EpisodeListFilter: String, Codable, CaseIterable, Identifiable {
-    /// Only episodes that have not been played (`isPlayed == false`). The default.
+    /// Episodes not marked played (`isPlayed == false`), including those started
+    /// but not finished. The default. Keep the raw value for saved preferences.
     case unheard
     /// Every episode, played or not.
     case all
@@ -18,7 +19,7 @@ enum EpisodeListFilter: String, Codable, CaseIterable, Identifiable {
     /// User-facing label for the segmented control.
     var title: String {
         switch self {
-        case .unheard: return "Unheard"
+        case .unheard: return "Unplayed"
         case .all: return "All"
         }
     }
@@ -33,14 +34,14 @@ enum EpisodeListFilter: String, Codable, CaseIterable, Identifiable {
     }
 
     /// VoiceOver announcement describing the visible set after a filter change,
-    /// e.g. "Showing 12 unheard episodes" or "Showing all 316 episodes". Pure so
+    /// e.g. "Showing 12 unplayed episodes" or "Showing all 316 episodes". Pure so
     /// the wording is unit-testable. Plural form is resolved here because the
     /// `^[…](inflect:)` markup is only honored by SwiftUI `Text`, not by the
     /// plain string passed to ``Announcer``.
     func announcement(count: Int) -> String {
         let noun = count == 1 ? "episode" : "episodes"
         switch self {
-        case .unheard: return "Showing \(count) unheard \(noun)"
+        case .unheard: return "Showing \(count) unplayed \(noun)"
         case .all: return "Showing all \(count) \(noun)"
         }
     }

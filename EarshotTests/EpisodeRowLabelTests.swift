@@ -169,9 +169,30 @@ final class EpisodeRowLabelTests: XCTestCase {
     }
 
     func testSpokenDownloadStateDistinguishesFailedFromNeverRequested() {
-        // Both can stream, but a failed request must remain discoverable.
-        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.none), "Streams when played")
-        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.failed), "Download failed. Streams when played")
+        let onlineAudio = "https://example.com/episode.mp3"
+        XCTAssertEqual(
+            EpisodeRowLabel.spokenDownloadState(.none, audioURL: onlineAudio),
+            "Not downloaded. Plays using an internet connection."
+        )
+        XCTAssertEqual(
+            EpisodeRowLabel.spokenDownloadState(.failed, audioURL: onlineAudio),
+            "Download failed. Plays using an internet connection."
+        )
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.none, audioURL: ""), "Not downloaded")
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.failed, audioURL: "file:///tmp/audio.mp3"), "Download failed")
+        XCTAssertEqual(
+            EpisodeRowLabel.spokenDownloadState(.none, audioURL: "http://example.com/episode.mp3"),
+            "Not downloaded. Plays using an internet connection."
+        )
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.none, audioURL: "ftp://example.com/audio"), "Not downloaded")
+    }
+
+    func testOnlineAvailabilityIsPartOfOneEpisodeRowLabel() {
+        let label = EpisodeRowLabel.label(
+            episodeTitle: "Episode", podcastName: nil, isPlayed: false, pubDate: nil,
+            downloadState: DownloadStatus.none, audioURL: "https://example.com/episode.mp3"
+        )
+        XCTAssertEqual(label, "Episode, Not downloaded. Plays using an internet connection.")
     }
 
     func testLabelAppendsDownloadStateLast() {
@@ -301,7 +322,7 @@ final class EpisodeRowLabelTests: XCTestCase {
     }
 
     func testDownloadBadgeDistinguishesFailedFromNeverRequested() {
-        let expected = EpisodeRowLabel.DownloadBadge(systemImage: "dot.radiowaves.up.forward", text: "Streaming")
+        let expected = EpisodeRowLabel.DownloadBadge(systemImage: "dot.radiowaves.up.forward", text: "Not downloaded")
         XCTAssertEqual(EpisodeRowLabel.downloadBadge(.none), expected)
         XCTAssertEqual(EpisodeRowLabel.downloadBadge(.failed),
                        EpisodeRowLabel.DownloadBadge(systemImage: "exclamationmark.circle", text: "Download failed"))
