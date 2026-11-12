@@ -154,6 +154,43 @@ final class EpisodeListDataSourceTests: XCTestCase {
         XCTAssertTrue(data.episodes.allSatisfy { !$0.isPlayed })
     }
 
+    func testSavedUnfinishedProgressCanBeCountedInStore() throws {
+        let (context, podcast) = try fixture(count: 5)
+        let episodes = try context.fetch(FetchDescriptor<Episode>())
+            .sorted { $0.guid < $1.guid }
+        episodes[0].positionSeconds = 0
+        episodes[1].positionSeconds = 42
+        episodes[2].positionSeconds = 900
+        episodes[2].isPlayed = true
+        episodes[3].positionSeconds = 12
+        episodes[4].positionSeconds = 0
+        try context.save()
+
+        let podcastID = podcast.persistentModelID
+        let request = FetchDescriptor<Episode>(predicate: #Predicate {
+            $0.podcast?.persistentModelID == podcastID &&
+            $0.positionSeconds > 0 && $0.playedAt == nil
+        })
+
+        XCTAssertEqual(try context.fetchCount(request), 2)
+        XCTAssertEqual(Set(try context.fetch(request).map(\.guid)), ["000001", "000003"])
+
+        // A legacy or repaired row can have only one of the two completion
+        // markers. Neither should be called partially played.
+        episodes[0].positionSeconds = 77
+        episodes[0].playedAt = .now
+        episodes[4].positionSeconds = 99
+        episodes[4].status = .played
+        try context.save()
+        let playedStatus = EpisodeStatus.played
+        let statusRequest = FetchDescriptor<Episode>(predicate: #Predicate {
+            $0.podcast?.persistentModelID == podcastID &&
+            $0.positionSeconds > 0 && $0.status != playedStatus &&
+            $0.playedAt == nil
+        })
+        XCTAssertEqual(Set(try context.fetch(statusRequest).map(\.guid)), ["000001", "000003"])
+    }
+
     func testNewestOldestAndNilDatesLast() throws {
         let (context, podcast) = try fixture(count: 3)
         let undated = Episode(guid: "nil", title: "Undated", audioURL: "https://example.com/nil.mp3")
