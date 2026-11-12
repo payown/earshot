@@ -119,6 +119,16 @@ struct EpisodeListView: View {
     private var filteredCount: Int { episodeList?.filteredCount ?? 0 }
     private var matchingCount: Int { episodeList?.matchingCount ?? 0 }
 
+    /// SwiftData's saved position changes less often than the player's clock.
+    /// Observe only the active show's filter eligibility, not every time tick.
+    private var activeEpisodeIsPartiallyPlayed: Bool {
+        guard let id = player.nowPlayingEpisodeID,
+              let episode = player.nowPlayingEpisode,
+              episode.persistentModelID == id,
+              episode.podcast?.persistentModelID == podcast.persistentModelID else { return false }
+        return EpisodeListFilter.partiallyPlayed.includes(episode)
+    }
+
     /// Persists and announces only on a genuine user change, so loading the
     /// stored value on appear doesn't speak over VoiceOver.
     private var filterSelection: Binding<EpisodeListFilter> {
@@ -179,7 +189,7 @@ struct EpisodeListView: View {
                         }
                         Section {
                             Picker("Filter episodes", selection: filterSelection) {
-                                ForEach(EpisodeListFilter.allCases) { option in
+                                ForEach(EpisodeListFilter.podcastChoices) { option in
                                     Text(option.title).tag(option)
                                 }
                             }
@@ -237,7 +247,9 @@ struct EpisodeListView: View {
                             } header: {
                                 Text(filter == .unheard
                                      ? "^[\(matchingCount) unplayed episode](inflect: true)"
-                                     : "^[\(matchingCount) episode](inflect: true)")
+                                     : filter == .partiallyPlayed
+                                         ? "^[\(matchingCount) partially played episode](inflect: true)"
+                                         : "^[\(matchingCount) episode](inflect: true)")
                                     .accessibilityFocused($focusResultsHeading)
                             }
                         }
@@ -284,6 +296,9 @@ struct EpisodeListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search episodes")
         .onChange(of: podcast.displayName) { reloadEpisodePage() }
+        .onChange(of: activeEpisodeIsPartiallyPlayed) {
+            if filter == .partiallyPlayed { reloadEpisodePage() }
+        }
         .onChange(of: searchText) {
             scheduleSearchReload()
         }
@@ -599,16 +614,28 @@ struct EpisodeListView: View {
             // Rotor "Unfollow this podcast" (#572): opens the destructive
             // confirmation — activation never unfollows directly.
             onUnfollow: { pendingUnfollow = podcast },
-            // Under the Unheard filter, rotor "Mark as played" removes this row
+            // Under Unplayed or Partially Played, "Mark as played" removes this row
             // (#579). Capture the visible neighbor before the state changes.
             onMarkPlayed: { nowPlayed in
-                guard filter == .unheard, nowPlayed else { return }
+                guard filter != .all, nowPlayed else { return }
                 let neighbor = neighborID(of: episode, in: visibleEpisodes)
+                let currentFilter = filter
+                let currentSearch = searchText
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    guard isEpisodeListVisible, filter == currentFilter,
+                          searchText == currentSearch else { return }
                     if let neighbor {
-                        focusedEpisode = neighbor
+                        if visibleEpisodes.contains(where: { $0.persistentModelID == neighbor }) {
+                            focusedEpisode = neighbor
+                        } else {
+                            focusResultsHeading = true
+                        }
                     } else {
-                        focusEmptyFilter = true
+                        if filteredCount == 0 {
+                            focusEmptyFilter = true
+                        } else {
+                            focusResultsHeading = true
+                        }
                     }
                 }
             },
@@ -878,20 +905,23 @@ struct EpisodeListView: View {
         .padding(.vertical, Spacing.sm)
     }
 
-    /// Shown when every episode is played and the filter is set to Unheard.
-    /// Offers a one-tap switch to All rather than leaving a blank list.
+    /// Offers a one-tap switch to All when the current filter has no episodes.
     private var emptyFilterState: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("No unplayed episodes")
+            Text(filter == .partiallyPlayed
+                 ? "No partially played episodes"
+                 : "No unplayed episodes")
                 .font(.headline)
                 // Focus lands here when the rotor mark-played removes the last
                 // unheard row (#579), so VoiceOver isn't orphaned on a vanished
                 // element. The heading, not the container: focusing the VStack
                 // would make VoiceOver group-summarize all three children.
                 .accessibilityFocused($focusEmptyFilter)
-            Text("You've played everything here. Switch to All to see every episode.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            if filter == .unheard {
+                Text("You've played everything here. Switch to All to see every episode.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             Button("Show all episodes") {
                 filterSelection.wrappedValue = .all
             }
@@ -1038,12 +1068,45 @@ struct EpisodeListView: View {
 
     private func reloadEpisodePage() {
         guard !podcast.isDeleted, let episodeList else { return }
+        // A synchronized completion or position reset can remove the focused row
+        // from Partially Played without a local rotor action. Keep VoiceOver on a
+        // surviving neighbor, and leave routine reloads alone.
+        let focusedID = filter == .partiallyPlayed ? focusedEpisode : nil
+        let oldIndex = focusedID.flatMap { id in
+            visibleEpisodes.firstIndex(where: { $0.persistentModelID == id })
+        }
+        let currentFilter = filter
+        let currentSearch = searchText
         episodeList.podcastTitle = "\(podcast.title) \(podcast.displayName)"
         episodeList.reloadKeepingLoadedLimit(
             filter: filter,
             sort: sortOrder,
             searchText: searchText
         )
+        if let focusedID, let oldIndex {
+            let newIDs = visibleEpisodes.map(\.persistentModelID)
+            guard !newIDs.contains(focusedID) else { return }
+            let neighbor = EpisodeListFocusRecovery.replacement(
+                focusedID: focusedID, oldIndex: oldIndex, currentIDs: newIDs
+            )
+            DispatchQueue.main.async {
+                guard isEpisodeListVisible, filter == currentFilter,
+                      searchText == currentSearch,
+                      !visibleEpisodes.contains(where: { $0.persistentModelID == focusedID })
+                else { return }
+                if let neighbor {
+                    if visibleEpisodes.contains(where: { $0.persistentModelID == neighbor }) {
+                        focusedEpisode = neighbor
+                    } else {
+                        focusResultsHeading = true
+                    }
+                } else if filteredCount == 0 {
+                    focusEmptyFilter = true
+                } else {
+                    focusResultsHeading = true
+                }
+            }
+        }
     }
 
     /// Keeps store search work off the keystroke path and prevents a superseded
@@ -1059,6 +1122,16 @@ struct EpisodeListView: View {
             guard !Task.isCancelled else { return }
             resetEpisodePage(moveFocusToResults: false)
         }
+    }
+}
+
+/// Pure choice of a surviving row when a filtered result vanishes.
+enum EpisodeListFocusRecovery {
+    static func replacement<ID: Equatable>(
+        focusedID: ID, oldIndex: Int, currentIDs: [ID]
+    ) -> ID? {
+        guard !currentIDs.contains(focusedID), !currentIDs.isEmpty else { return nil }
+        return currentIDs[min(max(0, oldIndex), currentIDs.count - 1)]
     }
 }
 

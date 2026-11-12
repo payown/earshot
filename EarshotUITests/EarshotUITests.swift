@@ -212,6 +212,64 @@ final class EarshotUITests: XCTestCase {
         )).firstMatch.waitForExistence(timeout: 5), "Play must load the selected episode")
     }
 
+    func testPodcastPartiallyPlayedFilterKeepsOneRowStopAndCanShowAll() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let filter = app.segmentedControls["Filter episodes"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 15), app.debugDescription)
+        let partial = filter.buttons["Partially Played"]
+        XCTAssertTrue(partial.exists)
+        partial.tap()
+        XCTAssertTrue(app.staticTexts["2 partially played episodes"].waitForExistence(timeout: 5))
+
+        let started = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        XCTAssertTrue(started.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#169 – Apple's Price Hikes"
+        )).firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#168 – Multi-Agent Madness"
+        )).firstMatch.exists)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).count, 1, "The filter must not create duplicate accessible row buttons")
+
+        filter.buttons["All"].tap()
+        XCTAssertTrue(app.staticTexts["6 episodes"].waitForExistence(timeout: 5),
+                      "All should restore the full six-episode show, including off-screen rows")
+    }
+
+    func testPartiallyPlayedRowsRemainConsecutiveVoiceOverStops() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+        let filter = app.segmentedControls["Filter episodes"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 15), app.debugDescription)
+        filter.buttons["Partially Played"].tap()
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        var speech: [String] = []
+        for _ in 0..<40 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("#169 – Apple's Price Hikes") { break }
+        }
+        let first = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#170 – Turn the Right Knob") }),
+                                  "First partially played episode not reached: \(speech)")
+        let second = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#169 – Apple's Price Hikes") }),
+                                   "Second partially played episode not reached: \(speech)")
+        XCTAssertEqual(second, first + 1, "Partially played episodes should be one stop each: \(speech)")
+    }
+
     func testQueueEpisodeSelectionAndPlayAreSeparate() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]

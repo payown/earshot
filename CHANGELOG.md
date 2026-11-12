@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Podcast episode lists offer a Partially Played filter for unfinished episodes with saved progress. Search, sorting, paging, and the existing Unplayed and All choices remain available; Downloads filters are unchanged.
+
 - Native iPad Library and podcast detail navigation, iPhone Duo layouts, and the independent Apple Watch app now share the main source. The watch can browse and download directly, play offline, show complications and shortcuts, and control or transfer iPhone playback. Paired-device and VoiceOver behavior still require physical acceptance before public distribution.
 
 - Now Playing's More options includes Share episode link, separate from exporting the audio file.

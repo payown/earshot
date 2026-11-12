@@ -174,6 +174,11 @@ final class EpisodeListDataSourceTests: XCTestCase {
 
         XCTAssertEqual(try context.fetchCount(request), 2)
         XCTAssertEqual(Set(try context.fetch(request).map(\.guid)), ["000001", "000003"])
+        let data = source(context, podcast)
+        data.resetAndLoad(filter: .partiallyPlayed, sort: .latestFirst, searchText: "")
+        XCTAssertEqual(data.filteredCount, 2)
+        XCTAssertEqual(data.matchingCount, 2)
+        XCTAssertEqual(Set(data.episodes.map(\.guid)), ["000001", "000003"])
 
         // A legacy or repaired row can have only one of the two completion
         // markers. Neither should be called partially played.
@@ -189,6 +194,51 @@ final class EpisodeListDataSourceTests: XCTestCase {
             $0.playedAt == nil
         })
         XCTAssertEqual(Set(try context.fetch(statusRequest).map(\.guid)), ["000001", "000003"])
+        data.reloadKeepingLoadedLimit(filter: .partiallyPlayed, sort: .latestFirst, searchText: "")
+        XCTAssertEqual(Set(data.episodes.map(\.guid)), ["000001", "000003"])
+        XCTAssertEqual(data.matchingCount, 2)
+    }
+
+    func testPartiallyPlayedSearchSortPagingAndSelectionStayStoreBounded() async throws {
+        for sort in [EpisodeSortOrder.latestFirst, .latestLast] {
+            let (context, podcast) = try fixture(count: 250)
+            let stored = try context.fetch(FetchDescriptor<Episode>())
+                .sorted { $0.guid < $1.guid }
+            for episode in stored.prefix(125) { episode.positionSeconds = 20 }
+            try context.save()
+            let data = source(context, podcast)
+
+            data.resetAndLoad(filter: .partiallyPlayed, sort: sort, searchText: "")
+            XCTAssertEqual(data.allCount, 250)
+            XCTAssertEqual(data.unplayedCount, 250)
+            XCTAssertEqual(data.filteredCount, 125)
+            XCTAssertEqual(data.matchingCount, 125)
+            XCTAssertEqual(data.episodes.count, 100)
+            XCTAssertTrue(data.hasMore)
+            XCTAssertEqual(data.episodes.first?.guid,
+                           sort == .latestFirst ? "000124" : "000000")
+
+            data.loadMore(filter: .partiallyPlayed, sort: sort, searchText: "")
+            XCTAssertEqual(data.episodes.count, 125)
+            XCTAssertFalse(data.hasMore)
+            XCTAssertEqual(Set(data.episodes.map(\.persistentModelID)).count, 125)
+
+            data.resetAndLoad(filter: .partiallyPlayed, sort: sort,
+                              searchText: "Episode 000042")
+            XCTAssertEqual(data.episodes.map(\.guid), ["000042"])
+            XCTAssertEqual(data.matchingCount, 1)
+            let ids = try await data.matchingEpisodeIDs(
+                filter: .partiallyPlayed, searchText: "Episode 000042"
+            )
+            XCTAssertEqual(ids, Set(data.episodes.map(\.persistentModelID)))
+
+            stored[42].isPlayed = true
+            try context.save()
+            data.reloadKeepingLoadedLimit(filter: .partiallyPlayed, sort: sort,
+                                          searchText: "Episode 000042")
+            XCTAssertEqual(data.matchingCount, 0)
+            XCTAssertTrue(data.episodes.isEmpty)
+        }
     }
 
     func testNewestOldestAndNilDatesLast() throws {

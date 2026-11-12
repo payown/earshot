@@ -145,7 +145,12 @@ final class EpisodeListDataSource {
         do {
             allCount = try context.fetchCount(descriptor(filter: .all, searchText: ""))
             unplayedCount = try context.fetchCount(descriptor(filter: .unheard, searchText: ""))
-            filteredCount = filter == .all ? allCount : unplayedCount
+            switch filter {
+            case .all: filteredCount = allCount
+            case .unheard: filteredCount = unplayedCount
+            case .partiallyPlayed:
+                filteredCount = try context.fetchCount(descriptor(filter: .partiallyPlayed, searchText: ""))
+            }
             matchingCount = try context.fetchCount(descriptor(filter: filter, searchText: searchText))
             episodes = try fetchPage(
                 filter: filter,
@@ -214,6 +219,7 @@ final class EpisodeListDataSource {
         datePresence: DatePresence = .any
     ) -> FetchDescriptor<Episode> {
         let podcastID = podcastID
+        let playedStatus = EpisodeStatus.played
         let query = EpisodeSearchFilter.normalized(searchText)
         // The old in-memory search matched the containing podcast title too. If
         // that title matches, every episode is a result; treating it as an empty
@@ -246,6 +252,21 @@ final class EpisodeListDataSource {
             return FetchDescriptor(predicate: #Predicate {
                 $0.podcast?.persistentModelID == podcastID && $0.playedAt == nil && $0.pubDate == nil
             })
+        case (.partiallyPlayed, false, .any):
+            return FetchDescriptor(predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && $0.positionSeconds > 0 &&
+                $0.status != playedStatus && $0.playedAt == nil
+            })
+        case (.partiallyPlayed, false, .dated):
+            return FetchDescriptor(predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && $0.positionSeconds > 0 &&
+                $0.status != playedStatus && $0.playedAt == nil && $0.pubDate != nil
+            })
+        case (.partiallyPlayed, false, .undated):
+            return FetchDescriptor(predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && $0.positionSeconds > 0 &&
+                $0.status != playedStatus && $0.playedAt == nil && $0.pubDate == nil
+            })
         case (.all, true, .any):
             return FetchDescriptor(predicate: searchPredicate(podcastID: podcastID, query: query))
         case (.all, true, .dated):
@@ -275,6 +296,27 @@ final class EpisodeListDataSource {
         case (.unheard, true, .undated):
             return FetchDescriptor(predicate: #Predicate {
                 $0.podcast?.persistentModelID == podcastID && $0.playedAt == nil && $0.pubDate == nil &&
+                ($0.title.localizedStandardContains(query) ||
+                 $0.episodeDescription?.localizedStandardContains(query) == true)
+            })
+        case (.partiallyPlayed, true, .any):
+            return FetchDescriptor(predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && $0.positionSeconds > 0 &&
+                $0.status != playedStatus && $0.playedAt == nil &&
+                ($0.title.localizedStandardContains(query) ||
+                 $0.episodeDescription?.localizedStandardContains(query) == true)
+            })
+        case (.partiallyPlayed, true, .dated):
+            return FetchDescriptor(predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && $0.positionSeconds > 0 &&
+                $0.status != playedStatus && $0.playedAt == nil && $0.pubDate != nil &&
+                ($0.title.localizedStandardContains(query) ||
+                 $0.episodeDescription?.localizedStandardContains(query) == true)
+            })
+        case (.partiallyPlayed, true, .undated):
+            return FetchDescriptor(predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && $0.positionSeconds > 0 &&
+                $0.status != playedStatus && $0.playedAt == nil && $0.pubDate == nil &&
                 ($0.title.localizedStandardContains(query) ||
                  $0.episodeDescription?.localizedStandardContains(query) == true)
             })
