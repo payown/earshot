@@ -423,9 +423,10 @@ final class EarshotUITests: XCTestCase {
         }
         revealAdjustment()
         XCTAssertEqual(adjustment.value as? String, "Automatic")
-        // Tap the visible picker to open its native menu; the accessibility
-        // representation is an adjustable element for VoiceOver.
-        adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        // The visual menu title sits at the leading, lower edge of the row.
+        // The VoiceOver representation spans the full row; tapping its trailing
+        // edge misses the native Picker even though the AX element is hittable.
+        adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.65)).tap()
         let fiveMinutes = app.buttons["5 minutes"].firstMatch
         XCTAssertTrue(fiveMinutes.waitForExistence(timeout: 5))
         fiveMinutes.tap()
