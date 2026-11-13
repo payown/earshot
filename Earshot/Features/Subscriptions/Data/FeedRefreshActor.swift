@@ -2213,9 +2213,9 @@ actor FeedRefreshActor {
     /// Recency is keyed on `QueueItem.addedAt`, NOT publish date: a manually
     /// "Play next"-ed older episode has a recent `addedAt`, so it sorts as newest
     /// and is kept. The cap therefore trims auto-queue pile-up without fighting an
-    /// explicit user enqueue. Eviction removes only the `QueueItem` (status reverts
-    /// to `.newEpisode`); the episode stays in the library and keeps its
-    /// `inboxDismissed` flag, so it never floods the inbox and is not deleted.
+    /// explicit user enqueue. Eviction removes only the `QueueItem`; an unfinished
+    /// episode reverts to `.newEpisode`, while a completed episode stays played.
+    /// Both remain in the library with their `inboxDismissed` state.
     private func enforceQueueCap(for podcast: Podcast) {
         guard let cap = podcast.inboxMaxEpisodes else { return } // nil = unlimited
 
@@ -2244,7 +2244,7 @@ actor FeedRefreshActor {
                     isQueued: false,
                     in: modelContext
                 ) || stagedFollowedRemoval
-                episode.status = .newEpisode
+                if !episode.isPlayed { episode.status = .newEpisode }
             }
             modelContext.delete(item)
         }

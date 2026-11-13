@@ -2,6 +2,17 @@ import XCTest
 @testable import Earshot
 
 final class QuickActionSettingsRotorActionTests: XCTestCase {
+    func testDownloadSettingNamesBothOutcomesWithoutRenamingEpisodeActions() {
+        XCTAssertEqual(EpisodeAction.download.settingsLabel, "Download / Remove Download")
+        XCTAssertEqual(QueueItemAction.download.settingsLabel, "Download / Remove Download")
+        XCTAssertEqual(EpisodeAction.download.label, "Download")
+        XCTAssertEqual(QueueItemAction.download.label, "Download")
+        XCTAssertEqual(EpisodeAction.download.id, "download")
+        XCTAssertEqual(QueueItemAction.download.id, "download")
+        XCTAssertEqual(EpisodeAction.playNow.settingsLabel, "Play now")
+        XCTAssertEqual(QueueItemAction.playNow.settingsLabel, "Play now")
+    }
+
     func testEnabledActionHasExactlyOneRemoveAndKeepsMoveActions() {
         let actions = QuickActionSettingsRotorActionBuilder.actions(
             state: .enabled,

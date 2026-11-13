@@ -81,7 +81,8 @@ jobs:
       # transient first-pass runner kills as failures even after a later pass.
       # Keep result and build products separate per run. Shared DerivedData once
       # reused app/test bundles without tracked resources after a merge.
-      # #679: StoreKit simulator tests fail with SKInternalErrorDomain Code=3.
+      # #679: StoreKit simulator tests failed under Xcode 26.6. Both suites
+      # pass on the selected Xcode 27.2 with iOS 26.0 and 26.5 simulators.
       # The two specific coordinator/reset tests also fail on unchanged 313;
       # docs/watchos-playback-quality-314.md records that baseline comparison.
       - name: Run Earshot tests
@@ -96,8 +97,6 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/EarshotDerivedData-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
             -resultBundlePath "$RUNNER_TEMP/EarshotTests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.xcresult" \
             -retry-tests-on-failure \
-            -skip-testing:EarshotTests/PaywallViewModelTests \
-            -skip-testing:EarshotTests/ProductCatalogServiceTests \
             -skip-testing:EarshotTests/CloudProjectionCoordinatorTests/testBurstOfRemoteImportNotificationsCoalescesAndStopsCleanly \
             -skip-testing:EarshotTests/InterruptedLibraryResetRuntimeTests/testSameAccountRecoveryCompletesBeforeNormalLaunch \
             CODE_SIGNING_ALLOWED=NO \

@@ -76,6 +76,12 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe returns to a half-heard interview between client visits and checks its
+  saved place before resuming (Chapter 128).
+
+- Kashe opens the Apple Watch Downloads list on her phone before a walk and
+  returns to it while choosing an interview (Chapter 125).
+
 - Kashe tests the combined Duo, iPad, and Watch build in place. She listens for
   the words across a phone-to-watch transfer, uses VoiceOver Magic Tap once,
   and checks that choosing an iPad episode stays silent until Play (Chapter 120).
@@ -4009,3 +4015,136 @@ Kashe's story:
 Kashe had heard the interview stop when Earshot vanished from her watch. Her phone kept talking, but the next sentence never reached her wrist. She saved the time, updated both apps, and asked Renata to listen beside her.
 
 "Let's hear where it lands," Kashe said. She noted the last words from the phone, touched Transfer on the watch, and waited for the first words there. A button could say the transfer worked. The next sentence would tell her whether it really had.
+
+---
+
+Chapter 122 - The place she kept
+
+What to try first:
+
+Update Earshot to 1.2.6 (317) on iPhone and Apple Watch without deleting either app. Confirm the Watch companion says Open in iPhone TestFlight. With VoiceOver, start an episode on Watch, pause it with a two-finger double tap, then try the same gesture on Home, Library, Up Next, Inbox, Downloads, an episode detail, Settings, and Now Playing. Each tap should change Watch playback once, including after navigating away. In Now Playing, choose Apple Watch controls or iPhone controls and check that the spoken device and buttons match the chosen section. Tell us the screen, exact speech, and which device changed.
+
+Pause an iPhone episode at a recognizable sentence, including at the beginning, then choose Continue saved episode on Apple Watch. The phone should remain paused. Next, make the phone unavailable and try the saved episode on Watch over Wi-Fi, then with a completed Watch download while offline. The saved position may be behind the phone's last unheard changes; the Watch should say when the current phone state is unverified. If media cannot be streamed or is no longer available, report that message and whether a download existed.
+
+While iPhone is actively playing, use Transfer to Apple Watch and then transfer back. Repeat at normal and 1.5 times speed with the phone app both open and in the background. The Watch should stay open, reach the same sentence, and avoid playing both devices after confirmation. Include both positions, the last and first words heard, connection state, and any crash time. Immediate paired Queue refresh remains disabled; Queue changes can sync through iCloud when available.
+
+Kashe's story:
+
+Kashe paused the interview on her watch and slipped her hand into her coat pocket. Outside, she tapped twice again. The voice returned to her wrist, even though her phone was still nearby. She tried it from the Library, then from the Queue. The same voice came back each time.
+
+Later, Renata paused the interview on the phone just as a new speaker began. Kashe chose to continue on her watch. The phone stayed quiet. When they walked beyond its reach, the watch held the last place it had heard about. “Tell me when that place is old,” Kashe said. “I can find the next sentence.”
+
+---
+
+Chapter 123 - One place to listen
+
+What to try first:
+
+Update Earshot to the proposed internal 1.2.6 (318) on iPhone and Apple Watch without deleting either app. On Watch Home, find the single Now Playing summary. With VoiceOver, check that it speaks the episode, podcast, playing or paused state, device, and position. Open it, return to Home, and check that focus returns to Now Playing. Confirm Library, Up Next, Inbox, Downloads, Bookmarks, and Settings remain reachable.
+
+Start an episode on Apple Watch. In Now Playing, try Play or Pause, skip backward and forward, restart, and adjust the playback position. Open Playback speed, Chapters when the episode has them, and Sleep timer. Check that each choice remains reachable and its selected state or result is spoken; return from each screen and check focus returns to its link. Try VoiceOver's two-finger double tap while playing, paused, and buffering on Home, Now Playing, and each secondary screen. It should act once on the established playback target.
+
+Open iPhone controls and Apple Watch controls without pressing Transfer. Merely viewing either set must not start audio, stop the other device, or move playback. While iPhone is playing, try its controls, then use Transfer to Apple Watch and wait for confirmation. Transfer back to iPhone. Note the last and first words heard, both positions, and whether either device kept playing unexpectedly. Repeat with the phone app in the background and with a brief connection interruption; a failed or uncertain transfer must say so without claiming success or closing either app.
+
+Pause an iPhone episode at the beginning and again later. Check that Continue saved episode on Apple Watch uses the latest saved place and leaves iPhone paused. Try with iPhone unreachable and an already downloaded Watch episode. The Watch should identify an unverified iPhone position and must not promise media it cannot access. Report the exact spoken message, position, device, connection state, and any focus jump or crash time. Immediate paired Queue refresh remains disabled; Queue changes can sync through iCloud when available.
+
+Kashe's story:
+
+Kashe opened the watch before leaving the house. Three places had offered to take her back to the same interview. This morning there was one. It told her what she was listening to, where it was playing, and how far she had gone.
+
+She opened the controls, changed the speed, and returned to the same spot in the list. Later she looked at the phone's controls while the interview played on her watch. Nothing moved until she chose Transfer. She waited for the answer before she put the phone away.
+
+“Show me where I am,” she told Renata. “Let me decide when to move.”
+
+---
+
+Chapter 124 - The page that stayed
+
+What to try first:
+
+Update Earshot to internal 1.2.6 (320) in place, without deleting the app or your library. Open a podcast with a long episode history. In its episode list, use Show 100 more until Load 10 older episodes appears. Note an episode near the bottom, then load older episodes. The expanded list should remain available instead of returning to its first 100 rows. With VoiceOver, check that focus stays on the Load control if you waited there, or on the episode you moved to while the request ran. Try both chronological orders. If a podcast exposes no older history, use another long-running show. Tell us the episode and where focus or the visible list landed if it jumps.
+
+Across the podcast list, Downloads, folder runs, app icon badge setting, and Shortcuts, check that episode status says Played or Unplayed consistently. Unplayed still includes an episode you started but have not marked played. On an episode row or Now Playing, audio without a completed download should say “Not downloaded. Plays using an internet connection.” when it has an online source. A failed download with an online source should say “Download failed. Plays using an internet connection.” If no online source is available, it must not promise streaming. Test with and without a connection, and tell us the exact words you hear.
+
+The Watch playback and simpler Now Playing layout from build 318 remain in this candidate. As a quick regression check, start playback directly on Watch and use VoiceOver's two-finger double tap to pause and resume it. On iPad, open a podcast from Library and switch back; on iPhone Duo, browse and return to the same episode. Report any changed playback target, lost place, crash, or unexpected focus move with the device, OS, and build number.
+
+Kashe's story:
+
+Kashe was working backward through an old language series. She opened another hundred episodes, found the one she wanted, and asked for ten more from the publisher. The list used to fold back under her finger. This time the episode stayed where she could find it.
+
+Renata asked whether it had been played. “Partly,” Kashe said. “I haven't marked it played yet.” The list called it Unplayed, just as the action did. On another row, Earshot told her the audio was not downloaded and needed the internet. She saved that one before leaving the house.
+
+---
+
+Chapter 125 - The list that stayed open
+
+What to try first:
+
+Update Earshot to internal 1.2.6 (321) on iPhone and Apple Watch without deleting either app or your library. On iPhone, open Settings, then Apple Watch Downloads. With VoiceOver, find your followed podcasts, go Back, and open Apple Watch Downloads again. The iPhone should stay open both times. Choose a podcast and an episode, then activate “Download [episode title] on Apple Watch.” If the request is queued, check Downloads on Watch for progress. If the Watch is not ready, Earshot should say the episode was not queued. If the iPhone closes, send the time, the last control you activated, your device and OS, and the newest Earshot crash report.
+
+On iPhone, replay an episode already marked Played, especially one you had reached near its end. Confirm that audio starts and does not immediately stop. Pause and resume, then try marking it Unplayed and playing again. Try a different episode with a saved position away from the beginning; that position should remain available. If playback is silent, stops, or crashes, send the episode title, position, actions, device, OS and build number.
+
+On a wide iPad running iPadOS 26.0, find “Search your library” in the navigation drawer. Search for a podcast, open a result, go Back, edit the query, and open another result. Check that Search stays reachable with VoiceOver and that switching results does not close Earshot. The same Search path passed simulator checks on iPadOS 26.5 and 27.2; physical VoiceOver focus and window-resize behavior still need your assessment. Watch playback handoff remains a separate open test and is not claimed fixed by this build.
+
+Kashe's story:
+
+Kashe opened the Apple Watch Downloads list on her phone to save an interview for a walk. Before, Earshot had vanished as soon as she entered. This time she found the show, returned to Settings, and opened the list again. It stayed long enough for her to choose the episode and hear whether the Watch accepted the request.
+
+Later she revisited an interview she had already finished. The old ending no longer pulled her straight to silence. She heard the beginning, paused at a sentence she wanted to keep, and knew where to return.
+
+---
+
+Chapter 126 - Where the episode waits
+
+What to try first:
+
+Update Earshot to internal 1.2.6 (322) on iPhone without deleting the app or your library. In Library, open a podcast with episodes in Inbox and Queue. With VoiceOver, move through its episode rows. Each row should remain one stop and say one placement before the title: “Now Playing” for the loaded episode, even when paused; otherwise “In Queue” or “In Inbox” where applicable. Played and download information should still follow the title. The same short words appear beside the episode visually.
+
+From that podcast, add an Inbox episode to the end of Queue. Hear the existing confirmation, then check that its row changes to “In Queue” without jumping away. Remove it from Queue and check the row again. Try a finished episode kept in Queue, an excluded or dismissed Inbox episode, and the Select episodes mode. On a long show, load more episodes, scroll, return, and check that the status and VoiceOver position remain sensible. Send the episode, exact words, actions, device, OS and build number if a badge is wrong, focus moves unexpectedly, or the list slows down.
+
+This build also restores StoreKit suites in automated CI and keeps feed-parser and background-refresh error details out of public diagnostics. These changes do not alter purchases or listening data. Apple Watch handoff and Paul's reported Watch reachability still need separate physical testing; this build does not claim to resolve them.
+
+Kashe's story:
+
+Kashe was choosing the next interview from a long show. She added one episode to Queue, then returned to the show. The row now said “In Queue” before its title. Another still waited in Inbox. She paused the interview already loaded in the player; its row kept saying “Now Playing,” so she knew which one would resume.
+
+Renata asked whether the badges made the list longer to hear. Kashe moved to the next row. One stop, one place, then the familiar played and download details. She could decide what to hear next without opening each episode to find where it had gone.
+
+---
+
+Chapter 127 - A place found in Search
+
+What to try first:
+
+Update Earshot to internal 1.2.6 (323) in place, without deleting the app or your library. This build supersedes internal 322. In Library, use Search your library to find an episode that is in Inbox and another you added to Queue. Each local episode result should be one VoiceOver stop and say one status before its title: “Now Playing” for the loaded episode, including when paused; otherwise “Queued” or “In Inbox.” Open a podcast from Search and check the same status in its episode list. Add Podcast's directory search is unchanged.
+
+In Settings, open Quick Actions. The Episode and Queue choices that configure download actions should say “Download / Remove Download” in both Enabled and Available lists. Add or remove that choice and listen to the confirmation. On an actual episode, the action should still say “Download” when audio is absent or “Remove download” when it is saved. This changes the setting's name, not the download behavior or your saved choices.
+
+Check the Library episode rows from Chapter 126 as well: move an episode between Inbox and Queue, try a paused Now Playing episode, and return to Search. If a status is stale, a row becomes two VoiceOver stops, the search field or focus moves unexpectedly, or an action has the wrong name, send the exact words, episode, actions, device, OS and build number. Watch handoff and Paul's Watch reachability remain separate open tests; this build does not claim to resolve them.
+
+In Settings > Playback, turn on Keep finished episodes in Queue. For a podcast with auto-queue and a count cap, finish an episode, then refresh after a newer one arrives. Eviction should leave it Played, not Unplayed. Catalog Queue removal also keeps Played. Past reversals are not guessed back; mark those Played once. Send the title, show and steps if one returns.
+
+Kashe's story:
+
+Kashe remembered part of an interview title but not where she had put it. She searched her library and found the episode marked “Queued.” The next result still said “In Inbox.” She opened the show, paused the episode already loaded, and heard “Now Playing” when she found it again.
+
+Renata then showed her the Download choice in Quick Actions settings. Its longer name explained that the same choice could add or remove a saved file. When Kashe returned to an episode, the action still named the one thing it would do right then.
+
+---
+
+Chapter 128 - The thread she kept
+
+What to try first:
+
+1. Update Earshot to 1.2.6 (324) in place on iPhone, iPad and Apple Watch. Do not delete the app or your library. This build combines the previous Watch, iPad, Queue, Search and playback fixes with the new Partially Played filter.
+2. In Library, open a podcast with an unfinished episode saved above zero, one at the beginning, and one completed. Choose Partially Played. VoiceOver should say “Showing N partially played episodes.” Only unfinished episodes with a saved position above zero should appear. Change sort order, search within the podcast, and load older episodes; check the count and browsing position.
+3. While focused on a matching episode, finish it or mark it Played. The row should leave the filter without trapping VoiceOver focus. Return after a sync or navigation change and check that the count and row state agree. Episode actions should remain in their usual rotor order.
+4. On iPhone, use the largest accessibility text size, rotate to landscape, and open Now Playing. Check that Play or Pause, skip, position and secondary controls remain reachable. In Settings, choose the playback-position adjustment “5 minutes,” leave, then return to confirm it stayed selected.
+5. On Watch, repeat the previously working two-finger double tap to pause and resume, and start Watch playback without first playing on iPhone. Separately test handoff in both directions while playing and paused: note the last and first words, positions, confirmations and whether both devices play. Try an unreachable phone and an already downloaded Watch episode offline. Handoff, stale-state focus and offline combinations still need your acceptance; an offline Watch cannot fetch unseen phone changes or missing audio.
+6. On iPad, Search your library for two podcasts, open one, return to edit the query, then open the other. Check spoken order, focus and that choosing a result does not start audio. Send the episode, device, OS, build number and exact spoken words for a mismatch or crash.
+
+Kashe's story:
+
+Kashe stopped an interview halfway through before visiting a client. Later, she opened the show and chose Partially Played. The interview was there, with the place she had saved. A finished episode was absent. That made the list shorter without making her remember another title.
+
+Renata asked if she had found what she wanted. “I found where I left off,” Kashe said. She checked the position once, then pressed Play.

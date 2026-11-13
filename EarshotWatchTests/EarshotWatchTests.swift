@@ -4,21 +4,179 @@ import WatchConnectivity
 @testable import EarshotWatch
 
 final class EarshotWatchTests: XCTestCase {
-    func testVoiceOverMagicTapControlsTheVisiblePlaybackDevice() {
-        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: true, watchHasEpisode: true,
-                                                   phoneIsLive: true, phoneHasEpisode: true), .watch)
+    func testHomePhoneSummaryDistinguishesLiveSavedAndUnreachablePositions() {
+        XCTAssertEqual(WatchHomePlaybackSummary.phoneValue(position: 0, playing: false,
+            usesSavedCheckpoint: true, isLive: false),
+            "Saved iPhone position, 0 minutes, 0 seconds. Current iPhone state unverified.")
+        XCTAssertEqual(WatchHomePlaybackSummary.phoneValue(position: 125, playing: true,
+            usesSavedCheckpoint: false, isLive: false),
+            "Last reported iPhone playback, 2 minutes, 5 seconds. Current iPhone state unverified.")
+        XCTAssertEqual(WatchHomePlaybackSummary.phoneValue(position: 125, playing: false,
+            usesSavedCheckpoint: false, isLive: true),
+            "Paused on iPhone, 2 minutes, 5 seconds")
+    }
+
+    func testMagicTapRetainsWatchOwnershipAndUsesLatestPausedContinuation() {
+        func choose(watchPlaying: Bool = false, watchEpisode: Bool = true,
+                    watchOwns: Bool = false, watchAt: Double? = 100,
+                    phoneLive: Bool = true, phonePlaying: Bool = false,
+                    phoneEpisode: Bool = true, phoneAt: Double? = 110,
+                    phoneScreen: Bool = false, watchScreen: Bool = false) -> WatchMagicTapTarget {
+            WatchMagicTapTarget.choose(watchIsPlaying: watchPlaying, watchHasEpisode: watchEpisode,
+                                       watchOwnsPlayback: watchOwns, watchCheckpoint: watchAt,
+                                       phoneIsLive: phoneLive, phoneIsPlaying: phonePlaying,
+                                       phoneHasEpisode: phoneEpisode,
+                                       phoneContinuationCheckpoint: phoneAt,
+                                       phoneControlScreen: phoneScreen,
+                                       watchControlScreen: watchScreen)
+        }
+        XCTAssertEqual(choose(watchPlaying: true, phonePlaying: true), .watch)
+        XCTAssertEqual(choose(watchOwns: true, phonePlaying: true), .none)
+        XCTAssertEqual(choose(watchOwns: true, watchAt: 120), .watch)
+        XCTAssertEqual(choose(watchOwns: true, watchAt: 100), .continuePhoneOnWatch)
+        XCTAssertEqual(choose(phonePlaying: true), .phone)
+        XCTAssertEqual(choose(), .continuePhoneOnWatch)
+        XCTAssertEqual(choose(phoneLive: false), .continuePhoneOnWatch)
+        XCTAssertEqual(choose(watchAt: 120), .watch)
+        XCTAssertEqual(choose(watchEpisode: false, phoneLive: false), .continuePhoneOnWatch)
+        XCTAssertEqual(choose(watchEpisode: false, phoneLive: false, phonePlaying: true),
+                       .continuePhoneOnWatch)
+        XCTAssertEqual(choose(watchEpisode: false, phoneEpisode: false, phoneAt: nil), .none)
+        XCTAssertEqual(choose(watchPlaying: true, phonePlaying: true, phoneScreen: true), .phone)
+        XCTAssertEqual(choose(phoneLive: false, phoneScreen: true), .none)
+        XCTAssertEqual(choose(phonePlaying: true, watchScreen: true), .none)
+        XCTAssertEqual(choose(watchEpisode: false, phonePlaying: true, watchScreen: true), .none)
+        XCTAssertEqual(choose(watchEpisode: false, phoneLive: false,
+                              phonePlaying: true, watchScreen: true), .continuePhoneOnWatch)
+    }
+
+    func testReachableStalePhoneStateAndOppositeDeviceRequireTransferConfirmation() {
+        XCTAssertTrue(WatchPlaybackCompetitionPolicy.phoneControlTakesOwnership(command: "toggle", accepted: true))
+        XCTAssertFalse(WatchPlaybackCompetitionPolicy.phoneControlTakesOwnership(command: "toggle", accepted: false))
+        XCTAssertFalse(WatchPlaybackCompetitionPolicy.phoneControlTakesOwnership(command: "state", accepted: true))
         XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: false, watchHasEpisode: true,
-                                                   phoneIsLive: true, phoneHasEpisode: true), .phone)
-        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: false, watchHasEpisode: true,
-                                                   phoneIsLive: false, phoneHasEpisode: true), .watch)
-        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: false, watchHasEpisode: false,
-                                                   phoneIsLive: false, phoneHasEpisode: false), .none)
-        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: true, watchHasEpisode: true,
-                                                   phoneIsLive: true, phoneHasEpisode: true,
-                                                   phoneControlScreen: true), .phone)
-        XCTAssertEqual(WatchMagicTapTarget.choose(watchIsPlaying: true, watchHasEpisode: true,
-                                                   phoneIsLive: false, phoneHasEpisode: true,
-                                                   phoneControlScreen: true), .none)
+                                                   watchOwnsPlayback: false, watchCheckpoint: 100,
+                                                   phoneIsLive: true, phoneIsPlaying: true,
+                                                   phoneHasEpisode: true,
+                                                   phoneContinuationCheckpoint: 110), .phone)
+        XCTAssertTrue(WatchPlaybackCompetitionPolicy.watchNeedsPhoneConfirmation(
+            phoneReachable: true, phoneReportedPlaying: true, watchPlaying: false))
+        XCTAssertFalse(WatchPlaybackCompetitionPolicy.watchNeedsPhoneConfirmation(
+            phoneReachable: false, phoneReportedPlaying: true, watchPlaying: false))
+        XCTAssertFalse(WatchPlaybackCompetitionPolicy.watchNeedsPhoneConfirmation(
+            phoneReachable: true, phoneReportedPlaying: true, watchPlaying: true))
+        XCTAssertTrue(WatchPlaybackCompetitionPolicy.phonePlayNeedsTransfer(
+            watchPlaying: true, phonePlaying: false))
+        XCTAssertFalse(WatchPlaybackCompetitionPolicy.phonePlayNeedsTransfer(
+            watchPlaying: true, phonePlaying: true))
+    }
+
+    func testLateSeekCannotClearOrPublishOverNewerSeek() {
+        var gate = WatchSeekGate()
+        let first = gate.begin()
+        XCTAssertTrue(gate.isPending)
+        let second = gate.begin()
+        XCTAssertFalse(gate.finish(first))
+        XCTAssertTrue(gate.isPending)
+        XCTAssertTrue(gate.finish(second))
+        XCTAssertFalse(gate.isPending)
+        let canceled = gate.begin()
+        gate.invalidate()
+        XCTAssertFalse(gate.finish(canceled))
+    }
+
+    @MainActor
+    func testPausedWatchEpisodeAtZeroRemainsResumableAfterRestart() throws {
+        let library = try WatchLibrary(inMemory: true)
+        let episode = WatchEpisode(feedURL: "https://example.com/feed", guid: "at-zero",
+                                   title: "Beginning", podcastTitle: "Show",
+                                   audioURL: "https://example.com/zero.mp3")
+        library.context.insert(episode)
+        library.persist()
+        XCTAssertEqual(WatchResumeEpisode.choose(from: library.episodes,
+                                                savedIdentity: episode.identity)?.identity,
+                       episode.identity)
+        XCTAssertNil(WatchResumeEpisode.choose(from: library.episodes, savedIdentity: nil))
+    }
+
+    @MainActor
+    func testPhoneContinuationPersistsZeroSeekAndRejectsStaleDuplicateAndInvalidMedia() throws {
+        let suite = "WatchContinuationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WatchContinuationStore(defaults: defaults)
+        func state(position: Double, changedAt: Double, observedAt: Double,
+                   audioURL: String = "https://example.com/one.mp3") -> PairedPlaybackState {
+            PairedPlaybackState(owner: .phone, feedURL: "https://example.com/feed", guid: "one",
+                                title: "One", podcastTitle: "Show", audioURL: audioURL,
+                                position: position, playing: false, observedAt: observedAt,
+                                playbackChangedAt: changedAt)
+        }
+        XCTAssertTrue(store.accept(state(position: 125, changedAt: 100, observedAt: 101)))
+        XCTAssertFalse(store.accept(state(position: 130, changedAt: 99, observedAt: 110)))
+        XCTAssertFalse(store.accept(state(position: 125, changedAt: 100, observedAt: 120)))
+        XCTAssertTrue(store.accept(state(position: 0, changedAt: 121, observedAt: 122)))
+        XCTAssertEqual(WatchContinuationStore(defaults: defaults).latest?.state.position, 0)
+        XCTAssertFalse(store.accept(state(position: 99, changedAt: 123, observedAt: 124,
+                                      audioURL: "file:///tmp/untrusted.mp3")))
+        XCTAssertEqual(store.latest?.state.position, 0)
+        XCTAssertTrue(store.latest?.isNewerThanWatch(Date(timeIntervalSince1970: 100)) == true)
+        XCTAssertFalse(store.latest?.isNewerThanWatch(Date(timeIntervalSince1970: 130)) == true)
+    }
+
+    func testPlaybackChangeCheckpointDoesNotAdvanceForTransportRefresh() {
+        let first = PairedPlaybackState(owner: .phone, feedURL: "https://example.com/feed",
+                                         guid: "one", title: "One", audioURL: "https://example.com/one.mp3",
+                                         position: 50, observedAt: 100, playbackChangedAt: 100)
+        let duplicate = PairedPlaybackState(owner: .phone, feedURL: first.feedURL,
+                                             guid: first.guid, title: first.title,
+                                             audioURL: first.audioURL, position: 50,
+                                             observedAt: 120, playbackChangedAt: 100)
+        XCTAssertFalse(duplicate.hasPlaybackChange(comparedWith: first))
+        let rewind = PairedPlaybackState(owner: .phone, feedURL: first.feedURL,
+                                          guid: first.guid, title: first.title,
+                                          audioURL: first.audioURL, position: 0,
+                                          observedAt: 121, playbackChangedAt: 121)
+        XCTAssertTrue(rewind.hasPlaybackChange(comparedWith: duplicate))
+    }
+
+    func testContinuationPrefersCompletedDownloadAndRejectsUnusableMediaAddress() throws {
+        let local = FileManager.default.temporaryDirectory.appending(path: "watch-audio-\(UUID().uuidString).mp3")
+        try Data([0, 1, 2]).write(to: local)
+        defer { try? FileManager.default.removeItem(at: local) }
+        let expiredRemote = "https://example.com/expired.mp3?expires=1"
+        XCTAssertEqual(WatchPlaybackSource.choose(local: local, remoteAddress: expiredRemote), local)
+        XCTAssertEqual(WatchPlaybackSource.choose(local: nil, remoteAddress: expiredRemote)?.scheme, "https")
+        XCTAssertNil(WatchPlaybackSource.choose(local: nil, remoteAddress: "file:///tmp/invalid.mp3"))
+        XCTAssertNil(WatchPlaybackSource.choose(local: nil, remoteAddress: ""))
+    }
+
+    func testPausedPhoneReplyAcceptsZeroAndRejectsLateOrChangedPlayback() throws {
+        let saved = try XCTUnwrap(WatchContinuation(PairedPlaybackState(
+            owner: .phone, feedURL: "https://example.com/feed", guid: "one", title: "One",
+            audioURL: "https://example.com/one.mp3", position: 60, playing: false,
+            observedAt: 100, playbackChangedAt: 100)))
+        var reply: [String: Any] = ["accepted": true, "owner": "phone", "playing": false,
+                                     "feedURL": saved.state.feedURL, "guid": saved.state.guid,
+                                     "title": saved.state.title, "audioURL": saved.state.audioURL,
+                                     "position": 0.0, "rate": 1.0,
+                                     "observedAt": 120.0, "playbackChangedAt": 120.0]
+        XCTAssertEqual(WatchContinuationReply.pausedCandidate(reply, matching: saved,
+                                                                 latest: saved, now: 121)?.state.position, 0)
+        reply["playbackChangedAt"] = 90.0
+        XCTAssertNil(WatchContinuationReply.pausedCandidate(reply, matching: saved,
+                                                               latest: saved, now: 121))
+        reply["playbackChangedAt"] = 120.0
+        reply["guid"] = "other"
+        XCTAssertNil(WatchContinuationReply.pausedCandidate(reply, matching: saved,
+                                                               latest: saved, now: 121))
+        reply["guid"] = "one"
+        reply["playing"] = true
+        XCTAssertNil(WatchContinuationReply.pausedCandidate(reply, matching: saved,
+                                                               latest: saved, now: 121))
+        reply["playing"] = false
+        XCTAssertNil(WatchContinuationReply.pausedCandidate(reply, matching: saved,
+                                                               latest: saved, now: 170))
     }
 
     @MainActor
@@ -370,8 +528,15 @@ final class EarshotWatchTests: XCTestCase {
                        "Audio is playing on Apple Watch")
         XCTAssertEqual(WatchPlaybackDeviceStatus.spokenText(watchPlaying: false, phonePlaying: false),
                        "Audio is paused on Apple Watch")
-        XCTAssertEqual(WatchPlaybackDeviceStatus.spokenText(watchPlaying: false, phonePlaying: true),
+        XCTAssertEqual(WatchPlaybackDeviceStatus.spokenText(watchPlaying: false, phonePlaying: true,
+                                                              selectedDevice: .phone),
                        "Audio is playing on iPhone")
+        XCTAssertEqual(WatchPlaybackDeviceStatus.spokenText(watchPlaying: false, phonePlaying: true,
+                                                              selectedDevice: .watch),
+                       "Audio is paused on Apple Watch")
+        XCTAssertEqual(WatchPlaybackDeviceStatus.spokenText(watchPlaying: false, phonePlaying: true,
+                                                              phoneIsLive: false, selectedDevice: .phone),
+                       "Last reported iPhone playback. Current state unavailable.")
     }
 
     func testHandoffUsesFreshMatchingPhoneStateAndFinalPausedPosition() throws {

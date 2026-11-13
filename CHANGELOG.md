@@ -9,11 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Podcast episode rows in Library and Library Search now show one placement badge: Now Playing, Queued, or In Inbox, in that order. VoiceOver speaks the same status before the episode title while keeping the existing played and download details.
+- Auto-queue count-cap eviction and catalog Queue removal now keep a completed episode Played when removing its Queue item, so it does not return to the Unplayed filter.
+- Quick Actions settings names the configurable Episode and Queue download choice “Download / Remove Download”; episode actions still say “Download” or “Remove download” for the actual state.
+
+- Apple Watch Home now has one Now Playing summary for the episode, playback state, device and position. Playback speed, chapters and sleep timer have short screens reachable from Now Playing. Device selection still only changes the controls being viewed; transfers remain explicit.
+
 - Episode filters, folder runs, badges and Shortcuts consistently use Played and Unplayed. Episode rows explain when audio is not downloaded and playback needs an internet connection.
 
 ### Fixed
 
+- Background feed scheduling errors now retain a numeric diagnostic code without putting private error text in public logs.
+
+- Malformed podcast feeds now log only an XML error code and parse position, keeping publisher-provided text out of public diagnostics.
+
+- Opening Apple Watch Downloads on iPhone no longer crashes while loading the followed podcast list.
+
+- Apple Watch VoiceOver Magic Tap now keeps Watch playback selected after pause across its screens. Now Playing has one device selector, and a paused or disconnected iPhone episode can continue from its last verified checkpoint using Watch audio or an existing download. A live transfer still waits for the receiving device and source pause acknowledgements.
+
 - Loading older podcast episodes keeps the current expanded episode list and browsing position available.
+
+- Replaying an episode no longer uses an older crash-recovery position left by a different playback session.
+
+- Now Playing keeps playback controls visible in short landscape windows on iOS 27.2.
 
 - Episode sharing supplies a single audio URL to Share Sheet shortcuts, with the title kept in preview metadata instead of a separate input item.
 
@@ -28,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System playback controls can resume the saved episode when Earshot relaunches in the background after a pause. Corrected audio-session configuration and prevented late startup work from interrupting resumed playback.
 
 ### Added
+
+- Podcast episode lists offer a Partially Played filter for unfinished episodes with a saved position above zero. Search, sorting, paging, and the existing Unplayed and All choices remain available; Downloads filters are unchanged.
 
 - Native iPad Library and podcast detail navigation, iPhone Duo layouts, and the independent Apple Watch app now share the main source. The watch can browse and download directly, play offline, show complications and shortcuts, and control or transfer iPhone playback. Paired-device and VoiceOver behavior still require physical acceptance before public distribution.
 
