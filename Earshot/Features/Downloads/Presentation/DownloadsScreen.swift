@@ -183,7 +183,7 @@ struct DownloadsScreen: View {
                                     "Filter downloads",
                                     selection: filterSelection(playedCount: result.playedCount)
                                 ) {
-                                    ForEach(EpisodeListFilter.allCases) { option in
+                                    ForEach(EpisodeListFilter.downloadsChoices) { option in
                                         Text(option.title).tag(option)
                                     }
                                 }

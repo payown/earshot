@@ -274,6 +274,66 @@ final class EarshotUITests: XCTestCase {
         )).firstMatch.waitForExistence(timeout: 5), "Play must load the selected episode")
     }
 
+    func testPodcastPartiallyPlayedFilterKeepsOneRowStopAndCanShowAll() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let filter = app.segmentedControls["Filter episodes"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 15), app.debugDescription)
+        let partial = filter.buttons["Partially Played"]
+        XCTAssertTrue(partial.exists)
+        partial.tap()
+        XCTAssertTrue(app.staticTexts["2 partially played episodes"].waitForExistence(timeout: 5))
+
+        let started = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        XCTAssertTrue(started.waitForExistence(timeout: 5), app.debugDescription)
+        let inbox = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "In Inbox, #169 – Apple's Price Hikes"
+        ))
+        XCTAssertTrue(inbox.firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "#168 – Multi-Agent Madness"
+        )).firstMatch.exists)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).count, 1, "The filter must not create duplicate accessible row buttons")
+        XCTAssertEqual(inbox.count, 1, "The Inbox row must remain one accessible stop")
+
+        filter.buttons["All"].tap()
+        XCTAssertTrue(app.staticTexts["6 episodes"].waitForExistence(timeout: 5),
+                      "All should restore the full six-episode show, including off-screen rows")
+    }
+
+    func testPartiallyPlayedRowsRemainConsecutiveVoiceOverStops() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+        let filter = app.segmentedControls["Filter episodes"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 15), app.debugDescription)
+        filter.buttons["Partially Played"].tap()
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        var speech: [String] = []
+        for _ in 0..<40 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("#169 – Apple's Price Hikes") { break }
+        }
+        let first = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#170 – Turn the Right Knob") }),
+                                  "First partially played episode not reached: \(speech)")
+        let second = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#169 – Apple's Price Hikes") }),
+                                   "Second partially played episode not reached: \(speech)")
+        XCTAssertEqual(second, first + 1, "Partially played episodes should be one stop each: \(speech)")
+    }
+
     func testQueueEpisodeSelectionAndPlayAreSeparate() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
@@ -548,11 +608,14 @@ final class EarshotUITests: XCTestCase {
         }
         revealAdjustment()
         XCTAssertEqual(adjustment.value as? String, "Automatic")
-        // Tap the visible picker to open its native menu; the accessibility
-        // representation is an adjustable element for VoiceOver.
-        adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        // The VoiceOver representation spans the full row, but the native menu
+        // hit region varies by OS. Try its leading edge, then its trailing edge.
+        adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.65)).tap()
         let fiveMinutes = app.buttons["5 minutes"].firstMatch
-        XCTAssertTrue(fiveMinutes.waitForExistence(timeout: 5))
+        if !fiveMinutes.waitForExistence(timeout: 2) {
+            adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.65)).tap()
+        }
+        XCTAssertTrue(fiveMinutes.waitForExistence(timeout: 5), app.debugDescription)
         fiveMinutes.tap()
         XCTAssertEqual(adjustment.value as? String, "5 minutes")
 
@@ -969,8 +1032,19 @@ final class EarshotUITests: XCTestCase {
     func testAnchoredPlayerStabilityAtLargestText() { verifyAnchoredPlayer(largeText: true) }
 
     func testPlayerTransportRemainsReachableInLandscape() {
+        verifyLandscapePlayer(largeText: false)
+    }
+
+    func testPlayerTransportRemainsReachableInLandscapeAtLargestText() {
+        verifyLandscapePlayer(largeText: true)
+    }
+
+    private func verifyLandscapePlayer(largeText: Bool) {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         app.launch()

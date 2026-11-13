@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Replaying an episode no longer uses an older crash-recovery position left by a different playback session.
 
+- Now Playing keeps playback controls visible in short landscape windows on iOS 27.2.
+
 - Episode sharing supplies a single audio URL to Share Sheet shortcuts, with the title kept in preview metadata instead of a separate input item.
 
 - Cold-launch download checks run off the main thread, initial tab preferences are reused, and repeated tab badge updates are combined to reduce navigation stalls.
@@ -44,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System playback controls can resume the saved episode when Earshot relaunches in the background after a pause. Corrected audio-session configuration and prevented late startup work from interrupting resumed playback.
 
 ### Added
+
+- Podcast episode lists offer a Partially Played filter for unfinished episodes with a saved position above zero. Search, sorting, paging, and the existing Unplayed and All choices remain available; Downloads filters are unchanged.
 
 - Native iPad Library and podcast detail navigation, iPhone Duo layouts, and the independent Apple Watch app now share the main source. The watch can browse and download directly, play offline, show complications and shortcuts, and control or transfer iPhone playback. Paired-device and VoiceOver behavior still require physical acceptance before public distribution.
 

@@ -32,7 +32,9 @@ enum DownloadsListFilter {
             return isInScope(episode, podcastIDs: podcastIDs)
         }
         let playedCount = scopedDownloaded.filter(\.isPlayed).count
-        let playedFiltered = playedFilter.apply(to: scopedDownloaded)
+        let downloadsFilter = EpisodeListFilter.downloadsChoices.contains(playedFilter)
+            ? playedFilter : .all
+        let playedFiltered = downloadsFilter.apply(to: scopedDownloaded)
         let visibleDownloaded = EpisodeSearchFilter.filter(playedFiltered, query: searchText)
         let visibleExpired = EpisodeSearchFilter.isActive(searchText)
             ? scopedExpired.filter { entry in
@@ -83,6 +85,10 @@ enum DownloadsFilterAnnouncement {
             return playedCount == 0
                 ? "Showing all downloads"
                 : "Showing all downloads, \(playedCount) played \(noun) included"
+        case .partiallyPlayed:
+            // Only podcast episode lists offer this choice. Match the Downloads
+            // list's defensive All fallback if an invalid value reaches here.
+            return text(filter: .all, playedCount: playedCount)
         }
     }
 

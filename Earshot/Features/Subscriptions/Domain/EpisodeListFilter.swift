@@ -11,8 +11,13 @@ enum EpisodeListFilter: String, Codable, CaseIterable, Identifiable {
     /// Episodes not marked played (`isPlayed == false`), including those started
     /// but not finished. The default. Keep the raw value for saved preferences.
     case unheard
+    /// Unfinished episodes with a saved position above zero.
+    case partiallyPlayed
     /// Every episode, played or not.
     case all
+
+    static let podcastChoices: [Self] = [.unheard, .partiallyPlayed, .all]
+    static let downloadsChoices: [Self] = [.unheard, .all]
 
     var id: String { rawValue }
 
@@ -20,6 +25,7 @@ enum EpisodeListFilter: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .unheard: return "Unplayed"
+        case .partiallyPlayed: return "Partially Played"
         case .all: return "All"
         }
     }
@@ -28,8 +34,18 @@ enum EpisodeListFilter: String, Codable, CaseIterable, Identifiable {
     /// drops played episodes; `.all` returns the input unchanged.
     func apply(to episodes: [Episode]) -> [Episode] {
         switch self {
-        case .unheard: return episodes.filter { !$0.isPlayed }
+        case .unheard, .partiallyPlayed: return episodes.filter { includes($0) }
         case .all: return episodes
+        }
+    }
+
+    /// Shared eligibility test for the filter and the live player observer.
+    func includes(_ episode: Episode) -> Bool {
+        switch self {
+        case .unheard: return !episode.isPlayed
+        case .partiallyPlayed:
+            return episode.positionSeconds > 0 && !episode.isPlayed && episode.playedAt == nil
+        case .all: return true
         }
     }
 
@@ -42,6 +58,7 @@ enum EpisodeListFilter: String, Codable, CaseIterable, Identifiable {
         let noun = count == 1 ? "episode" : "episodes"
         switch self {
         case .unheard: return "Showing \(count) unplayed \(noun)"
+        case .partiallyPlayed: return "Showing \(count) partially played \(noun)"
         case .all: return "Showing all \(count) \(noun)"
         }
     }
