@@ -4,6 +4,11 @@ import XCTest
 
 @MainActor
 final class EpisodeListDataSourceTests: XCTestCase {
+    private func assertPartialReady(_ data: EpisodeListDataSource) async {
+        let ready = await data.waitForCurrentLoad()
+        XCTAssertTrue(ready)
+    }
+
     private func fixture(count: Int) throws -> (ModelContext, Podcast) {
         let context = TestStore.freshContext()
         let podcast = Podcast(feedURL: "https://example.com/stress.xml", title: "Stress Show")
@@ -154,7 +159,7 @@ final class EpisodeListDataSourceTests: XCTestCase {
         XCTAssertTrue(data.episodes.allSatisfy { !$0.isPlayed })
     }
 
-    func testSavedUnfinishedProgressCanBeCountedInStore() throws {
+    func testSavedUnfinishedProgressCanBeCountedInStore() async throws {
         let (context, podcast) = try fixture(count: 5)
         let episodes = try context.fetch(FetchDescriptor<Episode>())
             .sorted { $0.guid < $1.guid }
@@ -176,6 +181,7 @@ final class EpisodeListDataSourceTests: XCTestCase {
         XCTAssertEqual(Set(try context.fetch(request).map(\.guid)), ["000001", "000003"])
         let data = source(context, podcast)
         data.resetAndLoad(filter: .partiallyPlayed, sort: .latestFirst, searchText: "")
+        await assertPartialReady(data)
         XCTAssertEqual(data.filteredCount, 2)
         XCTAssertEqual(data.matchingCount, 2)
         XCTAssertEqual(Set(data.episodes.map(\.guid)), ["000001", "000003"])
@@ -187,14 +193,15 @@ final class EpisodeListDataSourceTests: XCTestCase {
         episodes[4].positionSeconds = 99
         episodes[4].status = .played
         try context.save()
-        let playedStatus = EpisodeStatus.played
-        let statusRequest = FetchDescriptor<Episode>(predicate: #Predicate {
+        let candidateRequest = FetchDescriptor<Episode>(predicate: #Predicate {
             $0.podcast?.persistentModelID == podcastID &&
-            $0.positionSeconds > 0 && $0.status != playedStatus &&
+            $0.positionSeconds > 0 &&
             $0.playedAt == nil
         })
-        XCTAssertEqual(Set(try context.fetch(statusRequest).map(\.guid)), ["000001", "000003"])
+        XCTAssertEqual(Set(try context.fetch(candidateRequest).map(\.guid)),
+                       ["000001", "000003", "000004"])
         data.reloadKeepingLoadedLimit(filter: .partiallyPlayed, sort: .latestFirst, searchText: "")
+        await assertPartialReady(data)
         XCTAssertEqual(Set(data.episodes.map(\.guid)), ["000001", "000003"])
         XCTAssertEqual(data.matchingCount, 2)
     }
@@ -209,6 +216,7 @@ final class EpisodeListDataSourceTests: XCTestCase {
             let data = source(context, podcast)
 
             data.resetAndLoad(filter: .partiallyPlayed, sort: sort, searchText: "")
+            await assertPartialReady(data)
             XCTAssertEqual(data.allCount, 250)
             XCTAssertEqual(data.unplayedCount, 250)
             XCTAssertEqual(data.filteredCount, 125)
@@ -219,12 +227,14 @@ final class EpisodeListDataSourceTests: XCTestCase {
                            sort == .latestFirst ? "000124" : "000000")
 
             data.loadMore(filter: .partiallyPlayed, sort: sort, searchText: "")
+            await assertPartialReady(data)
             XCTAssertEqual(data.episodes.count, 125)
             XCTAssertFalse(data.hasMore)
             XCTAssertEqual(Set(data.episodes.map(\.persistentModelID)).count, 125)
 
             data.resetAndLoad(filter: .partiallyPlayed, sort: sort,
                               searchText: "Episode 000042")
+            await assertPartialReady(data)
             XCTAssertEqual(data.episodes.map(\.guid), ["000042"])
             XCTAssertEqual(data.matchingCount, 1)
             let ids = try await data.matchingEpisodeIDs(
@@ -236,9 +246,52 @@ final class EpisodeListDataSourceTests: XCTestCase {
             try context.save()
             data.reloadKeepingLoadedLimit(filter: .partiallyPlayed, sort: sort,
                                           searchText: "Episode 000042")
+            await assertPartialReady(data)
             XCTAssertEqual(data.matchingCount, 0)
             XCTAssertTrue(data.episodes.isEmpty)
         }
+    }
+
+    func testPartiallyPlayedSupersededSearchAndCancellationDoNotPublishLateResults() async throws {
+        let (context, podcast) = try fixture(count: 1_000)
+        let stored = try context.fetch(FetchDescriptor<Episode>())
+        for episode in stored { episode.positionSeconds = 15 }
+        try context.save()
+        let data = source(context, podcast)
+
+        data.resetAndLoad(filter: .partiallyPlayed, sort: .latestFirst, searchText: "Episode")
+        data.resetAndLoad(filter: .partiallyPlayed, sort: .latestFirst,
+                          searchText: "Episode 000042")
+        await assertPartialReady(data)
+        XCTAssertEqual(data.episodes.map(\.guid), ["000042"])
+        XCTAssertEqual(data.matchingCount, 1)
+
+        data.resetAndLoad(filter: .partiallyPlayed, sort: .latestFirst, searchText: "Episode")
+        data.cancelPendingLoad()
+        XCTAssertFalse(data.isLoading)
+        data.resetAndLoad(filter: .partiallyPlayed, sort: .latestFirst,
+                          searchText: "Episode 000999")
+        await assertPartialReady(data)
+        XCTAssertEqual(data.episodes.map(\.guid), ["000999"])
+        XCTAssertEqual(data.matchingCount, 1)
+    }
+
+    func testPartiallyPlayedTenThousandRowsKeepsRenderedPageBounded() async throws {
+        let (context, podcast) = try fixture(count: 10_000)
+        let stored = try context.fetch(FetchDescriptor<Episode>())
+        for episode in stored { episode.positionSeconds = 15 }
+        try context.save()
+        let data = source(context, podcast)
+
+        let started = Date()
+        data.resetAndLoad(filter: .partiallyPlayed, sort: .latestFirst, searchText: "")
+        XCTAssertTrue(data.isLoading)
+        XCTAssertLessThanOrEqual(data.episodes.count, EpisodeListDataSource.pageSize)
+        await assertPartialReady(data)
+        XCTAssertEqual(data.matchingCount, 10_000)
+        XCTAssertEqual(data.episodes.count, EpisodeListDataSource.pageSize)
+        XCTAssertEqual(data.episodes.first?.guid, "009999")
+        print("Partially Played 10,000-row background scan: \(Date().timeIntervalSince(started)) seconds")
     }
 
     func testNewestOldestAndNilDatesLast() throws {

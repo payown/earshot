@@ -72,6 +72,7 @@ struct EpisodeListView: View {
     @State private var episodeList: EpisodeListDataSource?
     @State private var searchReloadTask: Task<Void, Never>?
     @State private var episodeStateReloadTask: Task<Void, Never>?
+    @State private var partialCompletionTask: Task<Void, Never>?
     @State private var isBulkEpisodeMutation = false
     // Moves VoiceOver focus onto the first episode row when entering selection
     // mode, and to the Select/Done button on exit; keyed on the stable
@@ -139,9 +140,13 @@ struct EpisodeListView: View {
                 filter = newValue
                 let store = AppSettingsStore(context: context)
                 store.setEpisodeListFilter(newValue, forFeedURL: podcast.feedURL)
-                let count = ensureEpisodeList().count(filter: newValue, searchText: "")
-                Announcer.announce(newValue.announcement(count: count))
-                resetEpisodePage(moveFocusToResults: true)
+                if newValue == .partiallyPlayed {
+                    resetEpisodePage(moveFocusToResults: true, announcePartialFilter: true)
+                } else {
+                    let count = ensureEpisodeList().count(filter: newValue, searchText: "")
+                    Announcer.announce(newValue.announcement(count: count))
+                    resetEpisodePage(moveFocusToResults: true)
+                }
             }
         )
     }
@@ -201,7 +206,16 @@ struct EpisodeListView: View {
                                 chronologicalSortButton
                             }
                         }
-                        if allEpisodeCount == 0 && podcast.refreshedAt == nil {
+                        if filter == .partiallyPlayed, episodeList?.isLoading == true,
+                           visibleEpisodes.isEmpty {
+                            Section {
+                                Label("Loading episodes…", systemImage: "arrow.triangle.2.circlepath")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel("Loading episodes")
+                                    .accessibilityAddTraits(.updatesFrequently)
+                            }
+                        } else if allEpisodeCount == 0 && podcast.refreshedAt == nil {
                             // Freshly-migrated show whose episodes haven't been fetched yet.
                             // Distinguish "still loading" from a genuinely empty feed so a
                             // VoiceOver user isn't told "no episodes" prematurely.
@@ -286,7 +300,11 @@ struct EpisodeListView: View {
             }
         }
         .onAppear { isEpisodeListVisible = true }
-        .onDisappear { isEpisodeListVisible = false }
+        .onDisappear {
+            isEpisodeListVisible = false
+            partialCompletionTask?.cancel()
+            episodeList?.cancelPendingLoad()
+        }
         .task(id: podcast.feedURL) {
             sortOrder = AppSettingsStore(context: context).episodeSortOrder(forFeedURL: podcast.feedURL)
             filter = AppSettingsStore(context: context).episodeListFilter(forFeedURL: podcast.feedURL)
@@ -305,9 +323,13 @@ struct EpisodeListView: View {
         .onSubmit(of: .search) {
             guard EpisodeSearchFilter.isActive(searchText) else { return }
             searchReloadTask?.cancel()
-            resetEpisodePage(moveFocusToResults: false)
-            Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: matchingCount))
-            focusResultsHeading = true
+            if filter == .partiallyPlayed {
+                resetEpisodePage(moveFocusToResults: false, announcePartialSearch: true)
+            } else {
+                resetEpisodePage(moveFocusToResults: false)
+                Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: matchingCount))
+                focusResultsHeading = true
+            }
         }
         .refreshable { await refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
@@ -989,16 +1011,6 @@ struct EpisodeListView: View {
     private func loadOlderEpisodes() async {
         guard olderEpisodesState != .loading else { return }
         let restoreControlFocus = focusOlderEpisodesControl
-        defer {
-            if restoreControlFocus {
-                DispatchQueue.main.async {
-                    guard isEpisodeListVisible,
-                          focusOlderEpisodesControl,
-                          episodeList?.hasMore == false else { return }
-                    focusOlderEpisodesControl = true
-                }
-            }
-        }
         olderEpisodesState = .loading
         do {
             let outcome = try await SubscriptionRepository(
@@ -1008,12 +1020,17 @@ struct EpisodeListView: View {
             ).loadOlderEpisodes(for: podcast, reconcileEpisodeModels: false)
             olderEpisodesState = outcome.hasMore ? .ready : .end
             if outcome.inserted > 0 {
-                ensureEpisodeList().reloadKeepingLoadedLimit(
+                let source = ensureEpisodeList()
+                source.reloadKeepingLoadedLimit(
                     filter: filter,
                     sort: sortOrder,
                     searchText: searchText,
                     insertedEpisodeCount: outcome.inserted
                 )
+                if filter == .partiallyPlayed {
+                    _ = await source.waitForCurrentLoad()
+                }
+                guard !Task.isCancelled else { return }
                 Announcer.announce("Loaded \(outcome.inserted) older episodes")
             } else {
                 Announcer.announce("All available episodes loaded")
@@ -1026,6 +1043,14 @@ struct EpisodeListView: View {
                 "Loading older episodes failed: \(NetworkDiagnostic.reason(error), privacy: .public)"
             )
             Announcer.announce("Couldn't load older episodes")
+        }
+        if restoreControlFocus {
+            DispatchQueue.main.async {
+                guard isEpisodeListVisible,
+                      focusOlderEpisodesControl,
+                      episodeList?.hasMore == false else { return }
+                focusOlderEpisodesControl = true
+            }
         }
     }
 
@@ -1052,15 +1077,47 @@ struct EpisodeListView: View {
         return source
     }
 
-    private func resetEpisodePage(moveFocusToResults: Bool) {
+    private func resetEpisodePage(
+        moveFocusToResults: Bool,
+        announcePartialFilter: Bool = false,
+        announcePartialSearch: Bool = false
+    ) {
         guard !podcast.isDeleted else { return }
         cancelSelectionUpdate()
         if selection.isSelecting { selection.clear() }
-        ensureEpisodeList().resetAndLoad(
+        partialCompletionTask?.cancel()
+        let source = ensureEpisodeList()
+        source.resetAndLoad(
             filter: filter,
             sort: sortOrder,
             searchText: searchText
         )
+        if filter == .partiallyPlayed {
+            let currentSearch = searchText
+            let currentSort = sortOrder
+            partialCompletionTask = Task { @MainActor in
+                guard await source.waitForCurrentLoad(), !Task.isCancelled,
+                      isEpisodeListVisible, filter == .partiallyPlayed,
+                      searchText == currentSearch, sortOrder == currentSort else { return }
+                if announcePartialFilter {
+                    Announcer.announce(EpisodeListFilter.partiallyPlayed.announcement(count: source.filteredCount))
+                }
+                if announcePartialSearch {
+                    Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: source.matchingCount))
+                }
+                if moveFocusToResults || announcePartialSearch {
+                    DispatchQueue.main.async {
+                        guard isEpisodeListVisible, episodeList === source,
+                              filter == .partiallyPlayed,
+                              searchText == currentSearch, sortOrder == currentSort,
+                              !source.isLoading else { return }
+                        if source.matchingCount > 0 { focusResultsHeading = true }
+                        else { focusEmptyFilter = true }
+                    }
+                }
+            }
+            return
+        }
         if moveFocusToResults, matchingCount > 0 {
             DispatchQueue.main.async { focusResultsHeading = true }
         }
@@ -1083,28 +1140,48 @@ struct EpisodeListView: View {
             sort: sortOrder,
             searchText: searchText
         )
-        if let focusedID, let oldIndex {
-            let newIDs = visibleEpisodes.map(\.persistentModelID)
-            guard !newIDs.contains(focusedID) else { return }
-            let neighbor = EpisodeListFocusRecovery.replacement(
-                focusedID: focusedID, oldIndex: oldIndex, currentIDs: newIDs
+        if filter == .partiallyPlayed {
+            partialCompletionTask?.cancel()
+            partialCompletionTask = Task { @MainActor in
+                guard await episodeList.waitForCurrentLoad(), !Task.isCancelled else { return }
+                restoreVanishedFocus(
+                    focusedID: focusedID, oldIndex: oldIndex,
+                    currentFilter: currentFilter, currentSearch: currentSearch
+                )
+            }
+        } else {
+            restoreVanishedFocus(
+                focusedID: focusedID, oldIndex: oldIndex,
+                currentFilter: currentFilter, currentSearch: currentSearch
             )
-            DispatchQueue.main.async {
-                guard isEpisodeListVisible, filter == currentFilter,
-                      searchText == currentSearch,
-                      !visibleEpisodes.contains(where: { $0.persistentModelID == focusedID })
-                else { return }
-                if let neighbor {
-                    if visibleEpisodes.contains(where: { $0.persistentModelID == neighbor }) {
-                        focusedEpisode = neighbor
-                    } else {
-                        focusResultsHeading = true
-                    }
-                } else if filteredCount == 0 {
-                    focusEmptyFilter = true
+        }
+    }
+
+    private func restoreVanishedFocus(
+        focusedID: PersistentIdentifier?, oldIndex: Int?,
+        currentFilter: EpisodeListFilter, currentSearch: String
+    ) {
+        guard let focusedID, let oldIndex else { return }
+        let newIDs = visibleEpisodes.map(\.persistentModelID)
+        guard !newIDs.contains(focusedID) else { return }
+        let neighbor = EpisodeListFocusRecovery.replacement(
+            focusedID: focusedID, oldIndex: oldIndex, currentIDs: newIDs
+        )
+        DispatchQueue.main.async {
+            guard isEpisodeListVisible, filter == currentFilter,
+                  searchText == currentSearch,
+                  !visibleEpisodes.contains(where: { $0.persistentModelID == focusedID })
+            else { return }
+            if let neighbor {
+                if visibleEpisodes.contains(where: { $0.persistentModelID == neighbor }) {
+                    focusedEpisode = neighbor
                 } else {
                     focusResultsHeading = true
                 }
+            } else if filteredCount == 0 {
+                focusEmptyFilter = true
+            } else {
+                focusResultsHeading = true
             }
         }
     }
