@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe returns to a half-heard interview between client visits and checks its
+  saved place before resuming (Chapter 128).
+
 - Kashe opens the Apple Watch Downloads list on her phone before a walk and
   returns to it while choosing an interview (Chapter 125).
 
@@ -4126,3 +4129,22 @@ Kashe's story:
 Kashe remembered part of an interview title but not where she had put it. She searched her library and found the episode marked “Queued.” The next result still said “In Inbox.” She opened the show, paused the episode already loaded, and heard “Now Playing” when she found it again.
 
 Renata then showed her the Download choice in Quick Actions settings. Its longer name explained that the same choice could add or remove a saved file. When Kashe returned to an episode, the action still named the one thing it would do right then.
+
+---
+
+Chapter 128 - The thread she kept
+
+What to try first:
+
+1. Update Earshot to 1.2.6 (324) in place on iPhone, iPad and Apple Watch. Do not delete the app or your library. This build combines the previous Watch, iPad, Queue, Search and playback fixes with the new Partially Played filter.
+2. In Library, open a podcast with an unfinished episode saved above zero, one at the beginning, and one completed. Choose Partially Played. VoiceOver should say “Showing N partially played episodes.” Only unfinished episodes with a saved position above zero should appear. Change sort order, search within the podcast, and load older episodes; check the count and browsing position.
+3. While focused on a matching episode, finish it or mark it Played. The row should leave the filter without trapping VoiceOver focus. Return after a sync or navigation change and check that the count and row state agree. Episode actions should remain in their usual rotor order.
+4. On iPhone, use the largest accessibility text size, rotate to landscape, and open Now Playing. Check that Play or Pause, skip, position and secondary controls remain reachable. In Settings, choose the playback-position adjustment “5 minutes,” leave, then return to confirm it stayed selected.
+5. On Watch, repeat the previously working two-finger double tap to pause and resume, and start Watch playback without first playing on iPhone. Separately test handoff in both directions while playing and paused: note the last and first words, positions, confirmations and whether both devices play. Try an unreachable phone and an already downloaded Watch episode offline. Handoff, stale-state focus and offline combinations still need your acceptance; an offline Watch cannot fetch unseen phone changes or missing audio.
+6. On iPad, Search your library for two podcasts, open one, return to edit the query, then open the other. Check spoken order, focus and that choosing a result does not start audio. Send the episode, device, OS, build number and exact spoken words for a mismatch or crash.
+
+Kashe's story:
+
+Kashe stopped an interview halfway through before visiting a client. Later, she opened the show and chose Partially Played. The interview was there, with the place she had saved. A finished episode was absent. That made the list shorter without making her remember another title.
+
+Renata asked if she had found what she wanted. “I found where I left off,” Kashe said. She checked the position once, then pressed Play.
