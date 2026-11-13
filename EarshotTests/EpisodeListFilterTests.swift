@@ -159,7 +159,7 @@ final class EpisodeListFilterTests: XCTestCase {
         XCTAssertFalse(EpisodeListFilter.partiallyPlayed.includes(episode))
     }
 
-    func testFocusRecoveryKeepsNearestSurvivorWithoutStealingExistingFocus() {
+    func testFocusRecoveryKeepsNearestSurvivor() {
         XCTAssertEqual(EpisodeListFocusRecovery.replacement(
             focusedID: 2, oldIndex: 1, currentIDs: [1, 3, 4]
         ), 3)
@@ -171,6 +171,30 @@ final class EpisodeListFilterTests: XCTestCase {
         ))
         XCTAssertNil(EpisodeListFocusRecovery.replacement(
             focusedID: 2, oldIndex: 1, currentIDs: [] as [Int]
+        ))
+    }
+
+    func testFocusRecoveryDoesNotOverrideLaterVoiceOverTarget() {
+        XCTAssertTrue(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: 2, selectionFocusedID: 2,
+            otherControlFocused: false
+        ))
+        // SwiftUI can clear focus as the old row disappears; recovery remains useful.
+        XCTAssertTrue(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: nil, selectionFocusedID: 2,
+            otherControlFocused: false
+        ))
+        XCTAssertFalse(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: 3, selectionFocusedID: 2,
+            otherControlFocused: false
+        ))
+        XCTAssertFalse(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: nil, selectionFocusedID: 3,
+            otherControlFocused: false
+        ))
+        XCTAssertFalse(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: nil, selectionFocusedID: 2,
+            otherControlFocused: true
         ))
     }
 

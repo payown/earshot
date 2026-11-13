@@ -90,6 +90,8 @@ struct EpisodeListView: View {
     @AccessibilityFocusState private var focusEmptyFilter: Bool
     @AccessibilityFocusState private var focusResultsHeading: Bool
     @AccessibilityFocusState private var focusOlderEpisodesControl: Bool
+    @AccessibilityFocusState private var focusFilterControl: Bool
+    @AccessibilityFocusState private var focusSortControl: Bool
 
     /// Played/unheard filter for this podcast's list. Loaded per podcast on
     /// appear (default ``EpisodeListFilter/unheard``) and persisted on change
@@ -200,6 +202,7 @@ struct EpisodeListView: View {
                             }
                             .pickerStyle(.segmented)
                             .accessibilityLabel("Filter episodes")
+                            .accessibilityFocused($focusFilterControl)
                         }
                         if filteredCount > 0 {
                             Section {
@@ -880,6 +883,7 @@ struct EpisodeListView: View {
             Label(sortOrder.chronologicalToggleTitle, systemImage: "arrow.up.arrow.down")
         }
         .accessibilityHint("Changes the episode order without starting playback")
+        .accessibilityFocused($focusSortControl)
     }
 
     private var header: some View {
@@ -1134,6 +1138,7 @@ struct EpisodeListView: View {
         }
         let currentFilter = filter
         let currentSearch = searchText
+        let currentSort = sortOrder
         episodeList.podcastTitle = "\(podcast.title) \(podcast.displayName)"
         episodeList.reloadKeepingLoadedLimit(
             filter: filter,
@@ -1146,20 +1151,23 @@ struct EpisodeListView: View {
                 guard await episodeList.waitForCurrentLoad(), !Task.isCancelled else { return }
                 restoreVanishedFocus(
                     focusedID: focusedID, oldIndex: oldIndex,
-                    currentFilter: currentFilter, currentSearch: currentSearch
+                    currentFilter: currentFilter, currentSearch: currentSearch,
+                    currentSort: currentSort
                 )
             }
         } else {
             restoreVanishedFocus(
                 focusedID: focusedID, oldIndex: oldIndex,
-                currentFilter: currentFilter, currentSearch: currentSearch
+                currentFilter: currentFilter, currentSearch: currentSearch,
+                currentSort: currentSort
             )
         }
     }
 
     private func restoreVanishedFocus(
         focusedID: PersistentIdentifier?, oldIndex: Int?,
-        currentFilter: EpisodeListFilter, currentSearch: String
+        currentFilter: EpisodeListFilter, currentSearch: String,
+        currentSort: EpisodeSortOrder
     ) {
         guard let focusedID, let oldIndex else { return }
         let newIDs = visibleEpisodes.map(\.persistentModelID)
@@ -1169,7 +1177,15 @@ struct EpisodeListView: View {
         )
         DispatchQueue.main.async {
             guard isEpisodeListVisible, filter == currentFilter,
-                  searchText == currentSearch,
+                  searchText == currentSearch, sortOrder == currentSort,
+                  EpisodeListFocusRecovery.shouldRestore(
+                      capturedID: focusedID, currentFocusedID: focusedEpisode,
+                      selectionFocusedID: focusedRowID,
+                      otherControlFocused: focusSelectButton ||
+                          focusEmbeddedBackButton || focusEmptyFilter ||
+                          focusResultsHeading || focusOlderEpisodesControl ||
+                          focusFilterControl || focusSortControl
+                  ),
                   !visibleEpisodes.contains(where: { $0.persistentModelID == focusedID })
             else { return }
             if let neighbor {
@@ -1204,6 +1220,15 @@ struct EpisodeListView: View {
 
 /// Pure choice of a surviving row when a filtered result vanishes.
 enum EpisodeListFocusRecovery {
+    static func shouldRestore<ID: Equatable>(
+        capturedID: ID, currentFocusedID: ID?, selectionFocusedID: ID?,
+        otherControlFocused: Bool
+    ) -> Bool {
+        guard !otherControlFocused else { return false }
+        guard currentFocusedID == nil || currentFocusedID == capturedID else { return false }
+        return selectionFocusedID == nil || selectionFocusedID == capturedID
+    }
+
     static func replacement<ID: Equatable>(
         focusedID: ID, oldIndex: Int, currentIDs: [ID]
     ) -> ID? {
