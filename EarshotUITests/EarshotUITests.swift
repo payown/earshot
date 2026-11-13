@@ -481,12 +481,14 @@ final class EarshotUITests: XCTestCase {
         }
         revealAdjustment()
         XCTAssertEqual(adjustment.value as? String, "Automatic")
-        // The visual menu title sits at the leading, lower edge of the row.
-        // The VoiceOver representation spans the full row; tapping its trailing
-        // edge misses the native Picker even though the AX element is hittable.
+        // The VoiceOver representation spans the full row, but the native menu
+        // hit region varies by OS. Try its leading edge, then its trailing edge.
         adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.65)).tap()
         let fiveMinutes = app.buttons["5 minutes"].firstMatch
-        XCTAssertTrue(fiveMinutes.waitForExistence(timeout: 5))
+        if !fiveMinutes.waitForExistence(timeout: 2) {
+            adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.65)).tap()
+        }
+        XCTAssertTrue(fiveMinutes.waitForExistence(timeout: 5), app.debugDescription)
         fiveMinutes.tap()
         XCTAssertEqual(adjustment.value as? String, "5 minutes")
 
