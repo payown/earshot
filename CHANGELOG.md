@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Now Playing keeps playback controls visible in short landscape windows on iOS 27.2.
+
 - Loading older podcast episodes keeps the current expanded episode list and browsing position available.
 
 - Episode sharing supplies a single audio URL to Share Sheet shortcuts, with the title kept in preview metadata instead of a separate input item.
