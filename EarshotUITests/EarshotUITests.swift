@@ -845,8 +845,19 @@ final class EarshotUITests: XCTestCase {
     func testAnchoredPlayerStabilityAtLargestText() { verifyAnchoredPlayer(largeText: true) }
 
     func testPlayerTransportRemainsReachableInLandscape() {
+        verifyLandscapePlayer(largeText: false)
+    }
+
+    func testPlayerTransportRemainsReachableInLandscapeAtLargestText() {
+        verifyLandscapePlayer(largeText: true)
+    }
+
+    private func verifyLandscapePlayer(largeText: Bool) {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         app.launch()
