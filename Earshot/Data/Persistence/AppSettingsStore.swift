@@ -709,12 +709,14 @@ final class AppSettingsStore {
     /// (#641). Cross-podcast, so a single scalar key rather than per-feed.
     func downloadsPlayedFilter() -> EpisodeListFilter {
         guard let raw = rawValue(SettingsKey.downloadsPlayedFilter),
-              let filter = EpisodeListFilter(rawValue: raw)
+              let filter = EpisodeListFilter(rawValue: raw),
+              EpisodeListFilter.downloadsChoices.contains(filter)
         else { return SettingsDefault.downloadsPlayedFilter }
         return filter
     }
 
     func setDownloadsPlayedFilter(_ filter: EpisodeListFilter) {
+        guard EpisodeListFilter.downloadsChoices.contains(filter) else { return }
         setRawValue(filter.rawValue, for: SettingsKey.downloadsPlayedFilter)
     }
 

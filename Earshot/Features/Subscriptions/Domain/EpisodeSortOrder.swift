@@ -7,7 +7,7 @@ import Foundation
 /// (mirrors ``EpisodeListFilter`` and ``LibrarySort``). Date ties fall back to
 /// article-aware title order so the result is stable and deterministic
 /// (important for predictable VoiceOver focus).
-enum EpisodeSortOrder: String, Codable, Identifiable {
+enum EpisodeSortOrder: String, Codable, Identifiable, Sendable {
     /// Newest published first. The default for a podcast's episode list, which
     /// preserves the pre-existing pubDate-descending order.
     case latestFirst
