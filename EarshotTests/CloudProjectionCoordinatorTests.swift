@@ -1991,6 +1991,227 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(applicationEpisode(in: app)).isPlayed)
     }
 
+    func testExplicitLocalPlayedSaveSurvivesReconciliationBeforeNotificationPublishes() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 2_400)
+        let projection = try makeProjectionContainer()
+        let staleOwnRow = episodeStateRow(
+            device: "phone", position: 2_400,
+            updatedAt: Date.now.addingTimeInterval(-60).timeIntervalSince1970
+        )
+        projection.mainContext.insert(staleOwnRow)
+        try projection.mainContext.save()
+
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        XCTAssertTrue(QueueRepository(context: app.mainContext).markPlayedAndRemove(episode))
+        XCTAssertTrue(episode.isPlayed)
+        XCTAssertNotNil(episode.playedAt)
+        // A projection import can reach reconciliation before the asynchronous
+        // explicit-action notification writes the new own-device contribution.
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let stored = try XCTUnwrap(ModelContext(app).fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertTrue(stored.isPlayed, "An old own-device projection must not undo a manual completion")
+        XCTAssertTrue(stored.inboxDismissed)
+        XCTAssertEqual(stored.positionSeconds, 2_400,
+                       "Manual Played must preserve the saved checkpoint")
+        XCTAssertTrue(try PendingCloudPlayedMutation.records(in: ModelContext(app)).isEmpty)
+        let own = try XCTUnwrap(
+            ModelContext(projection).fetch(FetchDescriptor<CloudEpisodeStateProjection>()).first
+        )
+        XCTAssertTrue(own.isPlayed)
+    }
+
+    func testNewerRemoteUnplayedActionCanOverridePendingLocalPlayedAction() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 2_400)
+        let projection = try makeProjectionContainer()
+        let own = episodeStateRow(
+            device: "phone", position: 2_400,
+            updatedAt: Date.now.addingTimeInterval(-60).timeIntervalSince1970
+        )
+        projection.mainContext.insert(own)
+        try projection.mainContext.save()
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        XCTAssertTrue(QueueRepository(context: app.mainContext).markPlayedAndRemove(episode))
+
+        let newer = episodeStateRow(
+            device: "mac", position: 37,
+            updatedAt: Date.now.addingTimeInterval(60).timeIntervalSince1970
+        )
+        newer.isPlayed = false
+        newer.positionResetAt = newer.positionUpdatedAt
+        projection.mainContext.insert(newer)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let stored = try XCTUnwrap(ModelContext(app).fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertFalse(stored.isPlayed, "A later explicit remote Unplayed action must remain authoritative")
+        XCTAssertEqual(stored.positionSeconds, 37, "An old completion reset must not erase newer remote progress")
+        XCTAssertTrue(try PendingCloudPlayedMutation.records(in: ModelContext(app)).isEmpty)
+    }
+
+    func testPendingPlayedActionPublishesWhenCatalogRowIsTemporarilyMissing() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 2_400)
+        let projection = try makeProjectionContainer()
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        PendingCloudPlayedMutation.stage([episode], played: true, in: app.mainContext)
+        try app.mainContext.save()
+        app.mainContext.delete(episode)
+        try app.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let row = try XCTUnwrap(
+            ModelContext(projection).fetch(FetchDescriptor<CloudEpisodeStateProjection>()).first
+        )
+        XCTAssertTrue(row.isPlayed)
+        XCTAssertEqual(row.positionSeconds, 2_400,
+                       "The journal carries the saved place even without the catalog row")
+        XCTAssertTrue(try PendingCloudPlayedMutation.records(in: ModelContext(app)).isEmpty)
+    }
+
+    func testDelayedOlderPositionSnapshotCannotRewindNewerProjection() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 10)
+        let projection = try makeProjectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        let older = try XCTUnwrap(EpisodeUserStateSnapshot(
+            episode: episode, positionSeconds: 50
+        ))
+        let newer = try XCTUnwrap(EpisodeUserStateSnapshot(
+            episode: episode, positionSeconds: 100
+        ))
+        try await coordinator.publishLocalEpisodeStateChanges(
+            snapshots: [newer], now: Date(timeIntervalSince1970: 200)
+        )
+        try await coordinator.publishLocalEpisodeStateChanges(
+            snapshots: [older], now: Date(timeIntervalSince1970: 100)
+        )
+
+        let row = try XCTUnwrap(
+            ModelContext(projection).fetch(FetchDescriptor<CloudEpisodeStateProjection>()).first
+        )
+        XCTAssertEqual(row.positionSeconds, 100)
+        XCTAssertEqual(row.positionUpdatedAt, Date(timeIntervalSince1970: 200))
+        XCTAssertNil(row.positionResetAt)
+    }
+
+    func testPendingUnplayedActionKeepsNonzeroSavedPosition() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 2_400)
+        let projection = try makeProjectionContainer()
+        let own = episodeStateRow(
+            device: "phone", position: 0,
+            updatedAt: Date.now.addingTimeInterval(-60).timeIntervalSince1970
+        )
+        own.isPlayed = true
+        projection.mainContext.insert(own)
+        try projection.mainContext.save()
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        episode.isPlayed = false
+        PendingCloudPlayedMutation.stage([episode], played: false, in: app.mainContext)
+        try app.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let stored = try XCTUnwrap(ModelContext(app).fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertFalse(stored.isPlayed)
+        XCTAssertEqual(stored.positionSeconds, 2_400)
+    }
+
+    func testDelayedCompletionCannotResetNewerOwnDevicePosition() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let projection = try makeProjectionContainer()
+        let now = Date.now
+        let own = episodeStateRow(
+            device: "phone", position: 45,
+            updatedAt: now.addingTimeInterval(60).timeIntervalSince1970
+        )
+        own.playedUpdatedAt = now.addingTimeInterval(-60)
+        projection.mainContext.insert(own)
+        try projection.mainContext.save()
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        episode.isPlayed = true
+        PendingCloudPlayedMutation.stage(
+            [episode], played: true, eventDate: now, in: app.mainContext
+        )
+        try app.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let stored = try XCTUnwrap(ModelContext(app).fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertTrue(stored.isPlayed)
+        XCTAssertEqual(stored.positionSeconds, 45)
+        let row = try XCTUnwrap(
+            ModelContext(projection).fetch(FetchDescriptor<CloudEpisodeStateProjection>()).first
+        )
+        XCTAssertNil(row.positionResetAt)
+    }
+
+    func testPendingPlayedBacklogPublishesAcrossBoundedBatches() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let projection = try makeProjectionContainer()
+        let podcast = try XCTUnwrap(app.mainContext.fetch(FetchDescriptor<Podcast>()).first)
+        let staleTime = Date.now.addingTimeInterval(-60).timeIntervalSince1970
+        var episodes: [Episode] = []
+        for index in 0..<120 {
+            let guid = "pending-\(index)"
+            let episode = Episode(
+                guid: guid, title: guid, audioURL: "https://example.com/\(guid).mp3"
+            )
+            episode.podcast = podcast
+            episode.isPlayed = true
+            episode.positionSeconds = index + 1
+            app.mainContext.insert(episode)
+            episodes.append(episode)
+
+            let row = episodeStateRow(
+                device: "phone", position: index + 1, updatedAt: staleTime
+            )
+            row.episodeGUID = guid
+            projection.mainContext.insert(row)
+        }
+        PendingCloudPlayedMutation.stage(Array(episodes[0..<60]), in: app.mainContext)
+        PendingCloudPlayedMutation.stage(Array(episodes[60..<120]), in: app.mainContext)
+        try app.mainContext.save()
+        try projection.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let rows = try ModelContext(projection).fetch(
+            FetchDescriptor<CloudEpisodeStateProjection>()
+        ).filter { $0.episodeGUID.hasPrefix("pending-") }
+        XCTAssertEqual(rows.count, 120)
+        XCTAssertTrue(rows.allSatisfy(\.isPlayed))
+        XCTAssertEqual(rows.first(where: { $0.episodeGUID == "pending-119" })?.positionSeconds, 120)
+        XCTAssertTrue(try PendingCloudPlayedMutation.records(in: ModelContext(app)).isEmpty)
+    }
+
     func testExplicitMarkUnplayedCanOverrideNewerPlayedState() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 100)
         let projection = try makeProjectionContainer()
