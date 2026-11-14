@@ -108,6 +108,7 @@ struct RefreshOutcome: Sendable {
     var inboxReentryEpisodeIDs: [PersistentIdentifier] = []
     var inboxDismissedEpisodeIDs: [PersistentIdentifier] = []
     var filteredCount = 0
+    var recoveredLocalCount = 0
     var rejectedAllNewCandidates = false
     var keptOverflowCount = 0
     var filteredOverflowCount = 0
@@ -678,6 +679,12 @@ extension SubscriptionRepository {
             affectedPodcastIDs: reconcileEpisodeModels ? [podcast.persistentModelID] : []
         )
         publishInboxReentries(outcome.inboxReentryEpisodeIDs + outcome.inboxDismissedEpisodeIDs)
+        // Feed-gap recovery inserts dismissed history. It does not create an
+        // Inbox entry, but a previously imported cloud Played/position state
+        // may now have a local episode row to apply.
+        if outcome.recoveredLocalCount > 0 {
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        }
         // Refresh-time auto-queue mutates the queue on the background actor, so
         // QueueRepository never gets a chance to publish its normal change
         // notification. Notify after the durable save and main-context merge so
