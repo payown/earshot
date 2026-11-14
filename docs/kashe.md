@@ -76,6 +76,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe marks an Archers episode Played near its end, keeps the saved place on
+  another episode, and finds a missing episode after refreshing her second
+  device (Chapter 129).
+
 - Kashe returns to a half-heard interview between client visits and checks its
   saved place before resuming (Chapter 128).
 
@@ -4148,3 +4152,20 @@ Kashe's story:
 Kashe stopped an interview halfway through before visiting a client. Later, she opened the show and chose Partially Played. The interview was there, with the place she had saved. A finished episode was absent. That made the list shorter without making her remember another title.
 
 Renata asked if she had found what she wanted. “I found where I left off,” Kashe said. She checked the position once, then pressed Play.
+
+---
+
+Chapter 129 - The episode she could keep
+
+What to try first:
+
+1. Update Earshot to internal 1.2.6 (325) in place on iPhone and any second signed-in iPhone or iPad. Do not delete the app or your library. This build recovers missing local feed episodes and protects Played and Unplayed changes during cloud sync. It retains build 324’s Watch, iPad, Search, Queue and Partially Played work.
+2. On iPhone, play an episode until about one to three minutes remain, then mark it Played. Leave the podcast, reopen it, quit and reopen Earshot, and check Library’s Unplayed and Partially Played filters. The episode should stay Played and should not reappear there. Note the title, saved position and exact steps if it returns.
+3. Mark a different episode with a saved position Unplayed. Check that its listening place remains. Let a second signed-in device sync, if available, and check both episodes again. Do not reset your library to create a test case.
+4. On two signed-in devices, refresh a podcast whose newest episode appeared on one device but was missing on the other. Refresh the second device again after sync. The locally missing episode should appear without duplicate rows. Check that previously Played, dismissed, downloaded and queued episodes retain their state. Ordinary refresh should not automatically add recovered old rows to Inbox, Queue or Downloads.
+5. In a Library folder run, try Pause, Resume and Stop after current. Check the next episode and ordinary Queue. Report any audio failure with device, OS and last spoken episode. Four folder-run cases fail on the iOS 27.2 simulator on both build 324 and this source; the iOS 26.5 suite passed. Physical playback still needs checking.
+6. Recheck Watch’s two-finger double tap and independent Watch playback. On iPad, Search your library, open a result, return and edit the query. Watch handoff, offline/stale state and VoiceOver focus still need separate acceptance. This build does not claim to fix Paul’s Watch contact or the anonymous Inbox and iPad selection reports.
+
+Kashe’s story:
+
+Kashe marked an Archers episode Played before its last few minutes. Later, it was still Played, and her saved place on another episode remained. On her second device, a missing new episode appeared after refresh. She could choose what to hear next without retracing a finished story.
