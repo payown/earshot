@@ -24,6 +24,7 @@ extension Notification.Name {
 }
 
 struct EpisodeUserStateSnapshot: Sendable, Equatable {
+    let capturedAt: Date
     let feedURL: String
     let guid: String
     let positionSeconds: Int
@@ -43,6 +44,7 @@ struct EpisodeUserStateSnapshot: Sendable, Equatable {
               !episode.guid.isEmpty else { return nil }
         let feedURL = podcast.feedURL
         self.feedURL = FeedURLIdentity.canonical(feedURL)
+        self.capturedAt = .now
         self.guid = episode.guid
         self.positionSeconds = max(0, positionSeconds ?? episode.positionSeconds)
         self.isPlayed = episode.isPlayed
@@ -75,6 +77,97 @@ func postEpisodeUserStateChanges(
         )
     }
     postEpisodeUserStateSnapshots(snapshots)
+}
+
+/// An explicit Played/Unplayed edit must survive a CloudKit import that reaches
+/// reconciliation before its asynchronous projection notification. Store one
+/// device-local batch record in the SAME application save as the user action;
+/// the projection writer clears it only after publishing its contribution.
+enum PendingCloudPlayedMutation {
+    private static let prefix = "pending_cloud_played_v1_"
+
+    struct Entry: Hashable {
+        let feedURL: String
+        let guid: String
+        let isPlayed: Bool
+        let resetPosition: Bool
+        let positionSeconds: Int
+    }
+
+    struct Record {
+        let token: String
+        let eventDate: Date
+        let entries: [Entry]
+    }
+
+    private enum InvalidRecord: Error { case malformed }
+
+    @MainActor
+    static func stage(
+        _ episodes: [Episode], played: Bool? = nil,
+        eventDate: Date = .now, in context: ModelContext
+    ) {
+        let entries = episodes.compactMap { episode -> Entry? in
+            guard let podcast = episode.podcast, podcast.isFollowed,
+                  !episode.guid.isEmpty else { return nil }
+            return Entry(
+                feedURL: FeedURLIdentity.canonical(podcast.feedURL),
+                guid: episode.guid, isPlayed: played ?? episode.isPlayed,
+                resetPosition: episode.positionSeconds == 0,
+                positionSeconds: max(0, episode.positionSeconds)
+            )
+        }
+        guard !entries.isEmpty else { return }
+        let lines = entries.map {
+            "\(Data($0.feedURL.utf8).base64EncodedString())|\(Data($0.guid.utf8).base64EncodedString())|\($0.isPlayed ? "1" : "0")|\($0.resetPosition ? "1" : "0")|\($0.positionSeconds)"
+        }
+        let value = (["1|\(eventDate.timeIntervalSinceReferenceDate)"] + lines)
+            .joined(separator: "\n")
+        context.insert(LocalAppSetting(key: prefix + UUID().uuidString, value: value))
+    }
+
+    static func records(in context: ModelContext) throws -> [Record] {
+        try context.fetch(FetchDescriptor<LocalAppSetting>()).compactMap { row in
+            guard row.key.hasPrefix(prefix) else { return nil }
+            let token = String(row.key.dropFirst(prefix.count))
+            let lines = row.value.split(separator: "\n", omittingEmptySubsequences: false)
+            guard !token.isEmpty, lines.count > 1 else { throw InvalidRecord.malformed }
+            let header = lines[0].split(separator: "|", omittingEmptySubsequences: false)
+            guard header.count == 2, header[0] == "1",
+                  let interval = TimeInterval(header[1]), interval.isFinite
+            else { throw InvalidRecord.malformed }
+            let entries = try lines.dropFirst().map { line -> Entry in
+                let fields = line.split(separator: "|", omittingEmptySubsequences: false)
+                guard fields.count == 5,
+                      let feedData = Data(base64Encoded: String(fields[0])),
+                      let guidData = Data(base64Encoded: String(fields[1])),
+                      let feed = String(data: feedData, encoding: .utf8), !feed.isEmpty,
+                      let guid = String(data: guidData, encoding: .utf8), !guid.isEmpty,
+                      fields[2] == "0" || fields[2] == "1",
+                      fields[3] == "0" || fields[3] == "1",
+                      let position = Int(fields[4]), position >= 0
+                else { throw InvalidRecord.malformed }
+                return Entry(
+                    feedURL: FeedURLIdentity.canonical(feed), guid: guid,
+                    isPlayed: fields[2] == "1", resetPosition: fields[3] == "1",
+                    positionSeconds: position
+                )
+            }
+            return Record(
+                token: token, eventDate: Date(timeIntervalSinceReferenceDate: interval),
+                entries: entries
+            )
+        }
+    }
+
+    static func clear(_ records: [Record], in context: ModelContext) throws {
+        let keys = Set(records.map { prefix + $0.token })
+        guard !keys.isEmpty else { return }
+        for row in try context.fetch(FetchDescriptor<LocalAppSetting>())
+            where keys.contains(row.key) {
+            context.delete(row)
+        }
+    }
 }
 
 private struct CloudFolderPodcastMember: Codable, Equatable {
@@ -670,9 +763,17 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
     private func handleLocalEpisodeStateChanges(_ snapshots: [EpisodeUserStateSnapshot]) {
-        guard !isStopped, !isApplyingRemote else { return }
+        guard !isStopped else { return }
         do {
-            try publishLocalEpisodeStateChanges(snapshots: snapshots)
+            try publishPendingPlayedMutations(
+                appContext: modelContext, cloudContext: projectionContext
+            )
+            // The durable journal published the original action clock. A
+            // delayed callback must not retimestamp that Played decision and
+            // outrank a genuinely newer remote Unplayed action.
+            try publishLocalEpisodeStateChanges(
+                snapshots: snapshots, publishPlayedClock: false
+            )
         } catch {
             AppLog.data.error(
                 "Cloud episode-state projection failed: \(error.localizedDescription, privacy: .public)"
@@ -1137,6 +1238,9 @@ actor CloudProjectionCoordinator: ModelActor {
         )
         try publishPendingRemoteActivations()
         knownLocalFeedURLs = Set(podcasts.map { FeedURLIdentity.canonical($0.feedURL) })
+        // Publish the action's original clock before first-use seeding can
+        // manufacture a newer played timestamp for the same episode.
+        try publishPendingPlayedMutations(appContext: appContext, cloudContext: cloudContext)
         // Seed only keys this device has never projected. Existing rows may
         // describe state that a prior remote reconciliation applied locally;
         // treating that as a fresh local edit would manufacture a rewind.
@@ -2099,7 +2203,8 @@ actor CloudProjectionCoordinator: ModelActor {
     /// actions. It never scans the feed catalog when a position anchor saves.
     func publishLocalEpisodeStateChanges(
         snapshots: [EpisodeUserStateSnapshot],
-        now: Date = .now
+        now: Date? = nil,
+        publishPlayedClock: Bool = true
     ) throws {
         try requireWriterAdmission()
         refreshContextsFromStore()
@@ -2134,8 +2239,15 @@ actor CloudProjectionCoordinator: ModelActor {
             guard followedFeeds.contains(key.feedURL) else { continue }
             latestByKey[key] = snapshot
         }
+        let currentEpisodes = applicationEpisodes(matching: Set(latestByKey.keys))
         for key in latestByKey.keys.sorted() {
             guard let snapshot = latestByKey[key] else { continue }
+            let eventTime = now ?? snapshot.capturedAt
+            // A later explicit action may have saved before this notification
+            // reached the actor. Its older snapshot must not manufacture a
+            // new last-writer timestamp for the superseded Played value.
+            if snapshot.playedChangedExplicitly,
+               currentEpisodes[key]?.isPlayed != snapshot.isPlayed { continue }
             let row: CloudEpisodeStateProjection
             if let existing = ownByKey[key] {
                 row = existing
@@ -2144,36 +2256,44 @@ actor CloudProjectionCoordinator: ModelActor {
                 inserted.feedURL = key.feedURL
                 inserted.episodeGUID = key.guid
                 inserted.sourceDeviceID = deviceID
-                inserted.positionUpdatedAt = now
+                inserted.positionSeconds = snapshot.playedChangedExplicitly && !publishPlayedClock
+                    ? 0 : snapshot.positionSeconds
+                inserted.positionUpdatedAt = snapshot.playedChangedExplicitly && !publishPlayedClock
+                    ? .distantPast : eventTime
                 inserted.isPlayed = snapshot.isPlayed
-                inserted.playedUpdatedAt = snapshot.isPlayed
-                    || snapshot.playedChangedExplicitly ? now : .distantPast
+                inserted.playedUpdatedAt = publishPlayedClock
+                    && (snapshot.isPlayed || snapshot.playedChangedExplicitly)
+                    ? eventTime : .distantPast
                 inserted.inboxDismissed = snapshot.inboxDismissed
                 inserted.inboxDismissedUpdatedAt = snapshot.inboxDismissedChangedExplicitly
-                    ? now : .distantPast
+                    ? eventTime : .distantPast
                 cloudContext.insert(inserted)
                 ownByKey[key] = inserted
                 row = inserted
             }
-            if row.positionSeconds != snapshot.positionSeconds {
+            if !(snapshot.playedChangedExplicitly && !publishPlayedClock)
+                && eventTime > row.positionUpdatedAt
+                && row.positionSeconds != snapshot.positionSeconds {
                 if snapshot.positionSeconds < row.positionSeconds {
-                    row.positionResetAt = now
+                    row.positionResetAt = eventTime
                 }
                 row.positionSeconds = snapshot.positionSeconds
-                row.positionUpdatedAt = now
-                row.modifiedAt = now
+                row.positionUpdatedAt = eventTime
+                row.modifiedAt = eventTime
             }
-            if snapshot.playedChangedExplicitly {
+            if snapshot.playedChangedExplicitly && publishPlayedClock
+                && eventTime > row.playedUpdatedAt {
                 row.isPlayed = snapshot.isPlayed
-                row.playedUpdatedAt = now
-                row.modifiedAt = now
+                row.playedUpdatedAt = eventTime
+                row.modifiedAt = eventTime
             }
-            if snapshot.inboxDismissedChangedExplicitly {
+            if snapshot.inboxDismissedChangedExplicitly
+                && eventTime > row.inboxDismissedUpdatedAt {
                 row.inboxDismissed = snapshot.inboxDismissed
-                row.inboxDismissedUpdatedAt = now
-                row.modifiedAt = now
+                row.inboxDismissedUpdatedAt = eventTime
+                row.modifiedAt = eventTime
             }
-            if row.modifiedAt == .distantPast { row.modifiedAt = now }
+            if row.modifiedAt == .distantPast { row.modifiedAt = eventTime }
         }
         if cloudContext.hasChanges { try cloudContext.save() }
     }
@@ -2817,6 +2937,97 @@ actor CloudProjectionCoordinator: ModelActor {
         return result
     }
 
+    private struct PendingPlayedWinner {
+        let isPlayed: Bool
+        let resetPosition: Bool
+        let positionSeconds: Int
+        let eventDate: Date
+        let token: String
+    }
+
+    private func latestPendingPlayedMutations(
+        in context: ModelContext
+    ) throws -> [EpisodeKey: PendingPlayedWinner] {
+        var latest: [EpisodeKey: PendingPlayedWinner] = [:]
+        for record in try PendingCloudPlayedMutation.records(in: context) {
+            for entry in record.entries {
+                let key = EpisodeKey(feedURL: entry.feedURL, guid: entry.guid)
+                let candidate = PendingPlayedWinner(
+                    isPlayed: entry.isPlayed, resetPosition: entry.resetPosition,
+                    positionSeconds: entry.positionSeconds,
+                    eventDate: record.eventDate, token: record.token
+                )
+                if let previous = latest[key],
+                   (previous.eventDate > candidate.eventDate
+                    || (previous.eventDate == candidate.eventDate
+                        && previous.token >= candidate.token)) {
+                    continue
+                }
+                latest[key] = candidate
+            }
+        }
+        return latest
+    }
+
+    private func publishPendingPlayedMutations(
+        appContext: ModelContext, cloudContext: ModelContext
+    ) throws {
+        let records = try PendingCloudPlayedMutation.records(in: appContext)
+        guard !records.isEmpty else { return }
+        let latest = try latestPendingPlayedMutations(in: appContext)
+        let sourceDeviceID = deviceID
+        let keys = latest.keys.sorted()
+        // Bulk Mark All can accumulate many pending rows while offline. Keep
+        // each SwiftData predicate and save bounded to one catalog page.
+        for start in stride(from: 0, to: keys.count, by: 100) {
+            let batch = Array(keys[start..<min(start + 100, keys.count)])
+            let batchKeys = Set(batch)
+            let changedGUIDs = Array(Set(batch.map(\.guid)))
+            let rows = try cloudContext.fetch(FetchDescriptor<CloudEpisodeStateProjection>(
+                predicate: #Predicate {
+                    $0.sourceDeviceID == sourceDeviceID
+                        && $0.deletedAt == nil
+                        && changedGUIDs.contains($0.episodeGUID)
+                }
+            ))
+            var own: [EpisodeKey: CloudEpisodeStateProjection] = [:]
+            for row in rows.sorted(by: Self.episodeProjectionOrder) {
+                let key = Self.episodeKey(for: row)
+                guard batchKeys.contains(key) else { continue }
+                if own[key] == nil {
+                    own[key] = row
+                } else {
+                    cloudContext.delete(row)
+                }
+            }
+            for key in batch {
+                guard let event = latest[key] else { continue }
+                let row = own[key] ?? {
+                    let inserted = CloudEpisodeStateProjection()
+                    inserted.feedURL = key.feedURL
+                    inserted.episodeGUID = key.guid
+                    inserted.sourceDeviceID = deviceID
+                    cloudContext.insert(inserted)
+                    return inserted
+                }()
+                guard event.eventDate > row.playedUpdatedAt else { continue }
+                row.isPlayed = event.isPlayed
+                row.playedUpdatedAt = event.eventDate
+                if event.eventDate > row.positionUpdatedAt {
+                    row.positionSeconds = event.positionSeconds
+                    row.positionUpdatedAt = event.eventDate
+                    if event.resetPosition {
+                        row.positionResetAt = event.eventDate
+                    }
+                }
+                row.modifiedAt = max(row.modifiedAt, event.eventDate)
+            }
+            if cloudContext.hasChanges { try cloudContext.save() }
+        }
+        try PendingCloudPlayedMutation.clear(records, in: appContext)
+        if appContext.hasChanges { try appContext.save() }
+    }
+
     private func applyRemoteEpisodeStates(
         appContext: ModelContext,
         cloudContext: ModelContext
@@ -2825,6 +3036,7 @@ actor CloudProjectionCoordinator: ModelActor {
             .filter { $0.deletedAt == nil && !$0.episodeGUID.isEmpty }
         let grouped = Dictionary(grouping: rows, by: Self.episodeKey)
         let episodes = applicationEpisodes(matching: Set(grouped.keys))
+        let pendingPlayed = try latestPendingPlayedMutations(in: appContext)
         var changed = false
         for key in grouped.keys.sorted() {
             guard let episode = episodes[key], let contributions = grouped[key] else { continue }
@@ -2835,7 +3047,12 @@ actor CloudProjectionCoordinator: ModelActor {
                 }
                 return $0.sourceDeviceID > $1.sourceDeviceID
             }
-            let mergedPlayed = playedWinner?.isPlayed ?? false
+            let pending = pendingPlayed[key]
+            let pendingWins = pending.map {
+                $0.eventDate > (playedWinner?.playedUpdatedAt ?? .distantPast)
+            } ?? false
+            let mergedPlayed = pendingWins
+                ? (pending?.isPlayed ?? false) : (playedWinner?.isPlayed ?? false)
 
             let dismissalWinner = contributions
                 .filter { $0.inboxDismissedUpdatedAt != .distantPast }
@@ -2852,14 +3069,17 @@ actor CloudProjectionCoordinator: ModelActor {
                 if $0.date != $1.date { return $0.date < $1.date }
                 return $0.row.sourceDeviceID > $1.row.sourceDeviceID
             }
-            let progress = contributions.filter {
-                guard let resetWinner else { return true }
-                return $0.positionUpdatedAt > resetWinner.date
+            let pendingReset = pendingWins && pending?.resetPosition == true
+                ? pending?.eventDate : nil
+            let effectiveResetDate = [resetWinner?.date, pendingReset].compactMap { $0 }.max()
+            let eligibleProgress = contributions.filter {
+                guard let effectiveResetDate else { return true }
+                return $0.positionUpdatedAt > effectiveResetDate
             }
-            let mergedPosition = mergedPlayed ? 0 : max(
+            let mergedPosition = max(
                 0,
-                progress.map(\.positionSeconds).max()
-                    ?? resetWinner?.row.positionSeconds
+                eligibleProgress.map(\.positionSeconds).max()
+                    ?? (pendingReset != nil ? episode.positionSeconds : resetWinner?.row.positionSeconds)
                     ?? 0
             )
 

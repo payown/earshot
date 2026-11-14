@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Explicit Played and Unplayed changes keep their saved position and original action time when iCloud reconciliation arrives before the change notification; delayed progress cannot undo a newer decision.
+
 - Background feed scheduling errors now retain a numeric diagnostic code without putting private error text in public logs.
 
 - Malformed podcast feeds now log only an XML error code and parse position, keeping publisher-provided text out of public diagnostics.
