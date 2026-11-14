@@ -444,6 +444,9 @@ final class InboxRepository {
         inboxDismissedChangedExplicitly: Bool = false
     ) {
         guard context.hasChanges else { return }
+        if playedChangedExplicitly {
+            PendingCloudPlayedMutation.stage(changedEpisodes, in: context)
+        }
         do {
             try context.save()
             // Inbox membership changed (dismiss / clear / caps) — refresh the
@@ -455,6 +458,7 @@ final class InboxRepository {
                 inboxDismissedChangedExplicitly: inboxDismissedChangedExplicitly
             )
         } catch {
+            context.rollback()
             AppLog.data.error("Inbox save failed: \(error.localizedDescription, privacy: .public)")
         }
     }
