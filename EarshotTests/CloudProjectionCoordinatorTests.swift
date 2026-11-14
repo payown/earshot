@@ -42,6 +42,32 @@ private actor QueueApplicationRaceGate {
     }
 }
 
+private actor ProjectionRefreshFeed: FeedFetching {
+    let parsed: ParsedFeed
+
+    init(_ parsed: ParsedFeed) { self.parsed = parsed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed { parsed }
+}
+
+private actor ConditionalProjectionRefreshFeed: FeedFetching {
+    let parsed: ParsedFeed
+    private var requests: [Bool] = []
+
+    init(_ parsed: ParsedFeed) { self.parsed = parsed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed { parsed }
+
+    func refresh(_ request: FeedRefreshRequest) async throws -> FeedRefreshFetchResult {
+        requests.append(request.validators != nil)
+        if request.validators != nil { return .notModified(validators: request.validators) }
+        return .modified(parsed, validators: nil)
+    }
+
+    func receivedConditionalRequest() -> Bool { requests.contains(true) }
+    func requestCount() -> Int { requests.count }
+}
+
 @MainActor
 final class CloudProjectionCoordinatorTests: XCTestCase {
     func testProjectionOriginMarkerDistinguishesSelfGeneratedUIEvents() {
@@ -1615,6 +1641,289 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(refreshedLocal.lastSeenPubDate, cloudMark)
         XCTAssertEqual(cloud.lastSeenPubDate, cloudMark)
+    }
+
+    func testRemoteFeedMarkDoesNotHideLocallyMissingRecentEpisodes() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/synced-feed.xml"
+        let earlier = Date(timeIntervalSince1970: 1_700_000_000)
+        let missingDate = earlier.addingTimeInterval(60)
+        let remoteMark = earlier.addingTimeInterval(120)
+        let local = Podcast(feedURL: feedURL, title: "Show", lastSeenPubDate: earlier)
+        let saved = Episode(
+            guid: "saved", title: "Saved", audioURL: "https://example.com/saved.mp3",
+            pubDate: earlier
+        )
+        saved.podcast = local
+        saved.positionSeconds = 37
+        saved.inboxDismissed = true
+        let played = Episode(
+            guid: "played", title: "Played", audioURL: "https://example.com/played.mp3",
+            pubDate: earlier.addingTimeInterval(-60)
+        )
+        played.podcast = local
+        played.status = .played
+        played.inboxDismissed = true
+        app.mainContext.insert(local)
+        app.mainContext.insert(saved)
+        app.mainContext.insert(played)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let remote = CloudPodcastProjection()
+        remote.feedURL = feedURL
+        remote.title = "Show"
+        remote.lastSeenPubDate = remoteMark
+        projection.mainContext.insert(remote)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "second-device"
+        )
+        try await coordinator.reconcile()
+        XCTAssertEqual(
+            try ModelContext(app).fetch(FetchDescriptor<Podcast>()).first?.lastSeenPubDate,
+            remoteMark
+        )
+
+        let parsed = ParsedFeed(
+            title: "Show", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil,
+            episodes: [
+                ParsedEpisode(guid: "played", title: "Played", audioURL: "https://example.com/played.mp3",
+                              description: nil, pubDate: earlier.addingTimeInterval(-60), durationSeconds: nil),
+                ParsedEpisode(guid: "saved", title: "Saved", audioURL: "https://example.com/saved.mp3",
+                              description: nil, pubDate: earlier, durationSeconds: nil),
+                ParsedEpisode(guid: "missing", title: "Missing", audioURL: "https://example.com/missing.mp3",
+                              description: nil, pubDate: missingDate, durationSeconds: nil),
+                ParsedEpisode(guid: "remote-latest", title: "Latest", audioURL: "https://example.com/latest.mp3",
+                              description: nil, pubDate: remoteMark, durationSeconds: nil),
+            ]
+        )
+        let feed = ProjectionRefreshFeed(parsed)
+        let first = try await FeedRefreshActor(modelContainer: app).refreshOne(
+            feedURL: feedURL, feed: feed, autoQueueEnabled: true
+        )
+        let rows = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(Set(rows.map(\.guid)), ["played", "saved", "missing", "remote-latest"])
+        XCTAssertEqual(first?.added, 0, "Remote-known rows must not announce as new")
+        XCTAssertTrue(rows.filter { $0.guid == "missing" || $0.guid == "remote-latest" }.allSatisfy(\.inboxDismissed))
+        let preserved = try XCTUnwrap(rows.first { $0.guid == "saved" })
+        XCTAssertFalse(preserved.isPlayed)
+        XCTAssertEqual(preserved.positionSeconds, 37)
+        XCTAssertTrue(try XCTUnwrap(rows.first { $0.guid == "played" }).isPlayed)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<QueueItem>()), 0)
+
+        let again = try await FeedRefreshActor(modelContainer: app).refreshOne(
+            feedURL: feedURL, feed: feed, autoQueueEnabled: true
+        )
+        XCTAssertEqual(again?.added, 0)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Episode>()), 4)
+    }
+
+    func testRemoteFeedGapRecoversInBoundedBatchesWithSameDateAndOutOfOrderFeed() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/batched-sync.xml"
+        let localMark = Date(timeIntervalSince1970: 1_700_000_000)
+        let remoteMark = localMark.addingTimeInterval(120)
+        let podcast = Podcast(feedURL: feedURL, title: "Batched", lastSeenPubDate: localMark)
+        let existing = Episode(
+            guid: "existing", title: "Existing", audioURL: "https://example.com/existing.mp3",
+            pubDate: localMark
+        )
+        existing.podcast = podcast
+        existing.inboxDismissed = true
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(existing)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let remote = CloudPodcastProjection()
+        remote.feedURL = feedURL
+        remote.title = "Batched"
+        remote.lastSeenPubDate = remoteMark
+        projection.mainContext.insert(remote)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "second-device"
+        )
+        try await coordinator.reconcile()
+
+        let items = (0..<13).reversed().map { index in
+            ParsedEpisode(
+                guid: "missing-\(index)", title: "Missing \(index)",
+                audioURL: "https://example.com/\(index).mp3", description: nil,
+                pubDate: index.isMultiple(of: 2)
+                    ? localMark : localMark.addingTimeInterval(60),
+                durationSeconds: nil
+            )
+        }
+        let parsed = ParsedFeed(
+            title: "Batched", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil,
+            episodes: items + [
+                ParsedEpisode(
+                    guid: "existing", title: "Existing",
+                    audioURL: "https://example.com/existing.mp3", description: nil,
+                    pubDate: localMark, durationSeconds: nil
+                )
+            ]
+        )
+        let feed = ProjectionRefreshFeed(parsed)
+        let refresh = FeedRefreshActor(modelContainer: app)
+        let first = try await refresh.refreshOne(
+            feedURL: feedURL, feed: feed, autoQueueEnabled: true
+        )
+        XCTAssertEqual(first?.added, 0)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Episode>()), 11)
+        XCTAssertNotNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+
+        let second = try await refresh.refreshOne(
+            feedURL: feedURL, feed: feed, autoQueueEnabled: true
+        )
+        XCTAssertEqual(second?.added, 0)
+        let rows = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(rows.count, 14)
+        XCTAssertEqual(Set(rows.map(\.guid)), Set(["existing"] + (0..<13).map { "missing-\($0)" }))
+        XCTAssertTrue(rows.allSatisfy(\.inboxDismissed))
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<QueueItem>()), 0)
+        XCTAssertNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+    }
+
+    func testOrdinaryConditionalRefreshFetchesBodyForPendingRemoteGap() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/conditional-gap.xml"
+        let oldMark = Date(timeIntervalSince1970: 1_700_000_000)
+        let remoteMark = oldMark.addingTimeInterval(60)
+        let podcast = Podcast(feedURL: feedURL, title: "Conditional", lastSeenPubDate: remoteMark)
+        let existing = Episode(
+            guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+            pubDate: oldMark
+        )
+        existing.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(existing)
+        try PendingRemoteFeedGap.recordAdvance(
+            from: oldMark, to: remoteMark, feedURL: feedURL, in: app.mainContext
+        )
+        try FeedRefreshValidatorStore.set(
+            FeedHTTPValidators(etag: "\"previous\"", lastModified: nil, representationURL: nil),
+            feedURL: feedURL, in: app.mainContext
+        )
+        try app.mainContext.save()
+
+        let parsed = ParsedFeed(
+            title: "Conditional", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: [
+                ParsedEpisode(
+                    guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+                    description: nil, pubDate: oldMark, durationSeconds: nil
+                ),
+                ParsedEpisode(
+                    guid: "missing", title: "Missing", audioURL: "https://example.com/new.mp3",
+                    description: nil, pubDate: remoteMark, durationSeconds: nil
+                )
+            ]
+        )
+        let feed = ConditionalProjectionRefreshFeed(parsed)
+        let report = await FeedRefreshActor(modelContainer: app).refreshAllReport(
+            feed: feed, autoQueueEnabled: false, trigger: .backgroundTask,
+            isCancelled: { false }, onProgress: { _, _ in }
+        )
+        XCTAssertEqual(report.failed, 0)
+        XCTAssertEqual(report.results.count, 1)
+        XCTAssertFalse(report.results[0].wasNotModified)
+        let receivedConditionalRequest = await feed.receivedConditionalRequest()
+        let requestCount = await feed.requestCount()
+        XCTAssertFalse(receivedConditionalRequest)
+        XCTAssertEqual(requestCount, 1)
+        let rows = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(Set(rows.map(\.guid)), ["existing", "missing"])
+        XCTAssertEqual(report.results[0].outcome.added, 0)
+    }
+
+    func testTruncatedFeedKeepsRecoveryUntilOlderPageAppears() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/truncated-gap.xml"
+        let oldMark = Date(timeIntervalSince1970: 1_700_000_000)
+        let remoteMark = oldMark.addingTimeInterval(90)
+        let podcast = Podcast(feedURL: feedURL, title: "Truncated", lastSeenPubDate: remoteMark)
+        let existing = Episode(
+            guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+            pubDate: oldMark
+        )
+        existing.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(existing)
+        try PendingRemoteFeedGap.recordAdvance(
+            from: oldMark, to: remoteMark, feedURL: feedURL, in: app.mainContext
+        )
+        try app.mainContext.save()
+        func item(_ guid: String, _ date: Date) -> ParsedEpisode {
+            ParsedEpisode(
+                guid: guid, title: guid, audioURL: "https://example.com/\(guid).mp3",
+                description: nil, pubDate: date, durationSeconds: nil
+            )
+        }
+        func feed(_ items: [ParsedEpisode]) -> ProjectionRefreshFeed {
+            ProjectionRefreshFeed(ParsedFeed(
+                title: "Truncated", artworkURL: nil, description: nil, author: nil,
+                websiteURL: nil, language: nil, category: nil, episodes: items
+            ))
+        }
+        let refresh = FeedRefreshActor(modelContainer: app)
+        let first = try await refresh.refreshOne(
+            feedURL: feedURL, feed: feed([item("recent", remoteMark)]), autoQueueEnabled: false
+        )
+        XCTAssertEqual(first?.added, 0)
+        XCTAssertNotNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+
+        let second = try await refresh.refreshOne(
+            feedURL: feedURL,
+            feed: feed([
+                item("recent", remoteMark), item("older-missing", oldMark.addingTimeInterval(30)),
+                item("existing", oldMark)
+            ]),
+            autoQueueEnabled: false
+        )
+        XCTAssertEqual(second?.added, 0)
+        XCTAssertEqual(Set(try ModelContext(app).fetch(FetchDescriptor<Episode>()).map(\.guid)),
+                       ["existing", "recent", "older-missing"])
+        XCTAssertNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+    }
+
+    func testFutureRemoteMarkKeepsRecoveryJournal() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/future-gap.xml"
+        let oldMark = Date.now.addingTimeInterval(-120)
+        let remoteMark = Date.now.addingTimeInterval(3_600)
+        let podcast = Podcast(feedURL: feedURL, title: "Future", lastSeenPubDate: remoteMark)
+        let existing = Episode(
+            guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+            pubDate: oldMark
+        )
+        existing.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(existing)
+        try PendingRemoteFeedGap.recordAdvance(
+            from: oldMark, to: remoteMark, feedURL: feedURL, in: app.mainContext
+        )
+        try app.mainContext.save()
+        let parsed = ParsedFeed(
+            title: "Future", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: [
+                ParsedEpisode(guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+                              description: nil, pubDate: oldMark, durationSeconds: nil),
+                ParsedEpisode(guid: "future", title: "Future", audioURL: "https://example.com/future.mp3",
+                              description: nil, pubDate: remoteMark, durationSeconds: nil)
+            ]
+        )
+        _ = try await FeedRefreshActor(modelContainer: app).refreshOne(
+            feedURL: feedURL, feed: ProjectionRefreshFeed(parsed), autoQueueEnabled: false
+        )
+        XCTAssertNotNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Episode>()), 1)
     }
 
     func testPublishingLegacyDuplicateLocalFeedURLsDoesNotTrap() async throws {

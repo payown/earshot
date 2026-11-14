@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A second device can recover recently missing podcast episodes after a synced subscription advances its refresh marker. Recovery is bounded and keeps those already-known episodes out of new-episode Inbox and auto-queue actions.
+
 - Background feed scheduling errors now retain a numeric diagnostic code without putting private error text in public logs.
 
 - Malformed podcast feeds now log only an XML error code and parse position, keeping publisher-provided text out of public diagnostics.

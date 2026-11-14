@@ -981,6 +981,12 @@ actor CloudProjectionCoordinator: ModelActor {
             return inserted
         }()
         let before = value(podcast)
+        if existing != nil, !wasCatalogOnly {
+            try PendingRemoteFeedGap.recordAdvance(
+                from: podcast.lastSeenPubDate, to: remote.lastSeenPubDate,
+                feedURL: feed, in: modelContext
+            )
+        }
         copy(remote, to: podcast)
         if wasCatalogOnly {
             podcast.subscriptionStateRaw = nil
@@ -1078,6 +1084,12 @@ actor CloudProjectionCoordinator: ModelActor {
                 applicationChanged = true
             }
             if value(row) != value(podcast) {
+                if localByFeed[key] != nil {
+                    try PendingRemoteFeedGap.recordAdvance(
+                        from: podcast.lastSeenPubDate, to: row.lastSeenPubDate,
+                        feedURL: key, in: appContext
+                    )
+                }
                 copy(row, to: podcast)
             }
         }
@@ -3731,5 +3743,80 @@ enum CloudProjectionDeviceIdentity {
         let created = UUID().uuidString
         defaults.set(created, forKey: key)
         return created
+    }
+}
+
+/// Device-local range to repair catalog rows omitted when a remote subscription
+/// advances its marker before this device has fetched the same episode catalog.
+enum PendingRemoteFeedGap {
+    private enum InvalidRange: Error { case reversedDates }
+    struct Cursor: Codable, Equatable {
+        let date: Date
+        let guid: String
+    }
+
+    struct Range: Equatable {
+        let lower: Date
+        let upper: Date
+        let cursor: Cursor?
+    }
+
+    private struct Record: Codable {
+        let lower: Date
+        let upper: Date
+        let cursor: Cursor?
+    }
+
+    static func range(feedURL: String, in context: ModelContext) throws -> Range? {
+        let key = SettingsKey.pendingRemoteFeedGap(feedURL: feedURL)
+        guard let raw = try LocalAppSettingIdentity.rows(for: key, in: context).first?.value
+        else { return nil }
+        let record = try JSONDecoder().decode(Record.self, from: Data(raw.utf8))
+        guard record.lower <= record.upper else { throw InvalidRange.reversedDates }
+        return Range(lower: record.lower, upper: record.upper, cursor: record.cursor)
+    }
+
+    static func recordAdvance(
+        from old: Date?, to remote: Date?, feedURL: String, in context: ModelContext
+    ) throws {
+        guard let old, let remote, remote > old else { return }
+        let pending = try range(feedURL: feedURL, in: context)
+        let lower = min(old, pending?.lower ?? old)
+        let upper = max(remote, pending?.upper ?? remote)
+        try save(Range(lower: lower, upper: upper, cursor: nil), feedURL: feedURL, in: context)
+    }
+
+    static func advance(
+        _ range: Range, cursor: Cursor, feedURL: String, in context: ModelContext
+    ) throws {
+        try save(
+            Range(lower: range.lower, upper: range.upper, cursor: cursor),
+            feedURL: feedURL, in: context
+        )
+    }
+
+    static func restart(_ range: Range, feedURL: String, in context: ModelContext) throws {
+        try save(
+            Range(lower: range.lower, upper: range.upper, cursor: nil),
+            feedURL: feedURL, in: context
+        )
+    }
+
+    private static func save(
+        _ range: Range, feedURL: String, in context: ModelContext
+    ) throws {
+        let record = Record(lower: range.lower, upper: range.upper, cursor: range.cursor)
+        let raw = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        try LocalAppSettingIdentity.setValue(
+            raw, for: SettingsKey.pendingRemoteFeedGap(feedURL: feedURL), in: context
+        )
+    }
+
+    static func clear(feedURL: String, in context: ModelContext) throws {
+        for row in try LocalAppSettingIdentity.rows(
+            for: SettingsKey.pendingRemoteFeedGap(feedURL: feedURL), in: context
+        ) {
+            context.delete(row)
+        }
     }
 }

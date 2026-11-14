@@ -501,15 +501,27 @@ actor FeedRefreshActor {
             "refresh=\(correlationID, privacy: .public) firstFetch=\(firstScheduleReason, privacy: .public) taskCancelled=\(cancelledAtFirstSchedule, privacy: .public) eligibleFeeds=\(eligibleFeedCount) total=\(total) isEntitled=\(entitlementValue, privacy: .public)"
         )
 
-        let candidates = podcasts.enumerated().map { index, podcast in
-            FetchCandidate(
-                index: index,
-                url: podcast.feedURL,
-                validators: FeedRefreshValidatorStore.validators(
-                    feedURL: podcast.feedURL,
-                    in: modelContext
+        let candidates: [FetchCandidate]
+        do {
+            candidates = try podcasts.enumerated().map { index, podcast in
+                let pendingGap = try PendingRemoteFeedGap.range(
+                    feedURL: podcast.feedURL, in: modelContext
+                ) != nil
+                return FetchCandidate(
+                    index: index,
+                    url: podcast.feedURL,
+                    validators: pendingGap ? nil : FeedRefreshValidatorStore.validators(
+                        feedURL: podcast.feedURL, in: modelContext
+                    )
                 )
+            }
+        } catch {
+            AppLog.subscriptions.error(
+                "Could not load local feed-recovery state: \(Self.errorDetail(error), privacy: .public)"
             )
+            return RefreshRun(results: [], failures: [], attempted: 0, total: podcasts.count,
+                              failed: 0, cancelled: false, intendedInsertions: 0,
+                              durableInsertions: 0, loadFailed: true)
         }
         let pipeline = Self.fetchPipeline(
             candidates,
@@ -612,7 +624,7 @@ actor FeedRefreshActor {
                             "ActorApply",
                             "inputIndex=\(inputIndex) candidateCount=\(repairGUIDs.count)"
                         )
-                        var applyOutcome = apply(
+                        var applyOutcome = try apply(
                             parsed,
                             to: podcast,
                             autoQueueEnabled: autoQueueEnabled,
@@ -736,26 +748,29 @@ actor FeedRefreshActor {
             .existingFollowed(feedURL: canonical)
         else { return nil }
         let parsed = try await feed.fetch(canonical)
-        let repairGUIDs = ordinaryRefreshCandidates(
-            from: Self.deduplicatedEpisodes(parsed.episodes),
-            podcast: podcast,
-            now: .now
-        ).map(\.guid)
-        let repair = try IdentityRepairService(context: modelContext)
-            .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
-        if repair.didChange { try saveWithSignpost() }
-        var applyOutcome = apply(
-            parsed,
-            to: podcast,
-            autoQueueEnabled: autoQueueEnabled,
-            reconcileExistingEpisodeMetadata: true
-        )
-        applyOutcome.inboxDismissedEpisodes = try enforceInboxLimits(for: podcast, now: .now)
-        // Save BEFORE resolving `newEpisodeIDs` — persistentModelID is temporary
-        // for a newly-inserted Episode until the context saves (same reason
-        // `subscribe(feedURL:feed:inboxSeedCount:)` above saves before `result()`).
-        try saveIfNeeded()
-        return applyOutcome.result()
+        do {
+            let repairGUIDs = ordinaryRefreshCandidates(
+                from: Self.deduplicatedEpisodes(parsed.episodes),
+                podcast: podcast,
+                now: .now
+            ).map(\.guid)
+            let repair = try IdentityRepairService(context: modelContext)
+                .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
+            if repair.didChange { try saveWithSignpost() }
+            var applyOutcome = try apply(
+                parsed,
+                to: podcast,
+                autoQueueEnabled: autoQueueEnabled,
+                reconcileExistingEpisodeMetadata: true
+            )
+            applyOutcome.inboxDismissedEpisodes = try enforceInboxLimits(for: podcast, now: .now)
+            // Resolve IDs only after the inserts have permanent identities.
+            try saveIfNeeded()
+            return applyOutcome.result()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
     }
 
     /// Inserts the next missing historical page without ever classifying it as
@@ -1645,7 +1660,7 @@ actor FeedRefreshActor {
         to podcast: Podcast,
         autoQueueEnabled: Bool,
         reconcileExistingEpisodeMetadata: Bool
-    ) -> ApplyOutcome {
+    ) throws -> ApplyOutcome {
         let now = Date.now
         // A malformed feed can contain the same natural key more than once in a
         // single response. Deduplicate before any insert: a snapshot of the
@@ -1853,6 +1868,14 @@ actor FeedRefreshActor {
             enforceQueueCap(for: podcast)
         }
 
+        // A remote CloudKit marker may have moved ahead of this device's
+        // refetchable catalog. Repair only that recorded range, ten missing
+        // rows per refresh, as dismissed history. Do not route them through
+        // new-episode Inbox, auto-queue, download, or notification behavior.
+        let recovered = try recoverRemoteFeedGap(
+            from: parsedEpisodes, podcast: podcast, now: now
+        )
+
         if added > 0 {
             AppLog.subscriptions.info("Refreshed \(podcast.title, privacy: .private): \(added) new episode(s)")
         }
@@ -1869,10 +1892,74 @@ actor FeedRefreshActor {
             ),
             newEpisodes: newEpisodes,
             inboxReentryEpisodes: inboxReentries,
-            insertedCount: added + filtered,
+            insertedCount: added + filtered + recovered,
             metadataUpdatedCount: metadataUpdatedCount,
             correctedMediaEpisodes: correctedMediaEpisodes
         )
+    }
+
+    private func recoverRemoteFeedGap(
+        from parsedEpisodes: [ParsedEpisode], podcast: Podcast, now: Date
+    ) throws -> Int {
+        guard let gap = try PendingRemoteFeedGap.range(
+            feedURL: podcast.feedURL, in: modelContext
+        ) else { return 0 }
+        let candidates = parsedEpisodes.filter { item in
+            guard let date = item.pubDate else { return false }
+            return date >= gap.lower && date <= gap.upper && date <= now
+        }.sorted {
+            let left = $0.pubDate ?? .distantPast
+            let right = $1.pubDate ?? .distantPast
+            return left == right ? $0.guid < $1.guid : left > right
+        }
+        // A page of the feed that ends above the old mark cannot prove that
+        // all of the remote-known interval was returned. Keep its journal.
+        let reachedLowerBoundary = parsedEpisodes.contains {
+            guard let date = $0.pubDate else { return false }
+            return date <= gap.lower
+        }
+        let remaining = candidates.filter { item in
+            guard let cursor = gap.cursor, let date = item.pubDate else { return true }
+            return date < cursor.date || (date == cursor.date && item.guid > cursor.guid)
+        }
+        var recovered = 0
+        var lastProcessed: ParsedEpisode?
+        // One bounded GUID lookup per refresh, even for a very large feed.
+        let batch = Array(remaining.prefix(100))
+        if !batch.isEmpty {
+            let existing = try targetedEpisodes(
+                in: podcast, matchingGUIDs: batch.map(\.guid)
+            )
+            let knownGUIDs = Set(existing.map(\.guid))
+            for item in batch {
+                if !knownGUIDs.contains(item.guid) {
+                    if recovered == Self.ordinaryRefreshNewEpisodeLimit { break }
+                    let episode = Self.makeEpisode(from: item)
+                    episode.podcast = podcast
+                    episode.inboxDismissed = true
+                    modelContext.insert(episode)
+                    recovered += 1
+                }
+                lastProcessed = item
+            }
+        }
+        let reachedEnd = remaining.isEmpty || (
+            lastProcessed?.guid == remaining.last?.guid
+                && lastProcessed?.pubDate == remaining.last?.pubDate
+        )
+        if reachedEnd && reachedLowerBoundary && gap.upper <= now {
+            try PendingRemoteFeedGap.clear(feedURL: podcast.feedURL, in: modelContext)
+        } else if reachedEnd {
+            // Incomplete or future-dated feed: repeat from its newest item on
+            // the next body fetch so later published rows are not hidden.
+            try PendingRemoteFeedGap.restart(gap, feedURL: podcast.feedURL, in: modelContext)
+        } else if let lastProcessed, let date = lastProcessed.pubDate {
+            try PendingRemoteFeedGap.advance(
+                gap, cursor: .init(date: date, guid: lastProcessed.guid),
+                feedURL: podcast.feedURL, in: modelContext
+            )
+        }
+        return recovered
     }
 
     private static func downloadedFileLengthMismatch(
