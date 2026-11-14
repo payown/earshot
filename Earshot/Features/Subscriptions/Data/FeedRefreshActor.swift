@@ -1886,6 +1886,7 @@ actor FeedRefreshActor {
                 wasBackfill: false,
                 newestNewEpisodeGUID: newestNewGUID,
                 filteredCount: filtered,
+                recoveredLocalCount: recovered,
                 rejectedAllNewCandidates: selection.rejectedAllNewCandidates,
                 keptOverflowCount: selection.keptOverflowCount,
                 filteredOverflowCount: selection.filteredOverflowCount

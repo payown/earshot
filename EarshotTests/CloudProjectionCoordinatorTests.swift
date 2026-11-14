@@ -1721,6 +1721,75 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Episode>()), 4)
     }
 
+    func testSingleFeedRecoveryAppliesPreviouslyImportedPlayedState() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/recovered-played.xml"
+        let oldMark = Date(timeIntervalSince1970: 1_700_000_000)
+        let missingDate = oldMark.addingTimeInterval(60)
+        let remoteMark = oldMark.addingTimeInterval(120)
+        let podcast = Podcast(feedURL: feedURL, title: "Show", lastSeenPubDate: oldMark)
+        let known = Episode(
+            guid: "known", title: "Known", audioURL: "https://example.com/known.mp3",
+            pubDate: oldMark
+        )
+        known.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(known)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let remote = CloudPodcastProjection()
+        remote.feedURL = feedURL
+        remote.title = "Show"
+        remote.lastSeenPubDate = remoteMark
+        projection.mainContext.insert(remote)
+        let remotePlayed = CloudEpisodeStateProjection()
+        remotePlayed.feedURL = feedURL
+        remotePlayed.episodeGUID = "missing"
+        remotePlayed.sourceDeviceID = "first-device"
+        remotePlayed.isPlayed = true
+        remotePlayed.playedUpdatedAt = Date.now
+        projection.mainContext.insert(remotePlayed)
+        try projection.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: .default, deviceID: "second-device"
+        )
+        try await coordinator.start()
+        defer { Task { await coordinator.stop() } }
+
+        let parsed = ParsedFeed(
+            title: "Show", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil,
+            episodes: [
+                ParsedEpisode(guid: "known", title: "Known", audioURL: "https://example.com/known.mp3",
+                              description: nil, pubDate: oldMark, durationSeconds: nil),
+                ParsedEpisode(guid: "missing", title: "Missing", audioURL: "https://example.com/missing.mp3",
+                              description: nil, pubDate: missingDate, durationSeconds: nil),
+                ParsedEpisode(guid: "latest", title: "Latest", audioURL: "https://example.com/latest.mp3",
+                              description: nil, pubDate: remoteMark, durationSeconds: nil),
+            ]
+        )
+        let outcome = try await SubscriptionRepository(
+            context: app.mainContext, feed: ProjectionRefreshFeed(parsed)
+        ).refresh(podcast)
+        XCTAssertEqual(outcome.added, 0)
+        XCTAssertEqual(outcome.recoveredLocalCount, 2)
+
+        var recovered: Episode?
+        for _ in 0..<500 {
+            recovered = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+                .first { $0.guid == "missing" }
+            if recovered?.isPlayed == true { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(recovered?.isPlayed == true,
+                      "Single-feed recovery must apply the prior remote Played contribution")
+        XCTAssertTrue(recovered?.inboxDismissed == true)
+        await coordinator.stop()
+    }
+
     func testRemoteFeedGapRecoversInBoundedBatchesWithSameDateAndOutOfOrderFeed() async throws {
         let app = try makeApplicationContainer()
         let feedURL = "https://example.com/batched-sync.xml"
