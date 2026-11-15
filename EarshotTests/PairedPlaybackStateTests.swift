@@ -27,4 +27,25 @@ final class PairedPlaybackStateTests: XCTestCase {
         XCTAssertFalse(PairedPlaybackHandoffDecision.sourcePaused(stillPlaying, owner: .watch,
                                                                    feedURL: "https://example.com/feed", guid: "one"))
     }
+
+    func testPhonePlaybackCheckpointIsDistinctFromTransportObservation() {
+        let initial = PairedPlaybackState(owner: .phone, feedURL: "https://example.com/feed",
+                                           guid: "one", title: "One", audioURL: "https://example.com/one.mp3",
+                                           position: 48, playing: false, observedAt: 1_000,
+                                           playbackChangedAt: 990)
+        let refreshed = PairedPlaybackState(owner: .phone, feedURL: initial.feedURL,
+                                             guid: initial.guid, title: initial.title,
+                                             audioURL: initial.audioURL, position: initial.position,
+                                             playing: false, observedAt: 1_030,
+                                             playbackChangedAt: 990)
+        XCTAssertEqual(PairedPlaybackState.decode(refreshed.encoded())?.playbackChangedAt, 990)
+        XCTAssertFalse(refreshed.hasPlaybackChange(comparedWith: initial))
+        let rewind = PairedPlaybackState(owner: .phone, feedURL: initial.feedURL,
+                                          guid: initial.guid, title: initial.title,
+                                          audioURL: initial.audioURL, position: 0,
+                                          playing: false, observedAt: 1_031,
+                                          playbackChangedAt: 1_031)
+        XCTAssertTrue(rewind.hasPlaybackChange(comparedWith: refreshed))
+        XCTAssertEqual(PairedPlaybackState.decode(rewind.encoded())?.position, 0)
+    }
 }

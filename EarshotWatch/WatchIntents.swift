@@ -57,8 +57,11 @@ struct ResumeWatchAudioIntent: AppIntent {
         guard let runtime, await MainActor.run(body: { runtime.player.episode != nil }) else {
             return .result(dialog: "Open Earshot and choose an episode first.")
         }
+        if await MainActor.run(body: { runtime.watchResumeNeedsTransfer }) {
+            return .result(dialog: "iPhone is playing. Transfer to Apple Watch first.")
+        }
         let playing = await MainActor.run { runtime.player.isPlaying }
-        if !playing { await runtime.player.toggle() }
+        if !playing { await runtime.toggleWatch() }
         let started = await MainActor.run { runtime.player.isPlaying }
         if started { return .result(dialog: "Playing on Apple Watch.") }
         return .result(dialog: "Apple Watch could not start playback.")

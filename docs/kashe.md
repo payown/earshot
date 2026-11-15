@@ -4009,3 +4009,21 @@ Kashe's story:
 Kashe had heard the interview stop when Earshot vanished from her watch. Her phone kept talking, but the next sentence never reached her wrist. She saved the time, updated both apps, and asked Renata to listen beside her.
 
 "Let's hear where it lands," Kashe said. She noted the last words from the phone, touched Transfer on the watch, and waited for the first words there. A button could say the transfer worked. The next sentence would tell her whether it really had.
+
+---
+
+Chapter 122 - The place she kept
+
+What to try first:
+
+Update Earshot to 1.2.6 (317) on iPhone and Apple Watch without deleting either app. Confirm the Watch companion says Open in iPhone TestFlight. With VoiceOver, start an episode on Watch, pause it with a two-finger double tap, then try the same gesture on Home, Library, Up Next, Inbox, Downloads, an episode detail, Settings, and Now Playing. Each tap should change Watch playback once, including after navigating away. In Now Playing, choose Apple Watch controls or iPhone controls and check that the spoken device and buttons match the chosen section. Tell us the screen, exact speech, and which device changed.
+
+Pause an iPhone episode at a recognizable sentence, including at the beginning, then choose Continue saved episode on Apple Watch. The phone should remain paused. Next, make the phone unavailable and try the saved episode on Watch over Wi-Fi, then with a completed Watch download while offline. The saved position may be behind the phone's last unheard changes; the Watch should say when the current phone state is unverified. If media cannot be streamed or is no longer available, report that message and whether a download existed.
+
+While iPhone is actively playing, use Transfer to Apple Watch and then transfer back. Repeat at normal and 1.5 times speed with the phone app both open and in the background. The Watch should stay open, reach the same sentence, and avoid playing both devices after confirmation. Include both positions, the last and first words heard, connection state, and any crash time. Immediate paired Queue refresh remains disabled; Queue changes can sync through iCloud when available.
+
+Kashe's story:
+
+Kashe paused the interview on her watch and slipped her hand into her coat pocket. Outside, she tapped twice again. The voice returned to her wrist, even though her phone was still nearby. She tried it from the Library, then from the Queue. The same voice came back each time.
+
+Later, Renata paused the interview on the phone just as a new speaker began. Kashe chose to continue on her watch. The phone stayed quiet. When they walked beyond its reach, the watch held the last place it had heard about. “Tell me when that place is old,” Kashe said. “I can find the next sentence.”

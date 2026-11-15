@@ -13,6 +13,8 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
     private weak var runtime: AppRuntime?
     private var seenCommands: [String: [String: Any]] = [:]
     private var lastPublished: PairedPlaybackState?
+    private var lastCapturedPlayback: PairedPlaybackState?
+    private var lastPersistedPlayback: PairedPlaybackState?
     private var lastWatchState: PairedPlaybackState?
     private var isObservingPlayer = false
     private var handoffPending = false
@@ -244,22 +246,41 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
     }
 
     private func currentState() -> PairedPlaybackState {
-        guard let player = runtime?.player,
-              let episode = player.nowPlayingEpisode, !episode.isDeleted else {
-            return PairedPlaybackState(owner: .phone)
+        let player = runtime?.player
+        let episode = player?.nowPlayingEpisode
+        let validEpisode = episode?.isDeleted == false ? episode : nil
+        let now = Date.now.timeIntervalSince1970
+        if lastPersistedPlayback == nil {
+            lastPersistedPlayback = PairedPlaybackState.decode(
+                UserDefaults.standard.data(forKey: "phonePlaybackCheckpoint"))
         }
-        return PairedPlaybackState(owner: .phone, feedURL: episode.podcast?.feedURL ?? "",
-                                   guid: episode.guid, title: episode.title,
-                                   podcastTitle: episode.podcast?.title ?? "Podcast",
-                                   audioURL: episode.audioURL, position: player.currentPositionSeconds,
-                                   rate: player.effectiveRate, playing: player.isPlaying)
+        let previous = lastCapturedPlayback ?? lastPersistedPlayback
+        let observed = PairedPlaybackState(
+            owner: .phone, feedURL: validEpisode?.podcast?.feedURL ?? "",
+            guid: validEpisode?.guid ?? "", title: validEpisode?.title ?? "",
+            podcastTitle: validEpisode?.podcast?.title ?? "Podcast",
+            audioURL: validEpisode?.audioURL ?? "", position: player?.currentWatchSnapshotPosition ?? 0,
+            rate: player?.effectiveRate ?? 1, playing: player?.isPlaying ?? false, observedAt: now)
+        let checkpoint = observed.hasPlaybackChange(comparedWith: previous)
+            ? now : (previous?.playbackChangedAt ?? now)
+        let state = PairedPlaybackState(
+            owner: .phone, feedURL: observed.feedURL, guid: observed.guid, title: observed.title,
+            podcastTitle: observed.podcastTitle, audioURL: observed.audioURL,
+            position: observed.position, rate: observed.rate, playing: observed.playing,
+            observedAt: now, playbackChangedAt: checkpoint)
+        lastCapturedPlayback = state
+        if state.needsPublication(after: lastPersistedPlayback), let data = state.encoded() {
+            UserDefaults.standard.set(data, forKey: "phonePlaybackCheckpoint")
+            lastPersistedPlayback = state
+        }
+        return state
     }
 
     private func publishPlaybackState(force: Bool = false) {
+        let state = currentState()
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else { return }
-        let state = currentState()
         guard force || state.needsPublication(after: lastPublished), let data = state.encoded() else { return }
         do {
             try session.updateApplicationContext([PairedPlaybackState.contextKey: data])
@@ -615,6 +636,7 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
     }
 
     private func snapshot(player: PlayerService) -> [String: Any] {
+        let captured = currentState()
         var result: [String: Any] = [
             "version": 1,
             "owner": "phone",
@@ -622,7 +644,8 @@ final class PhoneWatchConnectivity: NSObject, WCSessionDelegate {
             "audioReady": player.isActuallyPlaying,
             "position": player.currentWatchSnapshotPosition,
             "rate": player.effectiveRate,
-            "observedAt": Date.now.timeIntervalSince1970
+            "observedAt": captured.observedAt,
+            "playbackChangedAt": captured.playbackChangedAt ?? captured.observedAt
         ]
         if let episode = player.nowPlayingEpisode {
             result["title"] = episode.title
