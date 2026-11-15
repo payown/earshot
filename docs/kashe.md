@@ -76,6 +76,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe pauses near the end of a folder run episode and returns to the next
+  episode once, without losing her place in the run (Chapter 130).
+
 - Kashe marks an Archers episode Played near its end, keeps the saved place on
   another episode, and finds a missing episode after refreshing her second
   device (Chapter 129).
@@ -4157,6 +4160,8 @@ Renata asked if she had found what she wanted. “I found where I left off,” K
 
 Chapter 129 - The episode she could keep
 
+Build 325 was prepared but not distributed; Chapter 130 is its replacement internal candidate.
+
 What to try first:
 
 1. Update Earshot to internal 1.2.6 (325) in place on iPhone and any second signed-in iPhone or iPad. Do not delete the app or your library. This build recovers missing local feed episodes and protects Played and Unplayed changes during cloud sync. It retains build 324’s Watch, iPad, Search, Queue and Partially Played work.
@@ -4169,3 +4174,17 @@ What to try first:
 Kashe’s story:
 
 Kashe marked an Archers episode Played before its last few minutes. Later, it was still Played, and her saved place on another episode remained. On her second device, a missing new episode appeared after refresh. She could choose what to hear next without retracing a finished story.
+
+Chapter 130 - The next episode, once
+
+What to try first:
+
+1. Update Earshot to internal 1.2.6 (326) in place. Do not delete the app or reset your library. This build replaces the held 325 candidate; it includes its feed-refresh and Played-state fixes plus a Folder Run pause and completion fix. It retains build 324's Watch, iPad, Search, Queue and Partially Played work.
+2. On iPhone, play an episode until one to three minutes remain, then mark it Played. Leave and reopen the podcast, quit and reopen Earshot, and check Library's Unplayed and Partially Played filters. It should stay Played. Mark a different episode with a saved position Unplayed; its listening place should remain after sync.
+3. If you have a second signed-in iPhone or iPad, refresh a podcast with a newer episode present on one device but missing on the other. Refresh again after sync. The missing row should appear once. Check that Played, dismissed, downloaded and queued episodes keep their state; recovered old rows should not be automatically added to Inbox, Queue or Downloads.
+4. Start a Library folder run. Near the end of an episode, Pause and quickly Resume, then let it finish; the next episode should be selected once. Try Pause, Resume, Stop after current, Cancel, and starting an unrelated episode. Check the next episode and your ordinary Queue. Report the last spoken title, device, OS and exact steps if audio or progression fails. Four folder-run cases failed on the original iOS 27.2 simulator; this source passes on a second. Physical playback still needs checking.
+5. Recheck Watch's two-finger double tap and starting playback on Watch without first playing on iPhone. On iPad, use Search your library, open a result, return, and edit the query. Watch handoff, offline and stale-state cases still need separate testing. This build does not claim to resolve Paul's Watch contact or the anonymous Inbox and iPad selection reports.
+
+Kashe's story:
+
+Kashe paused an episode as she reached the door. When she returned, the folder run moved to the next story only once. An Archers episode she had marked Played stayed that way, and the newer episode on her other device appeared after refresh. She did not have to rebuild her place in the queue.
