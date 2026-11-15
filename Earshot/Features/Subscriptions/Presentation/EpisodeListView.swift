@@ -51,6 +51,7 @@ struct EpisodeListView: View {
     @State private var pendingSelectedPlayedChange: Bool?
     @State private var pendingSelectedPlayedIDs: Set<PersistentIdentifier> = []
     @State private var olderEpisodesState: OlderEpisodesState = .ready
+    @State private var isEpisodeListVisible = false
     // Episode multi-select (#758). `selection` is the shared ``MultiSelectState``
     // holder (keyed on persistent identity); `batchRequest` presents the shared
     // ``FolderPickerView`` for the whole selection. Entering selection mode swaps
@@ -80,13 +81,14 @@ struct EpisodeListView: View {
     @AccessibilityFocusState private var focusSelectButton: Bool
     @AccessibilityFocusState private var focusEmbeddedBackButton: Bool
 
-    // Focus targets for the rotor "Mark as played" under the Unheard filter,
+    // Focus targets for the rotor "Mark as played" under the Unplayed filter,
     // where the marked row leaves the visible list (#579): the neighbor row, or
     // the empty-filter state when the last unheard episode was just marked.
     // Mirrors the Inbox's neighbor-focus wiring.
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusEmptyFilter: Bool
     @AccessibilityFocusState private var focusResultsHeading: Bool
+    @AccessibilityFocusState private var focusOlderEpisodesControl: Bool
 
     /// Played/unheard filter for this podcast's list. Loaded per podcast on
     /// appear (default ``EpisodeListFilter/unheard``) and persisted on change
@@ -234,7 +236,7 @@ struct EpisodeListView: View {
                                 }
                             } header: {
                                 Text(filter == .unheard
-                                     ? "^[\(matchingCount) unheard episode](inflect: true)"
+                                     ? "^[\(matchingCount) unplayed episode](inflect: true)"
                                      : "^[\(matchingCount) episode](inflect: true)")
                                     .accessibilityFocused($focusResultsHeading)
                             }
@@ -242,6 +244,7 @@ struct EpisodeListView: View {
                         if episodeList != nil && episodeList?.hasMore == false {
                             Section {
                                 olderEpisodesControl
+                                    .accessibilityFocused($focusOlderEpisodesControl)
                             }
                         }
                     }
@@ -270,6 +273,8 @@ struct EpisodeListView: View {
                 }
             }
         }
+        .onAppear { isEpisodeListVisible = true }
+        .onDisappear { isEpisodeListVisible = false }
         .task(id: podcast.feedURL) {
             sortOrder = AppSettingsStore(context: context).episodeSortOrder(forFeedURL: podcast.feedURL)
             filter = AppSettingsStore(context: context).episodeListFilter(forFeedURL: podcast.feedURL)
@@ -877,7 +882,7 @@ struct EpisodeListView: View {
     /// Offers a one-tap switch to All rather than leaving a blank list.
     private var emptyFilterState: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("No unheard episodes")
+            Text("No unplayed episodes")
                 .font(.headline)
                 // Focus lands here when the rotor mark-played removes the last
                 // unheard row (#579), so VoiceOver isn't orphaned on a vanished
@@ -953,6 +958,17 @@ struct EpisodeListView: View {
 
     private func loadOlderEpisodes() async {
         guard olderEpisodesState != .loading else { return }
+        let restoreControlFocus = focusOlderEpisodesControl
+        defer {
+            if restoreControlFocus {
+                DispatchQueue.main.async {
+                    guard isEpisodeListVisible,
+                          focusOlderEpisodesControl,
+                          episodeList?.hasMore == false else { return }
+                    focusOlderEpisodesControl = true
+                }
+            }
+        }
         olderEpisodesState = .loading
         do {
             let outcome = try await SubscriptionRepository(
@@ -962,7 +978,12 @@ struct EpisodeListView: View {
             ).loadOlderEpisodes(for: podcast, reconcileEpisodeModels: false)
             olderEpisodesState = outcome.hasMore ? .ready : .end
             if outcome.inserted > 0 {
-                resetEpisodePage(moveFocusToResults: false)
+                ensureEpisodeList().reloadKeepingLoadedLimit(
+                    filter: filter,
+                    sort: sortOrder,
+                    searchText: searchText,
+                    insertedEpisodeCount: outcome.inserted
+                )
                 Announcer.announce("Loaded \(outcome.inserted) older episodes")
             } else {
                 Announcer.announce("All available episodes loaded")

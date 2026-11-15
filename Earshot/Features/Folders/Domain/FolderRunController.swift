@@ -121,7 +121,7 @@ final class FolderRunController {
                 while try await store.pruneObsoletePage() > 0 { try Task.checkCancellation() }
                 self.snapshot = try await store.seal(id: runID)
                 try Task.checkCancellation()
-                Announcer.announce("\(name) is ready. \(self.snapshot?.discovered ?? 0) unheard episodes, oldest first.")
+                Announcer.announce("\(name) is ready. \(self.snapshot?.discovered ?? 0) unplayed episodes, oldest first.")
                 // Confirm the actual count before interrupting current playback.
                 // The status screen supplies Resume folder run for this ready run.
                 if startsPlayback, (self.snapshot?.discovered ?? 0) <= 50 {

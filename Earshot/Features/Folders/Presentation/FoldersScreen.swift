@@ -220,7 +220,7 @@ struct FoldersScreen: View {
                 }
             }
         actions += deleteAction(for: folder)
-        actions.append(QuickActionItem(id: "playUnheardOldestFirst", label: "Play unheard oldest first", isDestructive: false) {
+        actions.append(QuickActionItem(id: "playUnheardOldestFirst", label: "Play unplayed oldest first", isDestructive: false) {
             runFolder = folder
         })
         return actions

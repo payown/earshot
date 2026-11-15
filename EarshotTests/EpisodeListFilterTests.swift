@@ -39,6 +39,15 @@ final class EpisodeListFilterTests: XCTestCase {
         XCTAssertEqual(result.map(\.guid), ["1", "3", "5"])
     }
 
+    func testUnplayedWordingStillIncludesPartlyPlayedEpisode() {
+        let partial = Episode(
+            guid: "partial", title: "Partly played", audioURL: "https://example.com/partial.mp3",
+            positionSeconds: 120
+        )
+        XCTAssertEqual(EpisodeListFilter.unheard.title, "Unplayed")
+        XCTAssertEqual(EpisodeListFilter.unheard.apply(to: [partial]).map(\.guid), ["partial"])
+    }
+
     func testAllIncludesEverything() {
         let list = mixedList()
         let result = EpisodeListFilter.all.apply(to: list)
@@ -63,14 +72,14 @@ final class EpisodeListFilterTests: XCTestCase {
     // MARK: announcement(count:)
 
     func testAnnouncementWording() {
-        XCTAssertEqual(EpisodeListFilter.unheard.announcement(count: 12), "Showing 12 unheard episodes")
+        XCTAssertEqual(EpisodeListFilter.unheard.announcement(count: 12), "Showing 12 unplayed episodes")
         XCTAssertEqual(EpisodeListFilter.all.announcement(count: 316), "Showing all 316 episodes")
     }
 
     func testAnnouncementSingularPlural() {
-        XCTAssertEqual(EpisodeListFilter.unheard.announcement(count: 1), "Showing 1 unheard episode")
+        XCTAssertEqual(EpisodeListFilter.unheard.announcement(count: 1), "Showing 1 unplayed episode")
         XCTAssertEqual(EpisodeListFilter.all.announcement(count: 1), "Showing all 1 episode")
-        XCTAssertEqual(EpisodeListFilter.unheard.announcement(count: 0), "Showing 0 unheard episodes")
+        XCTAssertEqual(EpisodeListFilter.unheard.announcement(count: 0), "Showing 0 unplayed episodes")
     }
 
     // MARK: rawValue round-trip
@@ -84,7 +93,7 @@ final class EpisodeListFilterTests: XCTestCase {
     }
 
     func testTitles() {
-        XCTAssertEqual(EpisodeListFilter.unheard.title, "Unheard")
+        XCTAssertEqual(EpisodeListFilter.unheard.title, "Unplayed")
         XCTAssertEqual(EpisodeListFilter.all.title, "All")
     }
 

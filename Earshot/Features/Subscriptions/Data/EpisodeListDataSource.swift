@@ -39,11 +39,19 @@ final class EpisodeListDataSource {
         )
     }
 
-    func reloadKeepingLoadedLimit(filter: EpisodeListFilter, sort: EpisodeSortOrder, searchText: String) {
+    func reloadKeepingLoadedLimit(
+        filter: EpisodeListFilter,
+        sort: EpisodeSortOrder,
+        searchText: String,
+        insertedEpisodeCount: Int = 0
+    ) {
         load(
             filter: filter, sort: sort, searchText: searchText,
             intervalName: initialIntervalName(searchText),
-            limit: max(Self.pageSize, episodes.count)
+            // An older-feed fetch may insert rows before the current page in
+            // oldest-first order. Include them without evicting rows that were
+            // already visible, including pages loaded with Show 100 more.
+            limit: max(Self.pageSize, episodes.count + max(0, insertedEpisodeCount))
         )
     }
 

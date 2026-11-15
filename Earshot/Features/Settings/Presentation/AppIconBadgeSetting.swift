@@ -7,7 +7,7 @@ struct AppIconBadgeSetting: View {
 
     var body: some View {
         Section {
-            Toggle("Badge downloaded unheard episodes", isOn: Binding(
+            Toggle("Badge downloaded unplayed episodes", isOn: Binding(
                 get: { settings.badgeDownloadedUnheardEpisodes },
                 set: { enabled in
                     message = nil
@@ -32,7 +32,7 @@ struct AppIconBadgeSetting: View {
             ))
             .disabled(requesting)
         } footer: {
-            Text("Shows the number of downloaded unheard episodes on Earshot’s Home Screen icon. This setting applies only to this device.")
+            Text("Shows the number of downloaded unplayed episodes on Earshot’s Home Screen icon. This setting applies only to this device.")
         }
         .alert("Badge unavailable", isPresented: Binding(
             get: { message != nil },

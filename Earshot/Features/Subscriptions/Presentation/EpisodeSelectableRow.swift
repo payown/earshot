@@ -55,6 +55,7 @@ struct EpisodeSelectableRow: View {
             isPlayed: episode.isPlayed,
             pubDate: episode.pubDate,
             downloadState: episode.downloadStatus,
+            audioURL: episode.audioURL,
             isNowPlaying: isNowPlaying,
             details: settings.episodeSpokenDetails
         )
