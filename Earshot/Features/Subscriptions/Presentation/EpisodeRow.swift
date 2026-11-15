@@ -230,6 +230,7 @@ struct EpisodeRow: View {
             // so VoiceOver announces it as part of this one element, not a new
             // stop (#513).
             downloadState: episode.downloadStatus,
+            audioURL: episode.audioURL,
             // "Now Playing" leads the spoken label (Item 2).
             isNowPlaying: isNowPlaying,
             details: settings.episodeSpokenDetails

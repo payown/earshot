@@ -32,7 +32,7 @@ struct FolderRunScreen: View {
                 if let snapshot = run.snapshot {
                     LabeledContent("Status", value: status(snapshot))
                     LabeledContent("Podcasts checked", value: "\(snapshot.checkedPodcasts) of \(snapshot.totalPodcasts)")
-                    LabeledContent("Available unheard episodes found", value: String(snapshot.discovered))
+                    LabeledContent("Available unplayed episodes found", value: String(snapshot.discovered))
                     LabeledContent("Remaining", value: String(snapshot.remaining))
                     LabeledContent("Completed", value: String(snapshot.completed))
                     LabeledContent("Already played or unavailable", value: String(snapshot.skipped + snapshot.unavailableEpisodes))
@@ -53,13 +53,13 @@ struct FolderRunScreen: View {
                 }
             }
             Section {
-                Text("Oldest first across followed podcasts in this folder and its subfolders. Earshot includes stored unheard episodes and older episodes currently exposed by RSS. Publishers may no longer expose their complete archive.")
+                Text("Oldest first across followed podcasts in this folder and its subfolders. Earshot includes stored unplayed episodes and older episodes currently exposed by RSS. Publishers may no longer expose their complete archive.")
                 Text("Your normal Queue stays intact. Preparing a folder run does not automatically download its episodes. Large runs ask you to confirm their count before playback starts.")
                 Text("You can leave this screen while preparation or playback continues. Return using Folder run status in Folders.")
             }
             if let message = run.message { Text(message) }
             if folder?.isDeleted == false {
-                Button("Play unheard oldest first") { requestStart() }
+                Button("Play unplayed oldest first") { requestStart() }
                     .disabled(!run.isConnected || run.isBusy)
             }
             if !run.isConnected {
@@ -89,9 +89,9 @@ struct FolderRunScreen: View {
             }
             Button("Cancel", role: .cancel) { focusedHeading = true }
         } message: {
-            Text("Earshot will check available podcast feeds for older unheard episodes. Your normal Queue is preserved. Episodes will not all be downloaded automatically.")
+            Text("Earshot will check available podcast feeds for older unplayed episodes. Your normal Queue is preserved. Episodes will not all be downloaded automatically.")
         }
-        .alert("Play \(run.snapshot?.remaining ?? 0) unheard episodes from \(run.folderName), oldest first?",
+        .alert("Play \(run.snapshot?.remaining ?? 0) unplayed episodes from \(run.folderName), oldest first?",
                isPresented: $confirmPlayback) {
             Button("Play folder run") { run.resume() }
             Button("Not now", role: .cancel) { focusedHeading = true }
