@@ -590,6 +590,11 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(markPlayed.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(row.isSelected, "The row must expose its selected trait to VoiceOver")
         markPlayed.tap()
+        if row.waitForExistence(timeout: 2) {
+            // With VoiceOver active, a synthesized tap may only move focus to
+            // the action. Activate that same control before judging the result.
+            markPlayed.doubleTap()
+        }
         XCTAssertFalse(row.waitForExistence(timeout: 3), "Played episode should leave Inbox")
     }
 
