@@ -1608,7 +1608,9 @@ actor FeedRefreshActor {
                     dismissed.append(episode)
                     continue
                 }
-                if let cap {
+                // Keep partially played episodes in Inbox and outside the
+                // untouched count cap, matching InboxRepository.applyLimits.
+                if let cap, episode.positionSeconds == 0 {
                     newest.append(episode)
                     newest.sort {
                         let lhs = $0.pubDate ?? .distantPast

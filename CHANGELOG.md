@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Inbox count limits now keep partially played episodes visible in Inbox while limiting untouched episodes. Saved listening positions are unchanged. This also applies after an unchanged feed refresh.
+
 - A second device can recover recently missing podcast episodes after a synced subscription advances its refresh marker. Recovery is bounded and keeps those already-known episodes out of new-episode Inbox and auto-queue actions.
 - Explicit Played and Unplayed changes keep their saved position and original action time when iCloud reconciliation arrives before the change notification; delayed progress cannot undo a newer decision.
 

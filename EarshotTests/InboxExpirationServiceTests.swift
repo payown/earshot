@@ -127,6 +127,28 @@ final class InboxExpirationServiceTests: XCTestCase {
         XCTAssertEqual(InboxRepository(context: ctx).inboxEpisodes().map(\.title), ["Ep new"])
     }
 
+    func testCountLimitKeepsStartedEpisodeWithoutConsumingAnUntouchedSlot() {
+        let ctx = TestStore.freshContext()
+        let p = podcast(ctx, "started-cap")
+        p.inboxMaxEpisodes = 1
+        let started = episode(ctx, "started", podcast: p, pubDate: daysAgo(3))
+        started.positionSeconds = 45
+        let dismissed = episode(ctx, "dismissed", podcast: p,
+                                pubDate: daysAgo(4), dismissed: true)
+        dismissed.positionSeconds = 60
+        episode(ctx, "older", podcast: p, pubDate: daysAgo(2))
+        episode(ctx, "newer", podcast: p, pubDate: daysAgo(1))
+        try? ctx.save()
+
+        InboxRepository(context: ctx).applyLimits(now: now)
+
+        XCTAssertEqual(Set(InboxRepository(context: ctx).inboxEpisodes().map(\.guid)),
+                       Set(["started", "newer"]))
+        XCTAssertEqual(started.positionSeconds, 45)
+        XCTAssertFalse(started.inboxDismissed)
+        XCTAssertTrue(dismissed.inboxDismissed, "A limit must not restore a dismissed episode")
+    }
+
     func testApplyLimitsDismissesByAgeKeepsStarted() {
         let ctx = TestStore.freshContext()
         let p = podcast(ctx, "A")

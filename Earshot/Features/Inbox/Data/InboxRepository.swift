@@ -425,7 +425,10 @@ final class InboxRepository {
 
         if let cap = podcast.inboxMaxEpisodes {
             let remaining = candidates.filter { !$0.inboxDismissed }
-            let dismiss = Set(InboxLogic.idsToDismissForCount(remaining.map(\.persistentModelID), cap: cap))
+            // A started episode keeps its Inbox place, just as it does under
+            // the age limit. It does not consume one of the untouched slots.
+            let untouched = remaining.filter { $0.positionSeconds == 0 }
+            let dismiss = Set(InboxLogic.idsToDismissForCount(untouched.map(\.persistentModelID), cap: cap))
             for episode in remaining where dismiss.contains(episode.persistentModelID) {
                 episode.inboxDismissed = true
             }
