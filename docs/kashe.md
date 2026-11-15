@@ -4160,7 +4160,7 @@ Renata asked if she had found what she wanted. “I found where I left off,” K
 
 Chapter 129 - The episode she could keep
 
-Build 325 was prepared but not distributed; Chapter 130 is its replacement internal candidate.
+Build 325 was prepared but not distributed; Chapter 130 is its replacement TestFlight candidate.
 
 What to try first:
 
@@ -4179,7 +4179,7 @@ Chapter 130 - The next episode, once
 
 What to try first:
 
-1. Update Earshot to internal 1.2.6 (326) in place. Do not delete the app or reset your library. This build replaces the held 325 candidate; it includes its feed-refresh and Played-state fixes plus a Folder Run pause and completion fix. It retains build 324's Watch, iPad, Search, Queue and Partially Played work.
+1. Update Earshot to TestFlight 1.2.6 (326) in place. Do not delete the app or reset your library. This build replaces the held 325 candidate; it includes its feed-refresh and Played-state fixes plus a Folder Run pause and completion fix. It retains build 324's Watch, iPad, Search, Queue and Partially Played work.
 2. On iPhone, play an episode until one to three minutes remain, then mark it Played. Leave and reopen the podcast, quit and reopen Earshot, and check Library's Unplayed and Partially Played filters. It should stay Played. Mark a different episode with a saved position Unplayed; its listening place should remain after sync.
 3. If you have a second signed-in iPhone or iPad, refresh a podcast with a newer episode present on one device but missing on the other. Refresh again after sync. The missing row should appear once. Check that Played, dismissed, downloaded and queued episodes keep their state; recovered old rows should not be automatically added to Inbox, Queue or Downloads.
 4. Start a Library folder run. Near the end of an episode, Pause and quickly Resume, then let it finish; the next episode should be selected once. Try Pause, Resume, Stop after current, Cancel, and starting an unrelated episode. Check the next episode and your ordinary Queue. Report the last spoken title, device, OS and exact steps if audio or progression fails. Four folder-run cases failed on the original iOS 27.2 simulator; this source passes on a second. Physical playback still needs checking.
