@@ -4,18 +4,19 @@ import SwiftData
 
 final class OnboardingContentTests: XCTestCase {
 
-    func testSevenPagesInOrder() {
+    func testTenPagesInOrder() {
         let pages = OnboardingContent.pages
-        XCTAssertEqual(pages.count, 7)
+        XCTAssertEqual(pages.count, 10)
         XCTAssertEqual(pages.first?.title, "Welcome to Earshot")
-        XCTAssertEqual(pages.last?.title, "You're all set")
-        XCTAssertEqual(pages.map(\.id), Array(0..<7))
+        XCTAssertEqual(pages.last?.title, "Ready to listen")
+        XCTAssertEqual(pages.map(\.id), Array(0..<10))
     }
 
     func testExactlyOneAddPodcastPage() {
         let addPages = OnboardingContent.pages.filter(\.isAddPodcast)
         XCTAssertEqual(addPages.count, 1)
         XCTAssertEqual(addPages.first?.title, "Add your first podcast")
+        XCTAssertEqual(addPages.first?.id, 8)
     }
 
     /// The add-podcast page's Next is disabled until a podcast exists, and enabled

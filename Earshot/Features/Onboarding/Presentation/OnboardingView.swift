@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
-/// The seven-screen onboarding flow, shown once on first launch. Same for
+/// The ten-screen onboarding flow, shown once on first launch. Same for
 /// everyone (PRD 6). The "Add your first podcast" page hosts Search/Add/Import,
 /// and the final "Start Listening" is gated on having at least one subscription.
 struct OnboardingView: View {
@@ -34,7 +34,7 @@ struct OnboardingView: View {
                     pageView(page)
                         .tag(page.id)
                         // Paged TabView keeps every page mounted; hide the
-                        // offscreen ones so VoiceOver can't swipe into all seven
+                        // offscreen ones so VoiceOver can't swipe into all ten
                         // as one flattened list. Back/Next is the accessible path.
                         .accessibilityHidden(page.id != pageIndex)
                 }
