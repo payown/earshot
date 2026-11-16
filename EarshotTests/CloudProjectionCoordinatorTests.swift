@@ -720,6 +720,70 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(podcasts[0].autoQueue)
     }
 
+    func testRemoteInboxScopeChangeInvalidatesOpenInboxSnapshot() async throws {
+        let app = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/inbox.xml", title: "Inbox show")
+        let episode = Episode(
+            guid: "inbox-episode",
+            title: "New episode",
+            audioURL: "https://example.com/audio.mp3"
+        )
+        episode.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(episode)
+        try app.mainContext.save()
+        let before = try await InboxSnapshotLoader.all(modelContainer: app, optInOnly: false)
+        XCTAssertEqual(before.ids.count, 1)
+
+        let projection = try makeProjectionContainer()
+        let remote = CloudPodcastProjection()
+        remote.feedURL = podcast.feedURL
+        remote.title = podcast.title
+        remote.createdAt = podcast.createdAt
+        remote.inboxExcluded = true
+        projection.mainContext.insert(remote)
+        try projection.mainContext.save()
+
+        let center = NotificationCenter()
+        let inboxEvents = Mutex(0)
+        let token = center.addObserver(forName: .earshotInboxDidChange, object: nil, queue: nil) { _ in
+            inboxEvents.withLock { $0 += 1 }
+        }
+        defer { center.removeObserver(token) }
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: center,
+            deviceID: "second-device"
+        )
+
+        try await coordinator.reconcile()
+
+        XCTAssertTrue(try XCTUnwrap(app.mainContext.fetch(FetchDescriptor<Podcast>()).first).inboxExcluded)
+        let after = try await InboxSnapshotLoader.all(modelContainer: app, optInOnly: false)
+        XCTAssertEqual(after.ids.count, 0)
+        XCTAssertEqual(inboxEvents.withLock { $0 }, 1,
+                       "Open Inbox must reload when remote podcast scope changes")
+        try await coordinator.reconcile()
+        XCTAssertEqual(inboxEvents.withLock { $0 }, 1,
+                       "Unchanged projection must not cause another Inbox reload")
+
+        remote.inboxExcluded = false
+        remote.inboxIncluded = true
+        try projection.mainContext.save()
+        try await coordinator.reconcile()
+        let included = try await InboxSnapshotLoader.all(modelContainer: app, optInOnly: true)
+        XCTAssertEqual(included.ids.count, 1)
+        XCTAssertEqual(inboxEvents.withLock { $0 }, 2,
+                       "A remote opt-in change must refresh the open Inbox")
+
+        remote.title = "Renamed show"
+        try projection.mainContext.save()
+        try await coordinator.reconcile()
+        XCTAssertEqual(inboxEvents.withLock { $0 }, 2,
+                       "A title-only projection must not reload the Inbox snapshot")
+    }
+
     func testLocalDeletionPersistsTombstoneAndSurvivesCoordinatorRestart() async throws {
         let source = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed.xml", title: "Podcast")
