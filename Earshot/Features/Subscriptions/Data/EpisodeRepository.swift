@@ -149,6 +149,7 @@ final class EpisodeRepository {
     @discardableResult
     private func save(changedEpisodes: [Episode], notifyInbox: Bool = true) -> Bool {
         guard context.hasChanges else { return false }
+        PendingCloudPlayedMutation.stage(changedEpisodes, in: context)
         do {
             try context.save()
             onSave?()
@@ -161,6 +162,7 @@ final class EpisodeRepository {
             )
             return true
         } catch {
+            context.rollback()
             AppLog.data.error("Episode bulk save failed: \(error.localizedDescription, privacy: .public)")
             return false
         }

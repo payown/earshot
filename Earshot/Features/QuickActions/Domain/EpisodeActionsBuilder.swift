@@ -168,6 +168,7 @@ func buildEpisodeActions(
                 // row's neighbor in its visible list (#579).
                 onMarkPlayed?(nowPlayed)
                 episode.isPlayed = nowPlayed
+                PendingCloudPlayedMutation.stage([episode], in: context)
                 episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
                     nowPlayed: nowPlayed, wasDismissed: episode.inboxDismissed
                 )
@@ -182,6 +183,8 @@ func buildEpisodeActions(
                         playedChangedExplicitly: true,
                         inboxDismissedChangedExplicitly: episode.inboxDismissed != wasDismissed
                     )
+                } else {
+                    context.rollback()
                 }
                 // The rotor path's only announcement (#579). The sighted swipe
                 // announces on its own path (InboxScreen.markPlayed) and never

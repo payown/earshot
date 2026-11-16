@@ -23,6 +23,11 @@ final class FolderRunController {
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var currentItem: FolderRunItem?
     @ObservationIgnored private var isAdvancing = false
+    @ObservationIgnored private var unrelatedPlaybackStartedDuringAdvance = false
+#if DEBUG
+    @ObservationIgnored var beforeCompletionAdvanceForTesting: (@MainActor () async -> Void)?
+    @ObservationIgnored var selectedItemForTesting: ((FolderRunIdentity) -> Void)?
+#endif
     @ObservationIgnored private var transportPaused = false
     @ObservationIgnored private var pendingPlayback = false
 
@@ -146,6 +151,11 @@ final class FolderRunController {
         transportPaused = false
         hasPlaybackFailure = false
         pendingPlayback = true
+        unrelatedPlaybackStartedDuringAdvance = false
+        // Completion still owns the durable cursor advance. Let that same
+        // operation select the next item once, rather than racing a second
+        // selectNext against it after a rapid Pause, Resume sequence.
+        if isAdvancing { return }
         perform {
             try await self.selectNext(autoplay: true)
         }
@@ -156,6 +166,10 @@ final class FolderRunController {
         driving = false
         pendingPlayback = false
         transportPaused = true
+        // A completed episode has already been saved as Played. Cancelling its
+        // cursor advance would replay it on Resume. Keep the completion task
+        // owned, and let it persist the cursor before pausing the run.
+        if isAdvancing { return }
         perform {
             guard let id = self.snapshot?.id, let store = self.store else { return }
             let latest = try await store.currentSnapshot()
@@ -188,6 +202,17 @@ final class FolderRunController {
     /// Invoked before a deliberate source switch. Pause, interruption, route
     /// changes and same-item resumes do not destroy or reorder the run.
     func playbackWillStart(_ episode: Episode) {
+        if isAdvancing, identity(episode) != currentItem?.identity {
+            // This deliberate source switch wins over the old folder's
+            // in-flight completion. Let its cursor commit, but never let it
+            // select another folder episode over the new source.
+            unrelatedPlaybackStartedDuringAdvance = true
+            driving = false
+            pendingPlayback = false
+            transportPaused = false
+            currentItem = nil
+            return
+        }
         if transportPaused, identity(episode) == currentItem?.identity, !episode.isPlayed {
             transportPaused = false
             driving = true
@@ -244,20 +269,31 @@ final class FolderRunController {
             return true
         }
         isAdvancing = true
+        unrelatedPlaybackStartedDuringAdvance = false
         perform {
             guard let store = self.store else { throw FolderRunError.missingRun }
+#if DEBUG
+            if let beforeCompletionAdvanceForTesting = self.beforeCompletionAdvanceForTesting {
+                await beforeCompletionAdvanceForTesting()
+            }
+#endif
+            try Task.checkCancellation()
             self.snapshot = try await store.advance(item, disposition: .completed)
             try Task.checkCancellation()
             self.isAdvancing = false
-            if continuePlayback {
-                try await self.selectNext(autoplay: true)
-            } else {
-                self.driving = false
-                self.currentItem = nil
+            let sourceSwitched = self.unrelatedPlaybackStartedDuringAdvance
+            self.unrelatedPlaybackStartedDuringAdvance = false
+            if self.transportPaused || sourceSwitched || !continuePlayback {
                 if let snapshot = self.snapshot, !snapshot.state.isTerminal {
                     self.snapshot = try await store.pause(id: snapshot.id)
                 }
-                self.player?.clearFolderRunPresentation()
+                if !continuePlayback && !sourceSwitched {
+                    self.driving = false
+                    self.currentItem = nil
+                    self.player?.clearFolderRunPresentation()
+                }
+            } else {
+                try await self.selectNext(autoplay: true)
             }
         }
         return true
@@ -292,6 +328,9 @@ final class FolderRunController {
                 driving = true
                 pendingPlayback = false
                 if skipped > 0 { Announcer.announce("Skipped \(skipped) episodes already played or unavailable.") }
+#if DEBUG
+                selectedItemForTesting?(item.identity)
+#endif
                 player?.playFolderRunEpisode(episode, origin: folder().map { .folder($0.persistentModelID) }, autoplay: autoplay)
                 return
             }

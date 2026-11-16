@@ -205,6 +205,14 @@ enum SettingsKey {
         episodeFilterConfigurationPrefix + FeedURLIdentity.canonical(feedURL)
     }
 
+    /// Device-local recovery range when CloudKit advances a subscription's
+    /// high-water mark before its refetchable episode catalog exists here.
+    static let pendingRemoteFeedGapPrefix = "pending_remote_feed_gap_"
+
+    static func pendingRemoteFeedGap(feedURL: String) -> String {
+        pendingRemoteFeedGapPrefix + FeedURLIdentity.canonical(feedURL)
+    }
+
     static let pendingCloudFollowPrefix = "pending_cloud_follow_"
     static let pendingCloudUnfollowPrefix = "pending_cloud_unfollow_"
     /// Device-local restart journal for a subscription learned from an active

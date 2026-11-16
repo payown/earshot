@@ -42,6 +42,32 @@ private actor QueueApplicationRaceGate {
     }
 }
 
+private actor ProjectionRefreshFeed: FeedFetching {
+    let parsed: ParsedFeed
+
+    init(_ parsed: ParsedFeed) { self.parsed = parsed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed { parsed }
+}
+
+private actor ConditionalProjectionRefreshFeed: FeedFetching {
+    let parsed: ParsedFeed
+    private var requests: [Bool] = []
+
+    init(_ parsed: ParsedFeed) { self.parsed = parsed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed { parsed }
+
+    func refresh(_ request: FeedRefreshRequest) async throws -> FeedRefreshFetchResult {
+        requests.append(request.validators != nil)
+        if request.validators != nil { return .notModified(validators: request.validators) }
+        return .modified(parsed, validators: nil)
+    }
+
+    func receivedConditionalRequest() -> Bool { requests.contains(true) }
+    func requestCount() -> Int { requests.count }
+}
+
 @MainActor
 final class CloudProjectionCoordinatorTests: XCTestCase {
     func testProjectionOriginMarkerDistinguishesSelfGeneratedUIEvents() {
@@ -1617,6 +1643,358 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(cloud.lastSeenPubDate, cloudMark)
     }
 
+    func testRemoteFeedMarkDoesNotHideLocallyMissingRecentEpisodes() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/synced-feed.xml"
+        let earlier = Date(timeIntervalSince1970: 1_700_000_000)
+        let missingDate = earlier.addingTimeInterval(60)
+        let remoteMark = earlier.addingTimeInterval(120)
+        let local = Podcast(feedURL: feedURL, title: "Show", lastSeenPubDate: earlier)
+        let saved = Episode(
+            guid: "saved", title: "Saved", audioURL: "https://example.com/saved.mp3",
+            pubDate: earlier
+        )
+        saved.podcast = local
+        saved.positionSeconds = 37
+        saved.inboxDismissed = true
+        let played = Episode(
+            guid: "played", title: "Played", audioURL: "https://example.com/played.mp3",
+            pubDate: earlier.addingTimeInterval(-60)
+        )
+        played.podcast = local
+        played.status = .played
+        played.inboxDismissed = true
+        app.mainContext.insert(local)
+        app.mainContext.insert(saved)
+        app.mainContext.insert(played)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let remote = CloudPodcastProjection()
+        remote.feedURL = feedURL
+        remote.title = "Show"
+        remote.lastSeenPubDate = remoteMark
+        projection.mainContext.insert(remote)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "second-device"
+        )
+        try await coordinator.reconcile()
+        XCTAssertEqual(
+            try ModelContext(app).fetch(FetchDescriptor<Podcast>()).first?.lastSeenPubDate,
+            remoteMark
+        )
+
+        let parsed = ParsedFeed(
+            title: "Show", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil,
+            episodes: [
+                ParsedEpisode(guid: "played", title: "Played", audioURL: "https://example.com/played.mp3",
+                              description: nil, pubDate: earlier.addingTimeInterval(-60), durationSeconds: nil),
+                ParsedEpisode(guid: "saved", title: "Saved", audioURL: "https://example.com/saved.mp3",
+                              description: nil, pubDate: earlier, durationSeconds: nil),
+                ParsedEpisode(guid: "missing", title: "Missing", audioURL: "https://example.com/missing.mp3",
+                              description: nil, pubDate: missingDate, durationSeconds: nil),
+                ParsedEpisode(guid: "remote-latest", title: "Latest", audioURL: "https://example.com/latest.mp3",
+                              description: nil, pubDate: remoteMark, durationSeconds: nil),
+            ]
+        )
+        let feed = ProjectionRefreshFeed(parsed)
+        let first = try await FeedRefreshActor(modelContainer: app).refreshOne(
+            feedURL: feedURL, feed: feed, autoQueueEnabled: true
+        )
+        let rows = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(Set(rows.map(\.guid)), ["played", "saved", "missing", "remote-latest"])
+        XCTAssertEqual(first?.added, 0, "Remote-known rows must not announce as new")
+        XCTAssertTrue(rows.filter { $0.guid == "missing" || $0.guid == "remote-latest" }.allSatisfy(\.inboxDismissed))
+        let preserved = try XCTUnwrap(rows.first { $0.guid == "saved" })
+        XCTAssertFalse(preserved.isPlayed)
+        XCTAssertEqual(preserved.positionSeconds, 37)
+        XCTAssertTrue(try XCTUnwrap(rows.first { $0.guid == "played" }).isPlayed)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<QueueItem>()), 0)
+
+        let again = try await FeedRefreshActor(modelContainer: app).refreshOne(
+            feedURL: feedURL, feed: feed, autoQueueEnabled: true
+        )
+        XCTAssertEqual(again?.added, 0)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Episode>()), 4)
+    }
+
+    func testSingleFeedRecoveryAppliesPreviouslyImportedPlayedState() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/recovered-played.xml"
+        let oldMark = Date(timeIntervalSince1970: 1_700_000_000)
+        let missingDate = oldMark.addingTimeInterval(60)
+        let remoteMark = oldMark.addingTimeInterval(120)
+        let podcast = Podcast(feedURL: feedURL, title: "Show", lastSeenPubDate: oldMark)
+        let known = Episode(
+            guid: "known", title: "Known", audioURL: "https://example.com/known.mp3",
+            pubDate: oldMark
+        )
+        known.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(known)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let remote = CloudPodcastProjection()
+        remote.feedURL = feedURL
+        remote.title = "Show"
+        remote.lastSeenPubDate = remoteMark
+        projection.mainContext.insert(remote)
+        let remotePlayed = CloudEpisodeStateProjection()
+        remotePlayed.feedURL = feedURL
+        remotePlayed.episodeGUID = "missing"
+        remotePlayed.sourceDeviceID = "first-device"
+        remotePlayed.isPlayed = true
+        remotePlayed.playedUpdatedAt = Date.now
+        projection.mainContext.insert(remotePlayed)
+        try projection.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: .default, deviceID: "second-device"
+        )
+        try await coordinator.start()
+        defer { Task { await coordinator.stop() } }
+
+        let parsed = ParsedFeed(
+            title: "Show", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil,
+            episodes: [
+                ParsedEpisode(guid: "known", title: "Known", audioURL: "https://example.com/known.mp3",
+                              description: nil, pubDate: oldMark, durationSeconds: nil),
+                ParsedEpisode(guid: "missing", title: "Missing", audioURL: "https://example.com/missing.mp3",
+                              description: nil, pubDate: missingDate, durationSeconds: nil),
+                ParsedEpisode(guid: "latest", title: "Latest", audioURL: "https://example.com/latest.mp3",
+                              description: nil, pubDate: remoteMark, durationSeconds: nil),
+            ]
+        )
+        let outcome = try await SubscriptionRepository(
+            context: app.mainContext, feed: ProjectionRefreshFeed(parsed)
+        ).refresh(podcast)
+        XCTAssertEqual(outcome.added, 0)
+        XCTAssertEqual(outcome.recoveredLocalCount, 2)
+
+        var recovered: Episode?
+        for _ in 0..<500 {
+            recovered = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+                .first { $0.guid == "missing" }
+            if recovered?.isPlayed == true { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(recovered?.isPlayed == true,
+                      "Single-feed recovery must apply the prior remote Played contribution")
+        XCTAssertTrue(recovered?.inboxDismissed == true)
+        await coordinator.stop()
+    }
+
+    func testRemoteFeedGapRecoversInBoundedBatchesWithSameDateAndOutOfOrderFeed() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/batched-sync.xml"
+        let localMark = Date(timeIntervalSince1970: 1_700_000_000)
+        let remoteMark = localMark.addingTimeInterval(120)
+        let podcast = Podcast(feedURL: feedURL, title: "Batched", lastSeenPubDate: localMark)
+        let existing = Episode(
+            guid: "existing", title: "Existing", audioURL: "https://example.com/existing.mp3",
+            pubDate: localMark
+        )
+        existing.podcast = podcast
+        existing.inboxDismissed = true
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(existing)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let remote = CloudPodcastProjection()
+        remote.feedURL = feedURL
+        remote.title = "Batched"
+        remote.lastSeenPubDate = remoteMark
+        projection.mainContext.insert(remote)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "second-device"
+        )
+        try await coordinator.reconcile()
+
+        let items = (0..<13).reversed().map { index in
+            ParsedEpisode(
+                guid: "missing-\(index)", title: "Missing \(index)",
+                audioURL: "https://example.com/\(index).mp3", description: nil,
+                pubDate: index.isMultiple(of: 2)
+                    ? localMark : localMark.addingTimeInterval(60),
+                durationSeconds: nil
+            )
+        }
+        let parsed = ParsedFeed(
+            title: "Batched", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil,
+            episodes: items + [
+                ParsedEpisode(
+                    guid: "existing", title: "Existing",
+                    audioURL: "https://example.com/existing.mp3", description: nil,
+                    pubDate: localMark, durationSeconds: nil
+                )
+            ]
+        )
+        let feed = ProjectionRefreshFeed(parsed)
+        let refresh = FeedRefreshActor(modelContainer: app)
+        let first = try await refresh.refreshOne(
+            feedURL: feedURL, feed: feed, autoQueueEnabled: true
+        )
+        XCTAssertEqual(first?.added, 0)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Episode>()), 11)
+        XCTAssertNotNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+
+        let second = try await refresh.refreshOne(
+            feedURL: feedURL, feed: feed, autoQueueEnabled: true
+        )
+        XCTAssertEqual(second?.added, 0)
+        let rows = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(rows.count, 14)
+        XCTAssertEqual(Set(rows.map(\.guid)), Set(["existing"] + (0..<13).map { "missing-\($0)" }))
+        XCTAssertTrue(rows.allSatisfy(\.inboxDismissed))
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<QueueItem>()), 0)
+        XCTAssertNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+    }
+
+    func testOrdinaryConditionalRefreshFetchesBodyForPendingRemoteGap() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/conditional-gap.xml"
+        let oldMark = Date(timeIntervalSince1970: 1_700_000_000)
+        let remoteMark = oldMark.addingTimeInterval(60)
+        let podcast = Podcast(feedURL: feedURL, title: "Conditional", lastSeenPubDate: remoteMark)
+        let existing = Episode(
+            guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+            pubDate: oldMark
+        )
+        existing.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(existing)
+        try PendingRemoteFeedGap.recordAdvance(
+            from: oldMark, to: remoteMark, feedURL: feedURL, in: app.mainContext
+        )
+        try FeedRefreshValidatorStore.set(
+            FeedHTTPValidators(etag: "\"previous\"", lastModified: nil, representationURL: nil),
+            feedURL: feedURL, in: app.mainContext
+        )
+        try app.mainContext.save()
+
+        let parsed = ParsedFeed(
+            title: "Conditional", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: [
+                ParsedEpisode(
+                    guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+                    description: nil, pubDate: oldMark, durationSeconds: nil
+                ),
+                ParsedEpisode(
+                    guid: "missing", title: "Missing", audioURL: "https://example.com/new.mp3",
+                    description: nil, pubDate: remoteMark, durationSeconds: nil
+                )
+            ]
+        )
+        let feed = ConditionalProjectionRefreshFeed(parsed)
+        let report = await FeedRefreshActor(modelContainer: app).refreshAllReport(
+            feed: feed, autoQueueEnabled: false, trigger: .backgroundTask,
+            isCancelled: { false }, onProgress: { _, _ in }
+        )
+        XCTAssertEqual(report.failed, 0)
+        XCTAssertEqual(report.results.count, 1)
+        XCTAssertFalse(report.results[0].wasNotModified)
+        let receivedConditionalRequest = await feed.receivedConditionalRequest()
+        let requestCount = await feed.requestCount()
+        XCTAssertFalse(receivedConditionalRequest)
+        XCTAssertEqual(requestCount, 1)
+        let rows = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(Set(rows.map(\.guid)), ["existing", "missing"])
+        XCTAssertEqual(report.results[0].outcome.added, 0)
+    }
+
+    func testTruncatedFeedKeepsRecoveryUntilOlderPageAppears() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/truncated-gap.xml"
+        let oldMark = Date(timeIntervalSince1970: 1_700_000_000)
+        let remoteMark = oldMark.addingTimeInterval(90)
+        let podcast = Podcast(feedURL: feedURL, title: "Truncated", lastSeenPubDate: remoteMark)
+        let existing = Episode(
+            guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+            pubDate: oldMark
+        )
+        existing.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(existing)
+        try PendingRemoteFeedGap.recordAdvance(
+            from: oldMark, to: remoteMark, feedURL: feedURL, in: app.mainContext
+        )
+        try app.mainContext.save()
+        func item(_ guid: String, _ date: Date) -> ParsedEpisode {
+            ParsedEpisode(
+                guid: guid, title: guid, audioURL: "https://example.com/\(guid).mp3",
+                description: nil, pubDate: date, durationSeconds: nil
+            )
+        }
+        func feed(_ items: [ParsedEpisode]) -> ProjectionRefreshFeed {
+            ProjectionRefreshFeed(ParsedFeed(
+                title: "Truncated", artworkURL: nil, description: nil, author: nil,
+                websiteURL: nil, language: nil, category: nil, episodes: items
+            ))
+        }
+        let refresh = FeedRefreshActor(modelContainer: app)
+        let first = try await refresh.refreshOne(
+            feedURL: feedURL, feed: feed([item("recent", remoteMark)]), autoQueueEnabled: false
+        )
+        XCTAssertEqual(first?.added, 0)
+        XCTAssertNotNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+
+        let second = try await refresh.refreshOne(
+            feedURL: feedURL,
+            feed: feed([
+                item("recent", remoteMark), item("older-missing", oldMark.addingTimeInterval(30)),
+                item("existing", oldMark)
+            ]),
+            autoQueueEnabled: false
+        )
+        XCTAssertEqual(second?.added, 0)
+        XCTAssertEqual(Set(try ModelContext(app).fetch(FetchDescriptor<Episode>()).map(\.guid)),
+                       ["existing", "recent", "older-missing"])
+        XCTAssertNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+    }
+
+    func testFutureRemoteMarkKeepsRecoveryJournal() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/future-gap.xml"
+        let oldMark = Date.now.addingTimeInterval(-120)
+        let remoteMark = Date.now.addingTimeInterval(3_600)
+        let podcast = Podcast(feedURL: feedURL, title: "Future", lastSeenPubDate: remoteMark)
+        let existing = Episode(
+            guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+            pubDate: oldMark
+        )
+        existing.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(existing)
+        try PendingRemoteFeedGap.recordAdvance(
+            from: oldMark, to: remoteMark, feedURL: feedURL, in: app.mainContext
+        )
+        try app.mainContext.save()
+        let parsed = ParsedFeed(
+            title: "Future", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: [
+                ParsedEpisode(guid: "existing", title: "Existing", audioURL: "https://example.com/old.mp3",
+                              description: nil, pubDate: oldMark, durationSeconds: nil),
+                ParsedEpisode(guid: "future", title: "Future", audioURL: "https://example.com/future.mp3",
+                              description: nil, pubDate: remoteMark, durationSeconds: nil)
+            ]
+        )
+        _ = try await FeedRefreshActor(modelContainer: app).refreshOne(
+            feedURL: feedURL, feed: ProjectionRefreshFeed(parsed), autoQueueEnabled: false
+        )
+        XCTAssertNotNil(try PendingRemoteFeedGap.range(feedURL: feedURL, in: ModelContext(app)))
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Episode>()), 1)
+    }
+
     func testPublishingLegacyDuplicateLocalFeedURLsDoesNotTrap() async throws {
         let app = try makeApplicationContainer()
         app.mainContext.insert(Podcast(
@@ -1989,6 +2367,227 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try await coordinator.reconcile()
 
         XCTAssertTrue(try XCTUnwrap(applicationEpisode(in: app)).isPlayed)
+    }
+
+    func testExplicitLocalPlayedSaveSurvivesReconciliationBeforeNotificationPublishes() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 2_400)
+        let projection = try makeProjectionContainer()
+        let staleOwnRow = episodeStateRow(
+            device: "phone", position: 2_400,
+            updatedAt: Date.now.addingTimeInterval(-60).timeIntervalSince1970
+        )
+        projection.mainContext.insert(staleOwnRow)
+        try projection.mainContext.save()
+
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        XCTAssertTrue(QueueRepository(context: app.mainContext).markPlayedAndRemove(episode))
+        XCTAssertTrue(episode.isPlayed)
+        XCTAssertNotNil(episode.playedAt)
+        // A projection import can reach reconciliation before the asynchronous
+        // explicit-action notification writes the new own-device contribution.
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let stored = try XCTUnwrap(ModelContext(app).fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertTrue(stored.isPlayed, "An old own-device projection must not undo a manual completion")
+        XCTAssertTrue(stored.inboxDismissed)
+        XCTAssertEqual(stored.positionSeconds, 2_400,
+                       "Manual Played must preserve the saved checkpoint")
+        XCTAssertTrue(try PendingCloudPlayedMutation.records(in: ModelContext(app)).isEmpty)
+        let own = try XCTUnwrap(
+            ModelContext(projection).fetch(FetchDescriptor<CloudEpisodeStateProjection>()).first
+        )
+        XCTAssertTrue(own.isPlayed)
+    }
+
+    func testNewerRemoteUnplayedActionCanOverridePendingLocalPlayedAction() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 2_400)
+        let projection = try makeProjectionContainer()
+        let own = episodeStateRow(
+            device: "phone", position: 2_400,
+            updatedAt: Date.now.addingTimeInterval(-60).timeIntervalSince1970
+        )
+        projection.mainContext.insert(own)
+        try projection.mainContext.save()
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        XCTAssertTrue(QueueRepository(context: app.mainContext).markPlayedAndRemove(episode))
+
+        let newer = episodeStateRow(
+            device: "mac", position: 37,
+            updatedAt: Date.now.addingTimeInterval(60).timeIntervalSince1970
+        )
+        newer.isPlayed = false
+        newer.positionResetAt = newer.positionUpdatedAt
+        projection.mainContext.insert(newer)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let stored = try XCTUnwrap(ModelContext(app).fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertFalse(stored.isPlayed, "A later explicit remote Unplayed action must remain authoritative")
+        XCTAssertEqual(stored.positionSeconds, 37, "An old completion reset must not erase newer remote progress")
+        XCTAssertTrue(try PendingCloudPlayedMutation.records(in: ModelContext(app)).isEmpty)
+    }
+
+    func testPendingPlayedActionPublishesWhenCatalogRowIsTemporarilyMissing() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 2_400)
+        let projection = try makeProjectionContainer()
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        PendingCloudPlayedMutation.stage([episode], played: true, in: app.mainContext)
+        try app.mainContext.save()
+        app.mainContext.delete(episode)
+        try app.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let row = try XCTUnwrap(
+            ModelContext(projection).fetch(FetchDescriptor<CloudEpisodeStateProjection>()).first
+        )
+        XCTAssertTrue(row.isPlayed)
+        XCTAssertEqual(row.positionSeconds, 2_400,
+                       "The journal carries the saved place even without the catalog row")
+        XCTAssertTrue(try PendingCloudPlayedMutation.records(in: ModelContext(app)).isEmpty)
+    }
+
+    func testDelayedOlderPositionSnapshotCannotRewindNewerProjection() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 10)
+        let projection = try makeProjectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        let older = try XCTUnwrap(EpisodeUserStateSnapshot(
+            episode: episode, positionSeconds: 50
+        ))
+        let newer = try XCTUnwrap(EpisodeUserStateSnapshot(
+            episode: episode, positionSeconds: 100
+        ))
+        try await coordinator.publishLocalEpisodeStateChanges(
+            snapshots: [newer], now: Date(timeIntervalSince1970: 200)
+        )
+        try await coordinator.publishLocalEpisodeStateChanges(
+            snapshots: [older], now: Date(timeIntervalSince1970: 100)
+        )
+
+        let row = try XCTUnwrap(
+            ModelContext(projection).fetch(FetchDescriptor<CloudEpisodeStateProjection>()).first
+        )
+        XCTAssertEqual(row.positionSeconds, 100)
+        XCTAssertEqual(row.positionUpdatedAt, Date(timeIntervalSince1970: 200))
+        XCTAssertNil(row.positionResetAt)
+    }
+
+    func testPendingUnplayedActionKeepsNonzeroSavedPosition() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 2_400)
+        let projection = try makeProjectionContainer()
+        let own = episodeStateRow(
+            device: "phone", position: 0,
+            updatedAt: Date.now.addingTimeInterval(-60).timeIntervalSince1970
+        )
+        own.isPlayed = true
+        projection.mainContext.insert(own)
+        try projection.mainContext.save()
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        episode.isPlayed = false
+        PendingCloudPlayedMutation.stage([episode], played: false, in: app.mainContext)
+        try app.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let stored = try XCTUnwrap(ModelContext(app).fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertFalse(stored.isPlayed)
+        XCTAssertEqual(stored.positionSeconds, 2_400)
+    }
+
+    func testDelayedCompletionCannotResetNewerOwnDevicePosition() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let projection = try makeProjectionContainer()
+        let now = Date.now
+        let own = episodeStateRow(
+            device: "phone", position: 45,
+            updatedAt: now.addingTimeInterval(60).timeIntervalSince1970
+        )
+        own.playedUpdatedAt = now.addingTimeInterval(-60)
+        projection.mainContext.insert(own)
+        try projection.mainContext.save()
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        episode.isPlayed = true
+        PendingCloudPlayedMutation.stage(
+            [episode], played: true, eventDate: now, in: app.mainContext
+        )
+        try app.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let stored = try XCTUnwrap(ModelContext(app).fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertTrue(stored.isPlayed)
+        XCTAssertEqual(stored.positionSeconds, 45)
+        let row = try XCTUnwrap(
+            ModelContext(projection).fetch(FetchDescriptor<CloudEpisodeStateProjection>()).first
+        )
+        XCTAssertNil(row.positionResetAt)
+    }
+
+    func testPendingPlayedBacklogPublishesAcrossBoundedBatches() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let projection = try makeProjectionContainer()
+        let podcast = try XCTUnwrap(app.mainContext.fetch(FetchDescriptor<Podcast>()).first)
+        let staleTime = Date.now.addingTimeInterval(-60).timeIntervalSince1970
+        var episodes: [Episode] = []
+        for index in 0..<120 {
+            let guid = "pending-\(index)"
+            let episode = Episode(
+                guid: guid, title: guid, audioURL: "https://example.com/\(guid).mp3"
+            )
+            episode.podcast = podcast
+            episode.isPlayed = true
+            episode.positionSeconds = index + 1
+            app.mainContext.insert(episode)
+            episodes.append(episode)
+
+            let row = episodeStateRow(
+                device: "phone", position: index + 1, updatedAt: staleTime
+            )
+            row.episodeGUID = guid
+            projection.mainContext.insert(row)
+        }
+        PendingCloudPlayedMutation.stage(Array(episodes[0..<60]), in: app.mainContext)
+        PendingCloudPlayedMutation.stage(Array(episodes[60..<120]), in: app.mainContext)
+        try app.mainContext.save()
+        try projection.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let rows = try ModelContext(projection).fetch(
+            FetchDescriptor<CloudEpisodeStateProjection>()
+        ).filter { $0.episodeGUID.hasPrefix("pending-") }
+        XCTAssertEqual(rows.count, 120)
+        XCTAssertTrue(rows.allSatisfy(\.isPlayed))
+        XCTAssertEqual(rows.first(where: { $0.episodeGUID == "pending-119" })?.positionSeconds, 120)
+        XCTAssertTrue(try PendingCloudPlayedMutation.records(in: ModelContext(app)).isEmpty)
     }
 
     func testExplicitMarkUnplayedCanOverrideNewerPlayedState() async throws {

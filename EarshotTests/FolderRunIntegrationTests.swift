@@ -194,6 +194,186 @@ final class FolderRunIntegrationTests: XCTestCase {
         await run.release()
     }
 
+    func testRapidPauseResumeDuringCompletionAdvancesOnce() async throws {
+        let (context, folder, podcast, _) = try fixture()
+        let first = episode("first", podcast: podcast, context: context, age: 900)
+        _ = episode("second", podcast: podcast, context: context, age: 700)
+        try context.save()
+        let store = try await FolderRunStore.open()
+        let player = PlayerService()
+        player.configure(context: context)
+        let run = player.folderRuns
+        await run.connect(context: context, player: player, testStore: store)
+        run.start(folder: folder, replacing: nil, feed: FolderRunTestFeed(), startsPlayback: false)
+        await run.waitForOperationForTesting()
+        run.resume()
+        await run.waitForOperationForTesting()
+        var selectedGUIDs: [String] = []
+        run.selectedItemForTesting = { selectedGUIDs.append($0.guid) }
+
+        let enteredAdvance = expectation(description: "completion entered durable advance")
+        var releaseAdvance: CheckedContinuation<Void, Never>?
+        run.beforeCompletionAdvanceForTesting = {
+            await withCheckedContinuation { continuation in
+                releaseAdvance = continuation
+                enteredAdvance.fulfill()
+            }
+        }
+        XCTAssertTrue(run.completeCurrent(first, continuePlayback: true))
+        await fulfillment(of: [enteredAdvance], timeout: 2)
+        player.pause()
+        player.resume()
+        releaseAdvance?.resume()
+        releaseAdvance = nil
+        await run.waitForOperationForTesting()
+
+        let saved = try await store.currentSnapshot()
+        XCTAssertEqual(saved?.cursor, 1)
+        XCTAssertEqual(saved?.completed, 1)
+        XCTAssertEqual(selectedGUIDs, ["second"])
+        XCTAssertEqual(saved?.state, .playing)
+        run.beforeCompletionAdvanceForTesting = nil
+        run.selectedItemForTesting = nil
+        player.stopAndUnload()
+        await run.release()
+    }
+
+    func testPauseThenCancelDuringCompletionCannotStartNext() async throws {
+        let (context, folder, podcast, _) = try fixture()
+        let first = episode("first", podcast: podcast, context: context, age: 900)
+        _ = episode("second", podcast: podcast, context: context, age: 700)
+        try context.save()
+        let store = try await FolderRunStore.open()
+        let player = PlayerService()
+        player.configure(context: context)
+        let run = player.folderRuns
+        await run.connect(context: context, player: player, testStore: store)
+        run.start(folder: folder, replacing: nil, feed: FolderRunTestFeed(), startsPlayback: false)
+        await run.waitForOperationForTesting()
+        run.resume()
+        await run.waitForOperationForTesting()
+        var selectedGUIDs: [String] = []
+        run.selectedItemForTesting = { selectedGUIDs.append($0.guid) }
+
+        let enteredAdvance = expectation(description: "completion entered durable advance")
+        var releaseAdvance: CheckedContinuation<Void, Never>?
+        run.beforeCompletionAdvanceForTesting = {
+            await withCheckedContinuation { continuation in
+                releaseAdvance = continuation
+                enteredAdvance.fulfill()
+            }
+        }
+        XCTAssertTrue(run.completeCurrent(first, continuePlayback: true))
+        await fulfillment(of: [enteredAdvance], timeout: 2)
+        player.pause()
+        run.cancel()
+        releaseAdvance?.resume()
+        releaseAdvance = nil
+        await run.waitForOperationForTesting()
+
+        let saved = try await store.currentSnapshot()
+        XCTAssertEqual(saved?.state, .cancelled)
+        XCTAssertTrue(selectedGUIDs.isEmpty)
+        XCTAssertFalse(player.isPlaying)
+        run.beforeCompletionAdvanceForTesting = nil
+        run.selectedItemForTesting = nil
+        player.stopAndUnload()
+        await run.release()
+    }
+
+    func testRapidResumeCannotOverrideStopAfterCurrentCompletion() async throws {
+        let (context, folder, podcast, _) = try fixture()
+        let first = episode("first", podcast: podcast, context: context, age: 900)
+        _ = episode("second", podcast: podcast, context: context, age: 700)
+        try context.save()
+        let store = try await FolderRunStore.open()
+        let player = PlayerService()
+        player.configure(context: context)
+        let run = player.folderRuns
+        await run.connect(context: context, player: player, testStore: store)
+        run.start(folder: folder, replacing: nil, feed: FolderRunTestFeed(), startsPlayback: false)
+        await run.waitForOperationForTesting()
+        run.resume()
+        await run.waitForOperationForTesting()
+        var selectedGUIDs: [String] = []
+        run.selectedItemForTesting = { selectedGUIDs.append($0.guid) }
+
+        let enteredAdvance = expectation(description: "completion entered durable advance")
+        var releaseAdvance: CheckedContinuation<Void, Never>?
+        run.beforeCompletionAdvanceForTesting = {
+            await withCheckedContinuation { continuation in
+                releaseAdvance = continuation
+                enteredAdvance.fulfill()
+            }
+        }
+        XCTAssertTrue(run.completeCurrent(first, continuePlayback: false))
+        await fulfillment(of: [enteredAdvance], timeout: 2)
+        player.pause()
+        player.resume()
+        releaseAdvance?.resume()
+        releaseAdvance = nil
+        await run.waitForOperationForTesting()
+
+        let saved = try await store.currentSnapshot()
+        XCTAssertEqual(saved?.cursor, 1)
+        XCTAssertEqual(saved?.completed, 1)
+        XCTAssertEqual(saved?.state, .paused)
+        XCTAssertTrue(selectedGUIDs.isEmpty)
+        XCTAssertFalse(player.isPlaying)
+        run.beforeCompletionAdvanceForTesting = nil
+        run.selectedItemForTesting = nil
+        player.stopAndUnload()
+        await run.release()
+    }
+
+    func testUnrelatedPlaybackDuringCompletionCannotBeOvertaken() async throws {
+        let (context, folder, podcast, _) = try fixture()
+        let first = episode("first", podcast: podcast, context: context, age: 900)
+        _ = episode("second", podcast: podcast, context: context, age: 700)
+        let otherPodcast = Podcast(feedURL: "https://unrelated.example/feed", title: "Unrelated")
+        context.insert(otherPodcast)
+        let unrelated = episode("unrelated", podcast: otherPodcast, context: context, age: 500)
+        try context.save()
+        let store = try await FolderRunStore.open()
+        let player = PlayerService()
+        player.configure(context: context)
+        let run = player.folderRuns
+        await run.connect(context: context, player: player, testStore: store)
+        run.start(folder: folder, replacing: nil, feed: FolderRunTestFeed(), startsPlayback: false)
+        await run.waitForOperationForTesting()
+        run.resume()
+        await run.waitForOperationForTesting()
+        var selectedGUIDs: [String] = []
+        run.selectedItemForTesting = { selectedGUIDs.append($0.guid) }
+
+        let enteredAdvance = expectation(description: "completion entered durable advance")
+        var releaseAdvance: CheckedContinuation<Void, Never>?
+        run.beforeCompletionAdvanceForTesting = {
+            await withCheckedContinuation { continuation in
+                releaseAdvance = continuation
+                enteredAdvance.fulfill()
+            }
+        }
+        XCTAssertTrue(run.completeCurrent(first, continuePlayback: true))
+        await fulfillment(of: [enteredAdvance], timeout: 2)
+        player.pause()
+        player.play(unrelated)
+        releaseAdvance?.resume()
+        releaseAdvance = nil
+        await run.waitForOperationForTesting()
+
+        let saved = try await store.currentSnapshot()
+        XCTAssertEqual(saved?.cursor, 1)
+        XCTAssertEqual(saved?.completed, 1)
+        XCTAssertEqual(saved?.state, .paused)
+        XCTAssertTrue(selectedGUIDs.isEmpty)
+        XCTAssertEqual(player.nowPlayingEpisode?.guid, "unrelated")
+        run.beforeCompletionAdvanceForTesting = nil
+        run.selectedItemForTesting = nil
+        player.stopAndUnload()
+        await run.release()
+    }
+
     func testReleaseCancelsInFlightPreparationAndLeavesNoPlayablePartialRun() async throws {
         let (context, folder, _, _) = try fixture()
         let player = PlayerService()

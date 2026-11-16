@@ -676,6 +676,7 @@ final class QueueRepository {
             $0.persistentModelID == episode.persistentModelID
         }
         let episodeToMark = queuedEpisode ?? episode
+        PendingCloudPlayedMutation.stage([episodeToMark], played: true, in: context)
         let mutate: (Episode) -> Void = {
             $0.isPlayed = true
             $0.inboxDismissed = true

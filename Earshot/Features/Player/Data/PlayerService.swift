@@ -3051,12 +3051,18 @@ final class PlayerService {
         episode.isPlayed = true
         episode.positionSeconds = 0
         currentPositionSeconds = 0
+        if let context {
+            PendingCloudPlayedMutation.stage([episode], played: true, in: context)
+        }
         // Auto-delete the download once played, when the user opted in. Uses the
         // player's own context so it lands in the same saveContext() below.
         if let context {
             DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
         }
-        saveContext()
+        guard saveContext(publishEpisodeSnapshot: false) else {
+            context?.rollback()
+            return
+        }
         publishCurrentPlaybackHandoff()
         postEpisodeUserStateChanges([episode], playedChangedExplicitly: true)
         // The finished episode just left the inbox — refresh the tab badge
@@ -3081,12 +3087,12 @@ final class PlayerService {
     }
 
     @discardableResult
-    private func saveContext() -> Bool {
+    private func saveContext(publishEpisodeSnapshot: Bool = true) -> Bool {
         guard let context else { return false }
         guard context.hasChanges else { return true }
         do {
             try context.save()
-            if let currentEpisode {
+            if publishEpisodeSnapshot, let currentEpisode {
                 // The five-second tick lives in UserDefaults, so the Episode row
                 // can be intentionally stale during playback. Never let an
                 // unrelated context save publish that stale value as an explicit

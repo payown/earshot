@@ -90,6 +90,70 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(report.results.reduce(0) { $0 + $1.outcome.inboxDismissedEpisodeIDs.count }, 10)
     }
 
+    func testUnchangedRefreshCountCapKeepsStartedEpisodeAndNewestUntouched() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = ModelContext(container)
+        let now = Date.now
+        let podcast = Podcast(feedURL: "https://example.com/started-cap", title: "Started cap",
+                              lastSeenPubDate: now)
+        podcast.inboxMaxEpisodes = 1
+        context.insert(podcast)
+        for (guid, hours, position) in [("started", 72, 120), ("older", 48, 0), ("newer", 24, 0)] {
+            let episode = Episode(guid: guid, title: guid,
+                                  audioURL: "https://example.com/\(guid).mp3",
+                                  pubDate: now.addingTimeInterval(-Double(hours) * 3_600))
+            episode.podcast = podcast
+            episode.positionSeconds = position
+            context.insert(episode)
+        }
+        try context.save()
+
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: NotModifiedFeed(validators: FeedHTTPValidators(etag: nil, lastModified: nil,
+                                                                 representationURL: nil)),
+            autoQueueEnabled: false, isCancelled: { false }, onProgress: { _, _ in })
+
+        XCTAssertEqual(report.failed, 0)
+        let rows = try ModelContext(container).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(Set(rows.filter { !$0.inboxDismissed }.map(\.guid)), Set(["started", "newer"]))
+        XCTAssertEqual(rows.first { $0.guid == "started" }?.positionSeconds, 120)
+    }
+
+    func testCountCapKeepsStartedEpisodeOnLaterGUIDPage() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = ModelContext(container)
+        let now = Date.now
+        let podcast = Podcast(feedURL: "https://example.com/paged-started-cap", title: "Paged cap",
+                              lastSeenPubDate: now)
+        podcast.inboxMaxEpisodes = 1
+        context.insert(podcast)
+        for index in 0..<105 {
+            let guid = String(format: "e-%03d", index)
+            let episode = Episode(guid: guid, title: guid,
+                                  audioURL: "https://example.com/\(guid).mp3",
+                                  pubDate: now.addingTimeInterval(-Double(24 + index) * 3_600))
+            episode.podcast = podcast
+            context.insert(episode)
+        }
+        let started = Episode(guid: "z-started", title: "Started",
+                              audioURL: "https://example.com/started.mp3",
+                              pubDate: now.addingTimeInterval(-200 * 3_600))
+        started.podcast = podcast
+        started.positionSeconds = 90
+        context.insert(started)
+        try context.save()
+
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: NotModifiedFeed(validators: FeedHTTPValidators(etag: nil, lastModified: nil,
+                                                                 representationURL: nil)),
+            autoQueueEnabled: false, isCancelled: { false }, onProgress: { _, _ in })
+
+        XCTAssertEqual(report.failed, 0)
+        let rows = try ModelContext(container).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(Set(rows.filter { !$0.inboxDismissed }.map(\.guid)), Set(["e-000", "z-started"]))
+        XCTAssertEqual(rows.first { $0.guid == "z-started" }?.positionSeconds, 90)
+    }
+
 
     func testRefreshDiagnosticErrorDetailsNeverIncludeDomainsDescriptionsOrTokens() {
         let secret = "subscriber-secret-token"
