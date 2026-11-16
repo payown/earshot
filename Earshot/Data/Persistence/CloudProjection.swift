@@ -256,11 +256,6 @@ actor CloudProjectionCoordinator: ModelActor {
         let lastSeenPubDate: Date?
     }
 
-    private struct RemoteSubscriptionApplyResult {
-        let changed: Bool
-        let inboxScopeChanged: Bool
-    }
-
     private func inboxScopeDiffers(_ old: PodcastValue, _ new: PodcastValue) -> Bool {
         old.inboxIncluded != new.inboxIncluded
             || old.inboxExcluded != new.inboxExcluded
@@ -1053,7 +1048,7 @@ actor CloudProjectionCoordinator: ModelActor {
     /// authority and is never retimestamped as a local Follow.
     private func applyRemoteActiveSubscription(
         feedURL: String
-    ) async throws -> RemoteSubscriptionApplyResult {
+    ) async throws -> Bool {
         let feed = FeedURLIdentity.canonical(feedURL)
         await PodcastIdentityWriteGate.shared.acquire(feedURLs: [feed])
         do {
@@ -1070,16 +1065,16 @@ actor CloudProjectionCoordinator: ModelActor {
 
     private func applyRemoteActiveSubscriptionWhileLocked(
         feedURL feed: String
-    ) throws -> RemoteSubscriptionApplyResult {
+    ) throws -> Bool {
         refreshContextsFromStore()
         guard let remote = try projectionContext
             .fetch(FetchDescriptor<CloudPodcastProjection>())
             .filter({ FeedURLIdentity.canonical($0.feedURL) == feed })
             .sorted(by: Self.projectionOrder)
             .first,
-            remote.deletedAt == nil else { return .init(changed: false, inboxScopeChanged: false) }
+            remote.deletedAt == nil else { return false }
         guard try !PendingCloudUnfollowIntent.feedURLs(in: modelContext).contains(feed) else {
-            return .init(changed: false, inboxScopeChanged: false)
+            return false
         }
 
         // Destructive duplicate repair retains its established pre-delete
@@ -1111,11 +1106,12 @@ actor CloudProjectionCoordinator: ModelActor {
         }
         let changed = existing == nil || wasCatalogOnly || before != value(podcast)
         if modelContext.hasChanges { try remoteSubscriptionSave(modelContext) }
-        return .init(
-            changed: changed,
-            inboxScopeChanged: existing == nil || wasCatalogOnly
-                || inboxScopeDiffers(before, value(podcast))
-        )
+        // This feed's scope has already been saved. Notify before another feed
+        // can fail or reconciliation can stop; a retry would see no diff.
+        if existing == nil || wasCatalogOnly || inboxScopeDiffers(before, value(podcast)) {
+            postProjectionChange(.earshotInboxDidChange)
+        }
+        return changed
     }
 
     /// Applies remote subscriptions before projecting local subscriptions. An
@@ -1154,11 +1150,9 @@ actor CloudProjectionCoordinator: ModelActor {
             activeRemoteFeeds = feeds.sorted()
         }
         var applicationChanged = false
-        var inboxScopeChanged = false
         for feedURL in activeRemoteFeeds {
-            let result = try await applyRemoteActiveSubscription(feedURL: feedURL)
-            applicationChanged = result.changed || applicationChanged
-            inboxScopeChanged = result.inboxScopeChanged || inboxScopeChanged
+            applicationChanged = try await applyRemoteActiveSubscription(feedURL: feedURL)
+                || applicationChanged
             try Task.checkCancellation()
             guard !isStopped else { return }
         }
@@ -1177,6 +1171,7 @@ actor CloudProjectionCoordinator: ModelActor {
             for: Array(cloudByFeed.keys)
         )
         let pendingFollowFeeds = try pendingFollowFeedURLs(appContext)
+        var inboxScopeChanged = false
         for row in cloudByFeed.values.sorted(by: Self.projectionOrder) {
             let key = FeedURLIdentity.canonical(row.feedURL)
             if row.deletedAt != nil {
@@ -1190,7 +1185,6 @@ actor CloudProjectionCoordinator: ModelActor {
                         let removed = SubscriptionDeletionRepository(context: appContext)
                             .unsubscribe(podcast)
                         applicationChanged = removed || applicationChanged
-                        inboxScopeChanged = removed || inboxScopeChanged
                     } else {
                         scheduleRemotePodcastDeletion(podcast, feedURL: row.feedURL)
                         applicationChanged = true
@@ -1226,6 +1220,9 @@ actor CloudProjectionCoordinator: ModelActor {
         if appContext.hasChanges {
             try appContext.save()
             applicationChanged = true
+        }
+        if inboxScopeChanged {
+            postProjectionChange(.earshotInboxDidChange)
         }
 
         let podcasts = try podcastIdentity.allScalarPodcasts()
@@ -1289,10 +1286,7 @@ actor CloudProjectionCoordinator: ModelActor {
             cloudContext: cloudContext
         )
         applicationChanged = episodeChanged || applicationChanged
-        // The Inbox keeps an event-driven candidate snapshot. Remote podcast
-        // inclusion or limit changes can alter its membership without changing
-        // any Episode row, so invalidate that snapshot after the durable save.
-        if episodeChanged || inboxScopeChanged {
+        if episodeChanged {
             postProjectionChange(.earshotInboxDidChange)
         }
         try publishLocalQueueChanges(now: .now, onlyIfCloudEmpty: true)
@@ -1411,7 +1405,6 @@ actor CloudProjectionCoordinator: ModelActor {
         if modelContext.hasChanges { try? modelContext.save() }
         isApplyingRemote = false
         if changed || removedOrphans {
-            postProjectionChange(.earshotInboxDidChange)
             center.post(name: .earshotCloudProjectionDidApply, object: nil)
         }
     }

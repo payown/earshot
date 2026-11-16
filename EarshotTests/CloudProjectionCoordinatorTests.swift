@@ -782,6 +782,97 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try await coordinator.reconcile()
         XCTAssertEqual(inboxEvents.withLock { $0 }, 2,
                        "A title-only projection must not reload the Inbox snapshot")
+
+        remote.inboxMaxEpisodes = 1
+        try projection.mainContext.save()
+        try await coordinator.reconcile()
+        XCTAssertEqual(inboxEvents.withLock { $0 }, 3,
+                       "A synced count limit must refresh the open Inbox")
+        remote.inboxAgeLimitHours = 24
+        try projection.mainContext.save()
+        try await coordinator.reconcile()
+        XCTAssertEqual(inboxEvents.withLock { $0 }, 4,
+                       "A synced age limit must refresh the open Inbox")
+    }
+
+    func testSavedRemoteInboxScopeStillNotifiesWhenLaterFeedFails() async throws {
+        enum Injected: Error { case laterSave }
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        for name in ["a", "z"] {
+            let feedURL = "https://example.com/\(name).xml"
+            app.mainContext.insert(Podcast(feedURL: feedURL, title: name))
+            let remote = CloudPodcastProjection()
+            remote.feedURL = feedURL
+            remote.title = name
+            remote.inboxExcluded = true
+            projection.mainContext.insert(remote)
+        }
+        try app.mainContext.save()
+        try projection.mainContext.save()
+
+        let center = NotificationCenter()
+        let inboxEvents = Mutex(0)
+        let token = center.addObserver(forName: .earshotInboxDidChange, object: nil, queue: nil) { _ in
+            inboxEvents.withLock { $0 += 1 }
+        }
+        defer { center.removeObserver(token) }
+        let saves = Mutex(0)
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, center: center,
+            remoteSubscriptionSave: { context in
+                let count = saves.withLock { value in
+                    value += 1
+                    return value
+                }
+                if count == 2 { throw Injected.laterSave }
+                try context.save()
+            }
+        )
+        do {
+            try await coordinator.reconcile()
+            XCTFail("The later feed should fail after the first scope was saved")
+        } catch Injected.laterSave { }
+
+        let fresh = ModelContext(app)
+        let first = try XCTUnwrap(
+            PodcastIdentityService(context: fresh).existingFollowed(
+                feedURL: "https://example.com/a.xml"
+            )
+        )
+        XCTAssertTrue(first.inboxExcluded)
+        XCTAssertEqual(inboxEvents.withLock { $0 }, 1,
+                       "A later failure must not strand the saved scope in an open Inbox")
+    }
+
+    func testRemoteUnfollowPostsOneInboxInvalidationAfterCascade() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 30)
+        let projection = try makeProjectionContainer()
+        let tombstone = CloudPodcastProjection()
+        tombstone.feedURL = "https://example.com/feed"
+        tombstone.title = "Show"
+        tombstone.deletedAt = Date.distantFuture
+        tombstone.modifiedAt = Date.distantFuture
+        tombstone.sourceDeviceID = "mac"
+        projection.mainContext.insert(tombstone)
+        try projection.mainContext.save()
+
+        // Unsubscribe publishes through NotificationCenter.default, so the
+        // production center is required to detect a duplicate coordinator post.
+        let inboxEvents = Mutex(0)
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotInboxDidChange, object: nil, queue: nil
+        ) { _ in
+            inboxEvents.withLock { $0 += 1 }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        try await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            deviceID: "phone"
+        ).reconcile()
+
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Podcast>()), 0)
+        XCTAssertEqual(inboxEvents.withLock { $0 }, 1)
     }
 
     func testLocalDeletionPersistsTombstoneAndSurvivesCoordinatorRestart() async throws {
