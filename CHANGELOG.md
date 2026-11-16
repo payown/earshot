@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Inbox batch actions count only selected episodes still visible in the current Inbox; a refresh removing a selected row no longer leaves an enabled action that does nothing.
 - An open Inbox refreshes when iCloud changes a podcast's Inbox inclusion or limits, without changing episode dismissals or listening progress.
 
 - Inbox count limits now keep partially played episodes visible in Inbox while limiting untouched episodes. Saved listening positions are unchanged. This also applies after an unchanged feed refresh.

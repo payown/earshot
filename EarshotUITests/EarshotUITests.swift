@@ -516,6 +516,31 @@ final class EarshotUITests: XCTestCase {
                        "Each Inbox episode should be one VoiceOver stop: \(speech)")
     }
 
+    func testInboxBatchCountDropsWhenSelectedEpisodeLeavesInbox() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
+                               "-inboxSelectionRefreshTest"]
+        app.launch()
+        app.buttons["Inbox"].firstMatch.tap()
+
+        let title = "#169 – Apple's Price Hikes"
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Select"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 5))
+        row.tap()
+
+        let staleAction = app.buttons["Mark 1 episode as played"].firstMatch
+        XCTAssertTrue(staleAction.waitForExistence(timeout: 5))
+        app.buttons["Simulate Inbox update"].firstMatch.tap()
+        XCTAssertFalse(row.waitForExistence(timeout: 3), "The selected episode left the Inbox")
+        XCTAssertFalse(staleAction.exists,
+                       "The batch bar must not claim a removed episode remains actionable")
+        let noSelection = app.buttons["Mark as played"].firstMatch
+        XCTAssertTrue(noSelection.waitForExistence(timeout: 5))
+        XCTAssertFalse(noSelection.isEnabled, "An empty Inbox selection must not offer a no-op action")
+    }
+
     func testFolderMembershipPickerKeepsSelectionCurrent() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
