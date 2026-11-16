@@ -102,6 +102,9 @@ struct InboxScreen: View {
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusLaunchHeading: Bool
     @AccessibilityFocusState private var focusRefreshStatus: Bool
+#if DEBUG
+    @State private var scopeTestEpisode: Episode?
+#endif
     // Tracked by SwiftUI, so toggling VoiceOver while the Inbox is on screen
     // re-renders the rows and attaches/removes the swipe actions immediately —
     // no relaunch. (Reading UIAccessibility.isVoiceOverRunning in body would
@@ -181,6 +184,35 @@ struct InboxScreen: View {
                                 InboxRepository(context: context).dismiss(episode)
                             }
                         }
+                    }
+                    if ScreenshotHarness.isSeeding &&
+                        CommandLine.arguments.contains("-inboxSelectionScopeTest") {
+                        Button("Simulate podcast Inbox exclusion") {
+                            guard let episode = visible.first(where: { selection.isSelected($0.persistentModelID) }),
+                                  let podcast = episode.podcast else { return }
+                            scopeTestEpisode = episode
+                            podcast.inboxExcluded = true
+                            podcast.inboxIncluded = false
+                            try? context.save()
+                        }
+                        Text("Scope test played: \(scopeTestEpisode?.isPlayed == true ? "yes" : "no")")
+                    }
+                    if ScreenshotHarness.isSeeding &&
+                        CommandLine.arguments.contains("-inboxSelectionFolderScopeTest") {
+                        Button("Simulate folder membership removal") {
+                            guard let episode = visible.first(where: { selection.isSelected($0.persistentModelID) }),
+                                  let podcastID = episode.podcast?.persistentModelID,
+                                  let folderID = selectedFolderID,
+                                  let memberships = try? context.fetch(FetchDescriptor<FolderMembership>()),
+                                  let membership = memberships.first(where: {
+                                      $0.folder?.persistentModelID == folderID &&
+                                      $0.podcast?.persistentModelID == podcastID
+                                  }) else { return }
+                            scopeTestEpisode = episode
+                            context.delete(membership)
+                            try? context.save()
+                        }
+                        Text("Scope test played: \(scopeTestEpisode?.isPlayed == true ? "yes" : "no")")
                     }
 #endif
                     Group {
@@ -365,6 +397,13 @@ struct InboxScreen: View {
             snapshot: $currentCandidateSnapshot
         ))
         .onAppear {
+#if DEBUG
+            if ScreenshotHarness.isSeeding &&
+                CommandLine.arguments.contains("-inboxSelectionFolderScopeTest"),
+                let folder = folders.first(where: { $0.name == "Scope test folder" }) {
+                selectedFolderID = folder.persistentModelID
+            }
+#endif
             requestLaunchHeadingFocus()
             requestTabEntryFocus()
         }
@@ -723,12 +762,26 @@ struct InboxScreen: View {
 
     /// The selected episodes, in the current Inbox (search-filtered) order.
     private func selectedEpisodes(in visible: [Episode]) -> [Episode] {
-        // Recheck episode-local status and dismissal at activation time too. A
-        // save can land after this view rendered but before a batch tap. Podcast
-        // and folder inclusion remain governed by the event-driven candidate
-        // snapshot and are not claimed as synchronously revalidated here.
-        InboxRepository.currentEpisodes(visible, in: context)
-            .filter { selection.isSelected($0.persistentModelID) }
+        // A policy or folder membership save can land after the event-driven
+        // candidate snapshot rendered but before the batch tap. Recheck the
+        // selected subset against current episode and podcast policy. Only a
+        // folder-scoped batch pays for a fresh membership lookup at activation.
+        let selected = visible.filter { selection.isSelected($0.persistentModelID) }
+        let current = InboxRepository.currentEpisodes(selected, in: context)
+        let eligible = InboxRepository(context: context).inbox(from: current)
+            .filter { $0.podcast?.isFollowed != false }
+        // A deleted selected folder must never turn a stale scoped action into
+        // an All folders action before the picker resets its selection.
+        guard selectedFolderID != nil else { return eligible }
+        guard let selectedFolder, !selectedFolder.isDeleted else { return [] }
+        let allowedPodcastIDs = Set(
+            FolderRepository(context: context).subtreeSubscriptions(of: selectedFolder)
+                .map(\.persistentModelID)
+        )
+        return eligible.filter { episode in
+            guard let podcastID = episode.podcast?.persistentModelID else { return false }
+            return allowedPodcastIDs.contains(podcastID)
+        }
     }
 
     /// Adds every selected episode to the end of the queue, in Inbox order, then
