@@ -11,6 +11,29 @@ final class EarshotUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    func testWatchDownloadPickerOpensTwiceWithoutCrashing() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 15), app.debugDescription)
+        settings.tap()
+
+        let pickerLink = app.buttons["Apple Watch Downloads"]
+        XCTAssertTrue(pickerLink.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<2 {
+            pickerLink.tap()
+            let pickerBar = app.navigationBars["Apple Watch Downloads"]
+            XCTAssertTrue(pickerBar.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.buttons["Our Perspective"].waitForExistence(timeout: 5),
+                          "The picker should list followed shows after loading")
+            XCTAssertTrue(app.buttons["Technically Working"].exists)
+            pickerBar.buttons["BackButton"].tap()
+            XCTAssertTrue(pickerLink.waitForExistence(timeout: 5))
+        }
+    }
+
     func testIPadExposesNewWindowAction() throws {
         guard UIDevice.current.userInterfaceIdiom == .pad else {
             throw XCTSkip("Multiple windows are an iPad feature")
@@ -74,36 +97,75 @@ final class EarshotUITests: XCTestCase {
         guard UIDevice.current.userInterfaceIdiom == .pad else {
             throw XCTSkip("Search detail columns require an iPad layout")
         }
-        let os = ProcessInfo.processInfo.operatingSystemVersion
-        if os.majorVersion == 26 && os.minorVersion == 0 {
-            throw XCTSkip("iPadOS 26.0 simulator aborts in UIKit SearchBar when switching results")
-        }
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
         app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        guard window.frame.width >= 800 else {
+            throw XCTSkip("Search detail columns require a window at least 800 points wide")
+        }
         let searchButton = app.buttons["Search your library"]
         XCTAssertTrue(searchButton.waitForExistence(timeout: 15), app.debugDescription)
         searchButton.tap()
-        let field = app.searchFields.firstMatch
+        let field = app.searchFields["Search your library"]
         XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
         field.tap()
         field.typeText("e")
-        let firstShow = app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "Technically Working"
-        )).firstMatch
-        let secondShow = app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "Our Perspective"
-        )).firstMatch
-        XCTAssertTrue(firstShow.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(secondShow.exists)
-        firstShow.tap()
+        let firstResult = app.buttons["Technically Working, Michael Babcock & Damashe Thomas"]
+        let secondSidebarShow = app.buttons["Our Perspective, 2 unplayed episodes, Kolby & Michael"]
+        XCTAssertTrue(firstResult.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(secondSidebarShow.exists)
+        firstResult.tap()
         let firstEpisode = app.buttons.matching(NSPredicate(
             format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
         )).firstMatch
         XCTAssertTrue(firstEpisode.waitForExistence(timeout: 5), app.debugDescription)
-        secondShow.tap()
-        XCTAssertTrue(secondShow.isSelected, "The new podcast result should be selected")
-        XCTAssertFalse(firstEpisode.exists, "Switching search results must replace the episode data source")
+        secondSidebarShow.tap()
+        XCTAssertTrue(secondSidebarShow.isSelected, "The sidebar selection should switch podcasts")
+        XCTAssertTrue(firstEpisode.waitForNonExistence(timeout: 5),
+                      "Switching shows must replace the episode data source")
+    }
+
+    func testIPadSearchQueryRestoresAfterPodcastDetail() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Search detail navigation requires an iPad layout")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        guard window.frame.width >= 800 else {
+            throw XCTSkip("Search detail navigation requires a window at least 800 points wide")
+        }
+        app.buttons["Search your library"].tap()
+        let field = app.searchFields["Search your library"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        field.tap()
+        field.typeText("e")
+        let firstResult = app.buttons.matching(NSPredicate(
+            format: "label == %@", "Technically Working, Michael Babcock & Damashe Thomas"
+        )).firstMatch
+        XCTAssertTrue(firstResult.waitForExistence(timeout: 10), app.debugDescription)
+        firstResult.tap()
+        let detailBar = app.navigationBars["Technically Working"]
+        XCTAssertTrue(detailBar.waitForExistence(timeout: 5), app.debugDescription)
+        detailBar.buttons["BackButton"].tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(field.isHittable, "Back should restore the Library search field")
+        XCTAssertEqual(field.value as? String, "e", "Back should preserve the Library query")
+        field.tap()
+        field.typeText(XCUIKeyboardKey.delete.rawValue + "pers")
+        XCTAssertEqual(field.value as? String, "pers", "The restored Library query should be editable")
+        XCTAssertTrue(firstResult.waitForNonExistence(timeout: 5),
+                      "Editing the query should remove the old result")
+        let secondResult = app.buttons.matching(NSPredicate(
+            format: "label == %@", "Our Perspective, Kolby & Michael"
+        )).firstMatch
+        XCTAssertTrue(secondResult.waitForExistence(timeout: 5), app.debugDescription)
+        secondResult.tap()
+        XCTAssertTrue(app.navigationBars["Our Perspective"].waitForExistence(timeout: 5))
     }
 
     func testIPadLibraryVoiceOverReadsSelectedSidebarShow() throws {
@@ -212,6 +274,66 @@ final class EarshotUITests: XCTestCase {
         )).firstMatch.waitForExistence(timeout: 5), "Play must load the selected episode")
     }
 
+    func testPodcastPartiallyPlayedFilterKeepsOneRowStopAndCanShowAll() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let filter = app.segmentedControls["Filter episodes"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 15), app.debugDescription)
+        let partial = filter.buttons["Partially Played"]
+        XCTAssertTrue(partial.exists)
+        partial.tap()
+        XCTAssertTrue(app.staticTexts["2 partially played episodes"].waitForExistence(timeout: 5))
+
+        let started = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        XCTAssertTrue(started.waitForExistence(timeout: 5), app.debugDescription)
+        let inbox = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "In Inbox, #169 – Apple's Price Hikes"
+        ))
+        XCTAssertTrue(inbox.firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "#168 – Multi-Agent Madness"
+        )).firstMatch.exists)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).count, 1, "The filter must not create duplicate accessible row buttons")
+        XCTAssertEqual(inbox.count, 1, "The Inbox row must remain one accessible stop")
+
+        filter.buttons["All"].tap()
+        XCTAssertTrue(app.staticTexts["6 episodes"].waitForExistence(timeout: 5),
+                      "All should restore the full six-episode show, including off-screen rows")
+    }
+
+    func testPartiallyPlayedRowsRemainConsecutiveVoiceOverStops() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+        let filter = app.segmentedControls["Filter episodes"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 15), app.debugDescription)
+        filter.buttons["Partially Played"].tap()
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        var speech: [String] = []
+        for _ in 0..<40 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("#169 – Apple's Price Hikes") { break }
+        }
+        let first = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#170 – Turn the Right Knob") }),
+                                  "First partially played episode not reached: \(speech)")
+        let second = try XCTUnwrap(speech.firstIndex(where: { $0.contains("#169 – Apple's Price Hikes") }),
+                                   "Second partially played episode not reached: \(speech)")
+        XCTAssertEqual(second, first + 1, "Partially played episodes should be one stop each: \(speech)")
+    }
+
     func testQueueEpisodeSelectionAndPlayAreSeparate() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
@@ -292,6 +414,69 @@ final class EarshotUITests: XCTestCase {
                                         "The second show episode was not reached: \(speech)")
         XCTAssertEqual(secondIndex, firstIndex + 1,
                        "Each shared episode row should be one VoiceOver stop: \(speech)")
+    }
+
+    func testLibraryEpisodeRowsExposeInboxAndQueuePlacementInOneLabel() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+
+        let inbox = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "In Inbox, #169 – Apple's Price Hikes"
+        )).firstMatch
+        XCTAssertTrue(inbox.waitForExistence(timeout: 15), app.debugDescription)
+        let queued = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Queued, #166 – If You Used a Passkey"
+        )).firstMatch
+        // The List is lazy; #166 starts below the visible #169 row.
+        for _ in 0..<4 where !queued.exists {
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(queued.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(queued.label.contains("In Inbox"), "Queue placement should win over Inbox")
+    }
+
+    func testLibrarySearchEpisodeResultsExposePlacementInOneRow() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let searchButton = app.buttons["Search your library"]
+        XCTAssertTrue(searchButton.waitForExistence(timeout: 15), app.debugDescription)
+        searchButton.tap()
+        let field = app.searchFields["Search your library"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        field.tap()
+        field.typeText("Price Hikes")
+        let inbox = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "In Inbox, #169 – Apple's Price Hikes"
+        )).firstMatch
+        XCTAssertTrue(inbox.waitForExistence(timeout: 15), app.debugDescription)
+
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Price Hikes".count) + "Passkey")
+        let queued = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Queued, #166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(queued.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(queued.label.contains("In Inbox"), "The Queue takes priority in Search")
+    }
+
+    func testQuickActionsDownloadSettingNamesBothOutcomes() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        let settingsTab = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 15), app.debugDescription)
+        settingsTab.tap()
+        let quickActions = app.buttons["Quick Actions"]
+        for _ in 0..<5 where !quickActions.isHittable { app.swipeUp() }
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 5), app.debugDescription)
+        quickActions.tap()
+        let download = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Download / Remove Download, enabled"
+        ))
+        XCTAssertTrue(download.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
     func testInboxVoiceOverHasOneStopPerEpisode() throws {
@@ -423,11 +608,14 @@ final class EarshotUITests: XCTestCase {
         }
         revealAdjustment()
         XCTAssertEqual(adjustment.value as? String, "Automatic")
-        // Tap the visible picker to open its native menu; the accessibility
-        // representation is an adjustable element for VoiceOver.
-        adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        // The VoiceOver representation spans the full row, but the native menu
+        // hit region varies by OS. Try its leading edge, then its trailing edge.
+        adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.65)).tap()
         let fiveMinutes = app.buttons["5 minutes"].firstMatch
-        XCTAssertTrue(fiveMinutes.waitForExistence(timeout: 5))
+        if !fiveMinutes.waitForExistence(timeout: 2) {
+            adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.65)).tap()
+        }
+        XCTAssertTrue(fiveMinutes.waitForExistence(timeout: 5), app.debugDescription)
         fiveMinutes.tap()
         XCTAssertEqual(adjustment.value as? String, "5 minutes")
 
@@ -844,8 +1032,19 @@ final class EarshotUITests: XCTestCase {
     func testAnchoredPlayerStabilityAtLargestText() { verifyAnchoredPlayer(largeText: true) }
 
     func testPlayerTransportRemainsReachableInLandscape() {
+        verifyLandscapePlayer(largeText: false)
+    }
+
+    func testPlayerTransportRemainsReachableInLandscapeAtLargestText() {
+        verifyLandscapePlayer(largeText: true)
+    }
+
+    private func verifyLandscapePlayer(largeText: Bool) {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         app.launch()

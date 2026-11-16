@@ -16,7 +16,10 @@ final class DownloadScanBoundsTests: XCTestCase {
 
     private func makeManager(_ context: ModelContext) -> DownloadManager {
         let manager = DownloadManager()
-        manager.configure(context: context)
+        // These tests explicitly invoke the scan under test. Starting the real
+        // path monitor here can independently start pending downloads before
+        // the reconciliation assertion, depending on callback timing.
+        manager.configureForTesting(context: context, isOnWifi: true)
         return manager
     }
 

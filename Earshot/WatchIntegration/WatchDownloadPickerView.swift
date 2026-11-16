@@ -27,12 +27,14 @@ struct WatchDownloadPickerView: View {
 
     private func load() {
         do {
-            let descriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.isFollowed },
-                                                      sortBy: [SortDescriptor(\.title)])
-            podcasts = try context.fetch(descriptor)
+            podcasts = try Self.followedPodcasts(in: context)
         } catch {
             self.error = "Could not load podcasts. Try again."
         }
+    }
+
+    static func followedPodcasts(in context: ModelContext) throws -> [Podcast] {
+        try context.fetch(PodcastQuery.followedDescriptor(sortBy: [SortDescriptor(\.title)]))
     }
 }
 

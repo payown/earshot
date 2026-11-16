@@ -133,10 +133,15 @@ struct SearchView<HeaderContent: View>: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var query = ""
     @State private var matchedPodcasts: [Podcast] = []
     @State private var matchedEpisodes: [Episode] = []
+    @State private var queuedEpisodeIDs: Set<PersistentIdentifier> = []
+    @State private var queueMembershipTask: Task<Void, Never>?
+    @State private var queueMembershipRequest = UUID()
+    @State private var isSearchVisible = false
     @State private var matchedBookmarks: [Bookmark] = []
     @State private var podcastLimit = LocalSearchScanPolicy.resultPageSize
     @State private var episodeLimit = LocalSearchScanPolicy.resultPageSize
@@ -195,7 +200,7 @@ struct SearchView<HeaderContent: View>: View {
                         if let episode = selectedSearchEpisode, !episode.isDeleted {
                             EpisodeDetailPane(episode: episode)
                         } else if let podcast = selectedSearchPodcast, !podcast.isDeleted {
-                            EpisodeListView(podcast: podcast)
+                            EpisodeListView(podcast: podcast, showsPlacementStatus: scope == .library)
                                 .id(podcast.persistentModelID)
                         } else {
                             ContentUnavailableView(
@@ -232,9 +237,23 @@ struct SearchView<HeaderContent: View>: View {
             scheduleLocalSearch(for: newValue)
             if scope.showsDirectory { scheduleDirectorySearch(for: newValue) }
         }
+        .onAppear {
+            isSearchVisible = true
+            refreshQueueMembership()
+        }
         .onDisappear {
+            isSearchVisible = false
+            queueMembershipTask?.cancel()
             directoryTask?.cancel()
             localSearchTask?.cancel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotQueueDidChange)
+            .receive(on: DispatchQueue.main)) { _ in
+            refreshQueueMembership()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)
+            .receive(on: DispatchQueue.main)) { _ in
+            refreshQueueMembership()
         }
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
             .receive(on: DispatchQueue.main)) { note in
@@ -254,7 +273,9 @@ struct SearchView<HeaderContent: View>: View {
                 compactSearchPodcast = nil
             }
         }
-        .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
+        .navigationDestination(for: Podcast.self) {
+            EpisodeListView(podcast: $0, showsPlacementStatus: scope == .library)
+        }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
@@ -271,7 +292,7 @@ struct SearchView<HeaderContent: View>: View {
                 EpisodeListView(podcast: podcast, onPlayRequest: { episode in
                     pendingPodcastSheetPlayID = episode.persistentModelID
                     compactSearchPodcast = nil
-                })
+                }, showsPlacementStatus: scope == .library)
                     .id(podcast.persistentModelID)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
@@ -337,6 +358,8 @@ struct SearchView<HeaderContent: View>: View {
                                 selectedSearchPodcast = nil
                             } : nil,
                             isDetailSelected: wide && selectedSearchEpisode?.persistentModelID == episode.persistentModelID,
+                            isQueued: queuedEpisodeIDs.contains(episode.persistentModelID),
+                            isInInbox: isInInbox(episode),
                             performAction: { action in perform(action, for: episode) }
                         )
                     }
@@ -402,6 +425,12 @@ struct SearchView<HeaderContent: View>: View {
 
     private var searchPlacement: SearchFieldPlacement {
         switch (scope, usesCompactLanding) {
+        case (.library, _) where horizontalSizeClass == .regular:
+            // iPadOS 26.0 can abort in UISearchBar while its automatic placement
+            // moves between navigation items as a wide detail result changes.
+            // Keep the field in a stable drawer in regular-width Library search;
+            // compact iPhone layouts retain their existing automatic placement.
+            return .navigationBarDrawer(displayMode: .always)
         case (.addPodcast, true):
             return .navigationBarDrawer(displayMode: .always)
         default:
@@ -509,6 +538,28 @@ struct SearchView<HeaderContent: View>: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityHint("Double tap to play from the bookmarked spot")
+    }
+
+    private func isInInbox(_ episode: Episode) -> Bool {
+        guard scope == .library, let podcast = episode.podcast else { return false }
+        return EpisodePlacementStatus.isInInbox(
+            status: episode.status, dismissed: episode.inboxDismissed,
+            catalogOnly: podcast.isCatalogOnly, inboxIncluded: podcast.inboxIncluded,
+            inboxExcluded: podcast.inboxExcluded, optInOnly: settings.inboxOptInOnly
+        )
+    }
+
+    private func refreshQueueMembership() {
+        guard scope == .library, isSearchVisible else { return }
+        queueMembershipTask?.cancel()
+        let request = UUID()
+        queueMembershipRequest = request
+        let container = context.container
+        queueMembershipTask = Task { @MainActor in
+            guard let ids = try? await EpisodeQueueMembershipSnapshot.load(in: container),
+                  !Task.isCancelled, queueMembershipRequest == request else { return }
+            queuedEpisodeIDs = ids
+        }
     }
 
     private func perform(_ action: EpisodeAction, for episode: Episode) {

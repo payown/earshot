@@ -7,6 +7,10 @@ enum PlayerLayoutPolicy {
     // This is a window-width requirement, not a device or orientation check.
     static func usesTwoRegions(width: CGFloat) -> Bool { width >= 700 }
 
+    static func usesSplitArrangement(width: CGFloat, height: CGFloat) -> Bool {
+        usesTwoRegions(width: width) && height >= 500
+    }
+
     static func separatesDetails(width: CGFloat, height: CGFloat, accessibilityText: Bool) -> Bool {
         usesTwoRegions(width: width) || !accessibilityText || height >= 800
     }
@@ -117,10 +121,14 @@ struct NowPlayingScreen: View {
                 )
                 VStack(spacing: 0) {
                     playerHeader
-                    if #available(iOS 27.1, *), expanded {
+                    if #available(iOS 27.1, *), PlayerLayoutPolicy.usesSplitArrangement(
+                        width: geometry.size.width, height: geometry.size.height
+                    ) {
                         // The split arrangement places each peer region around
                         // an active fold instead of putting the transport over
                         // the center division. Each region keeps its own scroll.
+                        // In a short landscape window, its secondary region can
+                        // disappear; use the existing side-by-side stack there.
                         ArrangementView {
                             episodeRegion(expanded: true, separateDetails: separateDetails,
                                           windowWidth: geometry.size.width)

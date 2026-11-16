@@ -85,11 +85,17 @@ enum BackgroundFeedRefresher {
     /// Call when the app moves to the background and after every run so the chain
     /// continues. `earliestBeginDate` is advisory — the OS decides actual timing.
     @MainActor
-    static func scheduleNext(after interval: TimeInterval = FeedRefreshPolicy.defaultWindow) {
+    static func scheduleNext(
+        after interval: TimeInterval = FeedRefreshPolicy.defaultWindow,
+        submit: (BGAppRefreshTaskRequest) throws -> Void = { try BGTaskScheduler.shared.submit($0) },
+        logFailure: @Sendable (String) -> Void = {
+            AppLog.networking.error("\($0, privacy: .public)")
+        }
+    ) {
         let request = BGAppRefreshTaskRequest(identifier: taskIdentifier)
         request.earliestBeginDate = Date(timeIntervalSinceNow: interval)
         do {
-            try BGTaskScheduler.shared.submit(request)
+            try submit(request)
             if let earliestBeginDate = request.earliestBeginDate {
                 FeedRefreshStatusMonitor.shared.recordScheduled(at: earliestBeginDate)
             }
@@ -97,9 +103,9 @@ enum BackgroundFeedRefresher {
         } catch {
             // Submission fails on simulator and when the user has disabled
             // Background App Refresh — neither is fatal.
-            AppLog.networking.error(
-                "Could not schedule background feed refresh: \(error.localizedDescription, privacy: .public)"
-            )
+            // Error domains and descriptions can contain caller-supplied URLs.
+            // Keep the scheduler's numeric code without publishing that text.
+            logFailure("Could not schedule background feed refresh: scheduler error \((error as NSError).code)")
         }
     }
 

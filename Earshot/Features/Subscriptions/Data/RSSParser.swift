@@ -47,6 +47,21 @@ struct ParsedFeed: Sendable {
 /// subscribe to a feed and populate episodes. Namespaces are not processed, so
 /// element names arrive as qualified names (e.g. `itunes:duration`).
 final class RSSParser: NSObject, XMLParserDelegate {
+    typealias DiagnosticSink = @Sendable (String) -> Void
+    private let log: DiagnosticSink
+
+    init(log: @escaping DiagnosticSink = { message in
+        AppLog.networking.error("\(message, privacy: .public)")
+    }) {
+        self.log = log
+        super.init()
+    }
+
+    static func diagnosticReason(_ error: Error?) -> String {
+        guard let error else { return "unknown XML error" }
+        return "XML error \((error as NSError).code)"
+    }
+
     /// Directory search needs channel metadata but no episode catalog. In that
     /// mode the parser intentionally aborts at the first item/entry, after the
     /// channel fields that feeds conventionally place before their episodes.
@@ -176,21 +191,24 @@ final class RSSParser: NSObject, XMLParserDelegate {
             // `episodes` can never hold a half-parsed item: `finishItem()`
             // only runs on an item's closing tag, so an item in progress at
             // the failure point is simply dropped.
-            let reason = parser.parserError?.localizedDescription ?? "unknown XML error"
+            // Parser error descriptions are free-form framework text derived
+            // from a publisher's document. Only the numeric code is safe for
+            // public diagnostics; line, column and salvage count remain useful.
+            let reason = Self.diagnosticReason(parser.parserError)
             guard !episodes.isEmpty || !title.isEmpty else {
-                AppLog.networking.error(
+                log(
                     """
                     Feed parse failed with nothing salvageable at line \
                     \(parser.lineNumber), column \(parser.columnNumber): \
-                    \(reason, privacy: .public)
+                    \(reason)
                     """
                 )
                 return nil
             }
-            AppLog.networking.error(
+            log(
                 """
                 Feed parse failed at line \(parser.lineNumber), column \
-                \(parser.columnNumber) (\(reason, privacy: .public)); returning \
+                \(parser.columnNumber) (\(reason)); returning \
                 partial feed with \(self.episodes.count) salvaged episode(s)
                 """
             )

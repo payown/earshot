@@ -2642,6 +2642,7 @@ final class PlayerService {
     enum LivePositionKey {
         static let episode = "live_playback_episode_key"
         static let seconds = "live_playback_seconds"
+        static let updatedAt = "live_playback_updated_at"
     }
 
     /// Records the in-flight playback position to `UserDefaults` (NOT SwiftData)
@@ -2656,18 +2657,21 @@ final class PlayerService {
         let defaults = UserDefaults.standard
         defaults.set(key, forKey: LivePositionKey.episode)
         defaults.set(second, forKey: LivePositionKey.seconds)
+        defaults.set(Date.now, forKey: LivePositionKey.updatedAt)
     }
 
     private func writeLivePosition(_ item: PersonalAudioItem, second: Int) {
         let defaults = UserDefaults.standard
         defaults.set(PlaybackContentIdentity.personalAudioPrefix + item.id, forKey: LivePositionKey.episode)
         defaults.set(second, forKey: LivePositionKey.seconds)
+        defaults.set(Date.now, forKey: LivePositionKey.updatedAt)
     }
 
     private func clearLivePosition() {
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: LivePositionKey.episode)
         defaults.removeObject(forKey: LivePositionKey.seconds)
+        defaults.removeObject(forKey: LivePositionKey.updatedAt)
     }
 
     /// The UserDefaults live position stored for `episode`, or nil if the stored
@@ -2685,7 +2689,30 @@ final class PlayerService {
     /// (#736). Prevents losing progress on a crash now that the ~5s tick no
     /// longer writes to the store.
     private func resumePosition(for episode: Episode) -> Int {
-        max(episode.positionSeconds, livePosition(for: episode) ?? 0)
+        let identity = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        let lastPlayingID = settings?.rawValue(SettingsKey.lastPlayingEpisodeID)
+        // The live tick is crash recovery for the last loaded episode only. A
+        // completed or replaced episode can still have an older keyed tick in
+        // UserDefaults; it must not override a later saved zero on replay.
+        let ownsLivePosition = lastPlayingID == identity || lastPlayingID == episode.guid
+        guard ownsLivePosition else { return episode.positionSeconds }
+        // A completion from another device can reset this same episode's saved
+        // position while its old phone tick and last-playing ID remain. The
+        // completion is newer than that tick; a fresh replay tick is not.
+        if episode.isPlayed, episode.positionSeconds == 0,
+           let playedAt = episode.playedAt,
+           let liveUpdatedAt = UserDefaults.standard.object(forKey: LivePositionKey.updatedAt) as? Date,
+           playedAt > liveUpdatedAt {
+            return 0
+        }
+        if episode.isPlayed, episode.positionSeconds == 0,
+           episode.playedAt != nil,
+           UserDefaults.standard.object(forKey: LivePositionKey.updatedAt) == nil {
+            // Old app versions wrote no timestamp. Prefer a saved completion
+            // over an undated recovery tick of unknown age.
+            return 0
+        }
+        return max(episode.positionSeconds, livePosition(for: episode) ?? 0)
     }
 
     private func resumePosition(for item: PersonalAudioItem) -> Double {

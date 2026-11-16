@@ -16,11 +16,11 @@ struct QuickActionsSettingsView: View {
             }
 
             actionSection(content: "Episode", state: .enabled,
-                          actions: store.episodeActions, label: \.label,
+                          actions: store.episodeActions, label: \.settingsLabel,
                           move: store.moveEpisodeActions,
                           transfer: removeEpisodeAction)
             actionSection(content: "Episode", state: .available,
-                          actions: store.availableEpisodeActions, label: \.label,
+                          actions: store.availableEpisodeActions, label: \.settingsLabel,
                           move: store.moveAvailableEpisodeActions,
                           transfer: addEpisodeAction)
             actionSection(content: "Podcast", state: .enabled,
@@ -32,11 +32,11 @@ struct QuickActionsSettingsView: View {
                           move: store.moveAvailablePodcastActions,
                           transfer: addPodcastAction)
             actionSection(content: "Queue", state: .enabled,
-                          actions: store.queueActions, label: \.label,
+                          actions: store.queueActions, label: \.settingsLabel,
                           move: store.moveQueueActions,
                           transfer: removeQueueAction)
             actionSection(content: "Queue", state: .available,
-                          actions: store.availableQueueActions, label: \.label,
+                          actions: store.availableQueueActions, label: \.settingsLabel,
                           move: store.moveAvailableQueueActions,
                           transfer: addQueueAction)
 

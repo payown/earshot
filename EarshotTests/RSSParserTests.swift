@@ -206,6 +206,18 @@ final class RSSParserTests: XCTestCase {
 
     // MARK: Partial results on malformed XML (#384)
 
+    func testParserErrorDiagnosticDropsFreeFormDescription() {
+        let secret = "synthetic-token-abc123"
+        let error = NSError(domain: "NSXMLParserErrorDomain", code: 111,
+                            userInfo: [NSLocalizedDescriptionKey:
+                                "https://private.example/rss?token=\(secret)"])
+        let diagnostic = RSSParser.diagnosticReason(error)
+        XCTAssertEqual(diagnostic, "XML error 111")
+        XCTAssertFalse(diagnostic.contains(secret))
+        XCTAssertFalse(diagnostic.contains("private.example"))
+        XCTAssertEqual(RSSParser.diagnosticReason(nil), "unknown XML error")
+    }
+
     func testMalformedMidFeedReturnsSalvagedEpisodesAndTitle() throws {
         let xml = """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -229,6 +241,42 @@ final class RSSParserTests: XCTestCase {
         XCTAssertEqual(feed.episodes.count, 2)
         XCTAssertEqual(feed.episodes[0].guid, "g1")
         XCTAssertEqual(feed.episodes[1].guid, "g2")
+    }
+
+    func testMalformedFeedDiagnosticsKeepPositionAndOmitPublisherURL() throws {
+        let capture = NetworkLogCapture()
+        let secret = "synthetic-feed-token-123"
+        let xml = """
+        <rss><channel><title>Private Show</title>
+        <item><title>Saved Episode</title><guid>saved</guid>
+        <enclosure url="https://private.example/audio?token=\(secret)" type="audio/mpeg"/>
+        </item></wrongclose>
+        """
+        let feed = try XCTUnwrap(RSSParser(log: { message in capture.append(message) })
+            .parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.episodes.map(\.guid), ["saved"])
+        XCTAssertEqual(capture.messages.count, 1)
+        let diagnostic = try XCTUnwrap(capture.messages.first)
+        XCTAssertTrue(diagnostic.contains("Feed parse failed at line"))
+        XCTAssertTrue(diagnostic.contains("column"))
+        XCTAssertTrue(diagnostic.contains("XML error"))
+        XCTAssertTrue(diagnostic.contains("1 salvaged episode(s)"))
+        XCTAssertFalse(diagnostic.contains(secret))
+        XCTAssertFalse(diagnostic.contains("private.example"))
+    }
+
+    func testUnsavableFeedDiagnosticOmitsPublisherContent() throws {
+        let capture = NetworkLogCapture()
+        let secret = "synthetic-title-token-456"
+        let xml = "<rss><channel><bad \(secret)=\"value\"></wrongclose>"
+        let feed = RSSParser(log: { message in capture.append(message) })
+            .parse(Data(xml.utf8))
+        XCTAssertNil(feed)
+        XCTAssertEqual(capture.messages.count, 1)
+        let diagnostic = try XCTUnwrap(capture.messages.first)
+        XCTAssertTrue(diagnostic.contains("nothing salvageable at line"))
+        XCTAssertTrue(diagnostic.contains("XML error"))
+        XCTAssertFalse(diagnostic.contains(secret))
     }
 
     func testMalformedBeforeAnythingSalvageableReturnsNil() {

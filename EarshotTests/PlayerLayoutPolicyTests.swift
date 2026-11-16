@@ -20,4 +20,10 @@ final class PlayerLayoutPolicyTests: XCTestCase {
             width: 900, height: 600, accessibilityText: true
         ))
     }
+
+    func testShortLandscapeWindowKeepsBothPlayerRegions() {
+        XCTAssertFalse(PlayerLayoutPolicy.usesSplitArrangement(width: 874, height: 402))
+        XCTAssertFalse(PlayerLayoutPolicy.usesSplitArrangement(width: 699, height: 900))
+        XCTAssertTrue(PlayerLayoutPolicy.usesSplitArrangement(width: 700, height: 500))
+    }
 }

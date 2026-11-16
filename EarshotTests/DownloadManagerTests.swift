@@ -958,8 +958,11 @@ final class DownloadManagerTests: XCTestCase {
             outcome: .finished(fileName: "notification-guid.mp3")
         ))
 
-        for _ in 0..<100 where await center.addedRequestCount() == 0 {
-            await Task.yield()
+        // The completion request is scheduled by a separate task. Yielding a
+        // fixed number of turns can finish before that task runs under load.
+        for _ in 0..<200 {
+            if await center.addedRequestCount() > 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
         }
         let requests = await center.addedRequestSnapshots()
         XCTAssertEqual(requests.count, 1)

@@ -347,7 +347,7 @@ final class QueueRepository {
 
         items.removeAll { $0.persistentModelID == item.persistentModelID }
         context.delete(item)
-        canonicalEpisode.status = .newEpisode
+        if !canonicalEpisode.isPlayed { canonicalEpisode.status = .newEpisode }
         canonicalEpisode.inboxDismissed = true
 
         let downloadCleanup = DownloadCleanup.deleteAfterPlayedEnabled(context)

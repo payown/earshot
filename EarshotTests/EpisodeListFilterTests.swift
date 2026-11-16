@@ -55,8 +55,25 @@ final class EpisodeListFilterTests: XCTestCase {
         XCTAssertEqual(result.map(\.guid), list.map(\.guid))
     }
 
+    func testPartiallyPlayedRequiresSavedPositionAndNoCompletionMarker() {
+        let unstarted = makeEpisode("zero", played: false)
+        let resumable = makeEpisode("progress", played: false)
+        resumable.positionSeconds = 42
+        let completed = makeEpisode("played", played: true)
+        completed.positionSeconds = 42
+        let timestampOnly = makeEpisode("timestamp", played: false)
+        timestampOnly.positionSeconds = 12
+        timestampOnly.playedAt = .now
+
+        let result = EpisodeListFilter.partiallyPlayed.apply(
+            to: [unstarted, resumable, completed, timestampOnly]
+        )
+        XCTAssertEqual(result.map(\.guid), ["progress"])
+    }
+
     func testEmptyListStaysEmpty() {
         XCTAssertTrue(EpisodeListFilter.unheard.apply(to: []).isEmpty)
+        XCTAssertTrue(EpisodeListFilter.partiallyPlayed.apply(to: []).isEmpty)
         XCTAssertTrue(EpisodeListFilter.all.apply(to: []).isEmpty)
     }
 
@@ -73,13 +90,19 @@ final class EpisodeListFilterTests: XCTestCase {
 
     func testAnnouncementWording() {
         XCTAssertEqual(EpisodeListFilter.unheard.announcement(count: 12), "Showing 12 unplayed episodes")
+        XCTAssertEqual(EpisodeListFilter.partiallyPlayed.announcement(count: 12),
+                       "Showing 12 partially played episodes")
         XCTAssertEqual(EpisodeListFilter.all.announcement(count: 316), "Showing all 316 episodes")
     }
 
     func testAnnouncementSingularPlural() {
         XCTAssertEqual(EpisodeListFilter.unheard.announcement(count: 1), "Showing 1 unplayed episode")
+        XCTAssertEqual(EpisodeListFilter.partiallyPlayed.announcement(count: 1),
+                       "Showing 1 partially played episode")
         XCTAssertEqual(EpisodeListFilter.all.announcement(count: 1), "Showing all 1 episode")
         XCTAssertEqual(EpisodeListFilter.unheard.announcement(count: 0), "Showing 0 unplayed episodes")
+        XCTAssertEqual(EpisodeListFilter.partiallyPlayed.announcement(count: 0),
+                       "Showing 0 partially played episodes")
     }
 
     // MARK: rawValue round-trip
@@ -87,6 +110,7 @@ final class EpisodeListFilterTests: XCTestCase {
     func testRawValuesAreStable() {
         XCTAssertEqual(EpisodeListFilter.unheard.rawValue, "unheard")
         XCTAssertEqual(EpisodeListFilter.all.rawValue, "all")
+        XCTAssertEqual(EpisodeListFilter.partiallyPlayed.rawValue, "partiallyPlayed")
         for filter in EpisodeListFilter.allCases {
             XCTAssertEqual(EpisodeListFilter(rawValue: filter.rawValue), filter)
         }
@@ -95,6 +119,9 @@ final class EpisodeListFilterTests: XCTestCase {
     func testTitles() {
         XCTAssertEqual(EpisodeListFilter.unheard.title, "Unplayed")
         XCTAssertEqual(EpisodeListFilter.all.title, "All")
+        XCTAssertEqual(EpisodeListFilter.partiallyPlayed.title, "Partially Played")
+        XCTAssertEqual(EpisodeListFilter.podcastChoices, [.unheard, .partiallyPlayed, .all])
+        XCTAssertEqual(EpisodeListFilter.downloadsChoices, [.unheard, .all])
     }
 
     // MARK: Per-podcast persistence
@@ -114,6 +141,61 @@ final class EpisodeListFilterTests: XCTestCase {
         // Feed A remembers All; Feed B still falls back to the Unheard default.
         XCTAssertEqual(store.episodeListFilter(forFeedURL: feedA), .all)
         XCTAssertEqual(store.episodeListFilter(forFeedURL: feedB), .unheard)
+        store.setEpisodeListFilter(.partiallyPlayed, forFeedURL: feedA)
+        XCTAssertEqual(store.episodeListFilter(forFeedURL: feedA), .partiallyPlayed)
+        XCTAssertEqual(store.episodeListFilter(forFeedURL: feedB), .unheard)
+    }
+
+    func testPartiallyPlayedEligibilityChangesOnlyAtSavedStartAndCompletion() {
+        let episode = Episode(guid: "partial-transition", title: "Episode",
+                              audioURL: "https://example.com/partial.mp3")
+        XCTAssertFalse(EpisodeListFilter.partiallyPlayed.includes(episode))
+        episode.positionSeconds = 1
+        XCTAssertTrue(EpisodeListFilter.partiallyPlayed.includes(episode))
+        episode.positionSeconds = 0
+        XCTAssertFalse(EpisodeListFilter.partiallyPlayed.includes(episode))
+        episode.positionSeconds = 30
+        episode.isPlayed = true
+        XCTAssertFalse(EpisodeListFilter.partiallyPlayed.includes(episode))
+    }
+
+    func testFocusRecoveryKeepsNearestSurvivor() {
+        XCTAssertEqual(EpisodeListFocusRecovery.replacement(
+            focusedID: 2, oldIndex: 1, currentIDs: [1, 3, 4]
+        ), 3)
+        XCTAssertEqual(EpisodeListFocusRecovery.replacement(
+            focusedID: 4, oldIndex: 3, currentIDs: [1, 2, 3]
+        ), 3)
+        XCTAssertNil(EpisodeListFocusRecovery.replacement(
+            focusedID: 2, oldIndex: 1, currentIDs: [1, 2, 3]
+        ))
+        XCTAssertNil(EpisodeListFocusRecovery.replacement(
+            focusedID: 2, oldIndex: 1, currentIDs: [] as [Int]
+        ))
+    }
+
+    func testFocusRecoveryDoesNotOverrideLaterVoiceOverTarget() {
+        XCTAssertTrue(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: 2, selectionFocusedID: 2,
+            otherControlFocused: false
+        ))
+        // SwiftUI can clear focus as the old row disappears; recovery remains useful.
+        XCTAssertTrue(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: nil, selectionFocusedID: 2,
+            otherControlFocused: false
+        ))
+        XCTAssertFalse(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: 3, selectionFocusedID: 2,
+            otherControlFocused: false
+        ))
+        XCTAssertFalse(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: nil, selectionFocusedID: 3,
+            otherControlFocused: false
+        ))
+        XCTAssertFalse(EpisodeListFocusRecovery.shouldRestore(
+            capturedID: 2, currentFocusedID: nil, selectionFocusedID: 2,
+            otherControlFocused: true
+        ))
     }
 
     func testKeyIsScopedByFeedURL() {

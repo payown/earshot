@@ -5,6 +5,27 @@ import XCTest
 /// no network, no `BGTaskScheduler`.
 final class FeedRefreshPolicyTests: XCTestCase {
 
+    @MainActor
+    func testScheduleFailureDiagnosticOmitsPrivateErrorText() {
+        let capture = NetworkLogCapture()
+        let secret = "synthetic-scheduler-token-123"
+        let error = NSError(
+            domain: "https://private.example/feed?token=\(secret)",
+            code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "credentials=\(secret)"]
+        )
+
+        BackgroundFeedRefresher.scheduleNext(
+            after: 60,
+            submit: { _ in throw error },
+            logFailure: { capture.append($0) }
+        )
+
+        XCTAssertEqual(capture.messages, ["Could not schedule background feed refresh: scheduler error 3"])
+        XCTAssertFalse(capture.messages.joined().contains(secret))
+        XCTAssertFalse(capture.messages.joined().contains("private.example"))
+    }
+
     private let now = Date(timeIntervalSince1970: 1_000_000)
 
     func testRefreshesWhenLastRefreshIsNil() {

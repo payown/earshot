@@ -552,6 +552,73 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertEqual(EpisodeAction.markPlayed.label(for: episode), "Mark as unplayed")
     }
 
+    func test_replayCompletedEpisode_ignoresStaleLivePosition() throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episode = makeEpisode(ctx)
+        episode.isPlayed = true
+        episode.positionSeconds = 0
+        try ctx.save()
+
+        let defaults = UserDefaults.standard
+        let liveKey = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        defaults.set(liveKey, forKey: PlayerService.LivePositionKey.episode)
+        defaults.set(598, forKey: PlayerService.LivePositionKey.seconds)
+        AppSettingsStore(context: ctx).setRawValue("a-different-episode", for: SettingsKey.lastPlayingEpisodeID)
+        defer {
+            player.stopAndUnload()
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.episode)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.seconds)
+        }
+
+        player.load(episode)
+
+        XCTAssertEqual(player.currentPositionSeconds, 0,
+                       "A completed episode must replay from its saved zero, not stale crash-recovery seconds")
+
+        player.stopAndUnload()
+        // The reporter also tried marking the finished episode unplayed. That
+        // changes its played state, not its saved zero or the old tick's owner.
+        episode.isPlayed = false
+        try ctx.save()
+        defaults.set(liveKey, forKey: PlayerService.LivePositionKey.episode)
+        defaults.set(598, forKey: PlayerService.LivePositionKey.seconds)
+        player.load(episode)
+        XCTAssertEqual(player.currentPositionSeconds, 0,
+                       "Marking a completed episode unplayed must not resurrect another session's tick")
+    }
+
+    func test_replayAfterQueueAdvance_doesNotReuseFinishedEpisodesLiveTick() throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let finished = makeEpisode(ctx, guid: "finished")
+        let next = makeEpisode(ctx, guid: "next")
+        let queue = QueueRepository(context: ctx)
+        queue.add(finished)
+        queue.add(next)
+        player.load(finished)
+
+        let defaults = UserDefaults.standard
+        let finishedKey = DownloadTaskKey.key(feedURL: finished.podcast?.feedURL, guid: finished.guid)
+        defaults.set(finishedKey, forKey: PlayerService.LivePositionKey.episode)
+        defaults.set(598, forKey: PlayerService.LivePositionKey.seconds)
+        defer {
+            player.stopAndUnload()
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.episode)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.seconds)
+        }
+
+        player.markCurrentPlayedAndAdvance()
+        XCTAssertEqual(player.nowPlayingEpisodeID, next.persistentModelID)
+        XCTAssertEqual(finished.positionSeconds, 0)
+        XCTAssertTrue(finished.isPlayed)
+
+        player.load(finished)
+        XCTAssertEqual(player.currentPositionSeconds, 0)
+    }
+
     func test_markCurrentPlayedAndAdvance_transientPreviewDoesNotPersistEpisode() throws {
         let ctx = TestStore.freshContext()
         let player = PlayerService()

@@ -72,6 +72,21 @@ final class DownloadsPlayedFilterTests: XCTestCase {
         )
     }
 
+    func testPodcastOnlyFilterCannotChangeDownloadsMeaning() {
+        let context = TestStore.freshContext()
+        let podcast = makePodcast(context, "Show")
+        let unstarted = makeEpisode(context, podcast: podcast, guid: "new", title: "New")
+        let resumable = makeEpisode(context, podcast: podcast, guid: "partial", title: "Partial")
+        resumable.positionSeconds = 20
+        let result = DownloadsListFilter.apply(
+            downloaded: [unstarted, resumable], expired: [], podcastIDs: nil,
+            playedFilter: .partiallyPlayed, searchText: ""
+        )
+        XCTAssertEqual(result.visibleDownloaded.map(\.guid), ["new", "partial"])
+        XCTAssertEqual(DownloadsFilterAnnouncement.text(filter: .partiallyPlayed, playedCount: 0),
+                       "Showing all downloads")
+    }
+
     func testFolderAnnouncementIncludesVisibleCount() {
         XCTAssertEqual(
             DownloadsFilterAnnouncement.folderText(name: "News, Daily", visibleCount: 1),
@@ -185,6 +200,16 @@ final class DownloadsPlayedFilterTests: XCTestCase {
         let context = TestStore.freshContext()
         let store = AppSettingsStore(context: context)
         store.setRawValue("garbage", for: SettingsKey.downloadsPlayedFilter)
+        XCTAssertEqual(store.downloadsPlayedFilter(), .all)
+    }
+
+    func testPodcastOnlyFilterIsRejectedByDownloadsPreference() {
+        let context = TestStore.freshContext()
+        let store = AppSettingsStore(context: context)
+        store.setDownloadsPlayedFilter(.unheard)
+        store.setDownloadsPlayedFilter(.partiallyPlayed)
+        XCTAssertEqual(store.downloadsPlayedFilter(), .unheard)
+        store.setRawValue("partiallyPlayed", for: SettingsKey.downloadsPlayedFilter)
         XCTAssertEqual(store.downloadsPlayedFilter(), .all)
     }
 

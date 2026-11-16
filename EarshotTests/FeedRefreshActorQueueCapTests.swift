@@ -138,6 +138,42 @@ final class FeedRefreshActorQueueCapTests: XCTestCase {
         try assertDensePositions(container)
     }
 
+    func testQueueCapDoesNotMakeCompletedEpisodeUnplayedWhenEvicted() async throws {
+        let container = cleanContainer()
+        try seedAutoQueuePodcast(container, feedURL: "https://x/feed.xml", cap: 1, mark: d1)
+        let actor = FeedRefreshActor(modelContainer: container)
+
+        _ = try await actor.refreshOne(
+            feedURL: "https://x/feed.xml",
+            feed: FakeFeed(parsedFeed([parsedEpisode("a", d1), parsedEpisode("b", d2)])),
+            autoQueueEnabled: true
+        )
+        do {
+            let context = ModelContext(container)
+            let completed = try XCTUnwrap(context.fetch(FetchDescriptor<Episode>()).first { $0.guid == "b" })
+            completed.isPlayed = true
+            completed.playedAt = d3
+            try context.save()
+        }
+
+        // Keep-finished-in-Queue can leave a completed row queued. A later feed
+        // refresh evicts it under the count cap but must retain listening state.
+        _ = try await actor.refreshOne(
+            feedURL: "https://x/feed.xml",
+            feed: FakeFeed(parsedFeed([
+                parsedEpisode("a", d1), parsedEpisode("b", d2), parsedEpisode("c", d3)
+            ])),
+            autoQueueEnabled: true
+        )
+
+        let completed = try episode(container, guid: "b")
+        XCTAssertNil(completed.queueItem)
+        XCTAssertEqual(completed.status, .played)
+        XCTAssertEqual(completed.playedAt, d3)
+        XCTAssertTrue(EpisodeListFilter.unheard.apply(to: [completed]).isEmpty)
+        XCTAssertEqual(try queuedGUIDs(container, feedURL: "https://x/feed.xml"), ["c"])
+    }
+
     // MARK: Now-playing protection
 
     /// Acceptance criterion: the cap never dequeues the currently-playing episode.

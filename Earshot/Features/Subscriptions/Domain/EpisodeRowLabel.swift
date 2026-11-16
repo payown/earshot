@@ -1,5 +1,49 @@
 import Foundation
 
+/// One primary placement badge for a Library episode. Played and download
+/// availability remain separate facts in the row label.
+enum EpisodePlacementStatus: Equatable {
+    case nowPlaying
+    case inQueue
+    case inInbox
+
+    static func resolve(isNowPlaying: Bool, isQueued: Bool, isInInbox: Bool) -> Self? {
+        if isNowPlaying { return .nowPlaying }
+        if isQueued { return .inQueue }
+        if isInInbox { return .inInbox }
+        return nil
+    }
+
+    static func isInInbox(
+        status: EpisodeStatus,
+        dismissed: Bool,
+        catalogOnly: Bool,
+        inboxIncluded: Bool,
+        inboxExcluded: Bool,
+        optInOnly: Bool
+    ) -> Bool {
+        guard status == .newEpisode, !dismissed, !catalogOnly else { return false }
+        if optInOnly { return inboxIncluded }
+        return !InboxLogic.isExcluded(inboxExcluded: inboxExcluded, inboxIncluded: inboxIncluded)
+    }
+
+    var label: String {
+        switch self {
+        case .nowPlaying: "Now Playing"
+        case .inQueue: "Queued"
+        case .inInbox: "In Inbox"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .nowPlaying: "waveform"
+        case .inQueue: "list.bullet"
+        case .inInbox: "tray"
+        }
+    }
+}
+
 /// Pure builder for an ``EpisodeRow``'s VoiceOver label, extracted so the
 /// composition is unit-testable without a view (#535).
 ///
@@ -19,6 +63,8 @@ enum EpisodeRowLabel {
         downloadState: DownloadStatus? = nil,
         audioURL: String? = nil,
         isNowPlaying: Bool = false,
+        isQueued: Bool = false,
+        isInInbox: Bool = false,
         contextDetail: String? = nil,
         details: EpisodeSpokenDetails = EpisodeSpokenDetails()
     ) -> String {
@@ -26,7 +72,10 @@ enum EpisodeRowLabel {
         // episode's state before its title ("Now Playing, [title], …"). One state
         // regardless of playing or paused (Item 2). Callers that don't track
         // playback pass the default false and the prefix is omitted.
-        var parts = isNowPlaying ? ["Now Playing", episodeTitle] : [episodeTitle]
+        let placement = EpisodePlacementStatus.resolve(
+            isNowPlaying: isNowPlaying, isQueued: isQueued, isInInbox: isInInbox
+        )
+        var parts = placement.map { [$0.label, episodeTitle] } ?? [episodeTitle]
         if details.includesPodcastName, let podcastName, !podcastName.isEmpty {
             parts.append(podcastName)
         }

@@ -5,6 +5,28 @@ import SwiftData
 @MainActor
 final class QueueRepositoryTests: XCTestCase {
 
+    func testLibraryPlacementSnapshotTracksQueueAndRetainedPlayedEpisode() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Placement")
+        let first = makeEpisode(ctx, "first", podcast: podcast)
+        let retained = makeEpisode(ctx, "retained", podcast: podcast)
+        let other = makeEpisode(ctx, "other", podcast: podcast)
+        try ctx.save()
+
+        let repo = QueueRepository(context: ctx)
+        repo.add(first)
+        repo.add(retained)
+        retained.isPlayed = true // Keep-finished mode can retain a played QueueItem.
+        try ctx.save()
+        let queued = try await EpisodeQueueMembershipSnapshot.load(in: ctx.container)
+        XCTAssertEqual(queued, Set([first.persistentModelID, retained.persistentModelID]))
+        XCTAssertFalse(queued.contains(other.persistentModelID))
+
+        XCTAssertTrue(repo.cancelFromQueue(first))
+        let afterRemoval = try await EpisodeQueueMembershipSnapshot.load(in: ctx.container)
+        XCTAssertEqual(afterRemoval, Set([retained.persistentModelID]))
+    }
+
     // MARK: Fixtures
 
     private func makePodcast(_ ctx: ModelContext, _ title: String, autoQueue: Bool = false) -> Podcast {

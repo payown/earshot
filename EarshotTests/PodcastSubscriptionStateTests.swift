@@ -4,6 +4,34 @@ import XCTest
 
 @MainActor
 final class PodcastSubscriptionStateTests: XCTestCase {
+    func testWatchDownloadPickerFetchesFollowedPodcastsInTitleOrder() throws {
+        let context = TestStore.freshContext()
+        context.insert(Podcast(feedURL: "https://watch.example/legacy", title: "C Legacy"))
+        context.insert(Podcast(
+            feedURL: "https://watch.example/catalog", title: "Z Catalog",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        ))
+        context.insert(Podcast(
+            feedURL: "https://watch.example/followed", title: "A Followed",
+            subscriptionStateRaw: "followed"
+        ))
+        context.insert(Podcast(
+            feedURL: "https://watch.example/future", title: "B Future",
+            subscriptionStateRaw: "future-state"
+        ))
+        try context.save()
+
+        XCTAssertEqual(
+            try WatchDownloadPickerView.followedPodcasts(in: context).map(\.title),
+            ["A Followed", "B Future", "C Legacy"]
+        )
+    }
+
+    func testWatchDownloadPickerFetchHandlesEmptyLibrary() throws {
+        let context = TestStore.freshContext()
+        XCTAssertTrue(try WatchDownloadPickerView.followedPodcasts(in: context).isEmpty)
+    }
+
     func testFollowedPredicateAndCountFailOpenExceptExactCatalogValue() throws {
         let context = TestStore.freshContext()
         let legacy = Podcast(feedURL: "https://state.example/legacy", title: "Legacy")
