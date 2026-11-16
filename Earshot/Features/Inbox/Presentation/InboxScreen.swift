@@ -155,6 +155,14 @@ struct InboxScreen: View {
         // What the list actually shows: the inbox narrowed by the search field
         // (#457). With no search active this IS `inbox` (same array, no copy).
         let visible = EpisodeSearchFilter.filter(inbox, query: searchText)
+        // A refresh can remove a selected episode while the selection bar stays
+        // open. Count selected matches in the current filtered Inbox (including
+        // rows beyond the loaded page), not stale IDs from a prior snapshot.
+        let selectedVisibleCount = selection.isSelecting
+            ? visible.reduce(into: 0) { count, episode in
+                if selection.isSelected(episode.persistentModelID) { count += 1 }
+            }
+            : 0
         let displayed = visible.prefix(displayedEpisodeLimit)
         return GeometryReader { geometry in
             let wide = ListDetailLayoutPolicy.usesTwoPanes(
@@ -163,6 +171,18 @@ struct InboxScreen: View {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     inboxFilter
+#if DEBUG
+                    // Disposable, seeded UI regression only: model a remote
+                    // Inbox update while the batch bar is open.
+                    if selection.isSelecting && ScreenshotHarness.isSeeding &&
+                        CommandLine.arguments.contains("-inboxSelectionRefreshTest") {
+                        Button("Simulate Inbox update") {
+                            if let episode = visible.first(where: { selection.isSelected($0.persistentModelID) }) {
+                                InboxRepository(context: context).dismiss(episode)
+                            }
+                        }
+                    }
+#endif
                     Group {
                 if inbox.isEmpty {
                     ContentUnavailableView(
@@ -277,29 +297,29 @@ struct InboxScreen: View {
         .safeAreaInset(edge: .bottom) {
             if selection.isSelecting {
                 MultiSelectBar(
-                    count: selection.count,
+                    count: selectedVisibleCount,
                     primary: MultiSelectAction(
                         id: "add",
-                        title: MultiSelectActionLabel.addToFolder(count: selection.count, itemSingular: "episode"),
+                        title: MultiSelectActionLabel.addToFolder(count: selectedVisibleCount, itemSingular: "episode"),
                         systemImage: "folder",
                         handler: { presentBatch(.add, visible: visible) }
                     ),
                     secondary: [
                         MultiSelectAction(
                             id: "move",
-                            title: MultiSelectActionLabel.moveToFolder(count: selection.count, itemSingular: "episode"),
+                            title: MultiSelectActionLabel.moveToFolder(count: selectedVisibleCount, itemSingular: "episode"),
                             systemImage: "folder",
                             handler: { presentBatch(.move, visible: visible) }
                         ),
                         MultiSelectAction(
                             id: "queue",
-                            title: EpisodeBatchLabel.addToQueue(count: selection.count),
+                            title: EpisodeBatchLabel.addToQueue(count: selectedVisibleCount),
                             systemImage: "text.badge.plus",
                             handler: { addSelectedToQueue(visible: visible) }
                         ),
                         MultiSelectAction(
                             id: "played",
-                            title: EpisodeBatchLabel.markPlayed(count: selection.count),
+                            title: EpisodeBatchLabel.markPlayed(count: selectedVisibleCount),
                             systemImage: "checkmark.circle",
                             handler: { markSelectedPlayed(visible: visible) }
                         ),
@@ -316,6 +336,30 @@ struct InboxScreen: View {
         // the user asks for the tally when they want it (the list itself
         // updates live as they type).
         .searchable(text: $searchText, prompt: "Search inbox")
+        .onChange(of: displayed.map(\.persistentModelID)) { previous, current in
+            guard selection.isSelecting, let focused = focusedRowID,
+                  previous.contains(focused), !current.contains(focused) else { return }
+            // A remote refresh can remove the VoiceOver-focused selectable row.
+            // Move only that vanished focus to the stable Done button after the
+            // new list renders; never steal focus on an ordinary list update.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                // A nil focus state is ambiguous: the row may have vanished,
+                // or the user may have moved to another control. Never pull
+                // focus back after a deliberate move.
+                guard selection.isSelecting, focusedRowID == focused,
+                      !focusSelectButton else { return }
+                let currentInbox = currentInboxEpisodes()
+                let latest = EpisodeSearchFilter.filter(currentInbox, query: searchText)
+                    .prefix(displayedEpisodeLimit)
+                guard !latest.contains(where: { $0.persistentModelID == focused }) else { return }
+                focusedRowID = nil
+                if currentInbox.isEmpty || latest.isEmpty {
+                    focusEmpty = true
+                } else {
+                    focusSelectButton = true
+                }
+            }
+        }
         .modifier(CandidateSnapshotSyncModifier(
             candidates: candidates,
             snapshot: $currentCandidateSnapshot
@@ -679,7 +723,12 @@ struct InboxScreen: View {
 
     /// The selected episodes, in the current Inbox (search-filtered) order.
     private func selectedEpisodes(in visible: [Episode]) -> [Episode] {
-        visible.filter { selection.isSelected($0.persistentModelID) }
+        // Recheck episode-local status and dismissal at activation time too. A
+        // save can land after this view rendered but before a batch tap. Podcast
+        // and folder inclusion remain governed by the event-driven candidate
+        // snapshot and are not claimed as synchronously revalidated here.
+        InboxRepository.currentEpisodes(visible, in: context)
+            .filter { selection.isSelected($0.persistentModelID) }
     }
 
     /// Adds every selected episode to the end of the queue, in Inbox order, then

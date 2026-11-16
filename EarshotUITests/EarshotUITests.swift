@@ -516,6 +516,88 @@ final class EarshotUITests: XCTestCase {
                        "Each Inbox episode should be one VoiceOver stop: \(speech)")
     }
 
+    func testInboxBatchCountDropsWhenSelectedEpisodeLeavesInbox() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
+                               "-inboxSelectionRefreshTest"]
+        app.launch()
+        app.buttons["Inbox"].firstMatch.tap()
+
+        let title = "#169 – Apple's Price Hikes"
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Select"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 5))
+        row.tap()
+
+        let staleAction = app.buttons["Mark 1 episode as played"].firstMatch
+        XCTAssertTrue(staleAction.waitForExistence(timeout: 5))
+        app.buttons["Simulate Inbox update"].firstMatch.tap()
+        XCTAssertFalse(row.waitForExistence(timeout: 3), "The selected episode left the Inbox")
+        XCTAssertFalse(staleAction.exists,
+                       "The batch bar must not claim a removed episode remains actionable")
+        let noSelection = app.buttons["Mark as played"].firstMatch
+        XCTAssertTrue(noSelection.waitForExistence(timeout: 5))
+        XCTAssertFalse(noSelection.isEnabled, "An empty Inbox selection must not offer a no-op action")
+    }
+
+    func testIPadInboxVoiceOverSelectionAndMarkPlayed() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch.waitForExistence(timeout: 15))
+        app.buttons["Inbox"].firstMatch.tap()
+
+        let episodeTitle = "#169 – Apple's Price Hikes"
+        let normalRow = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", episodeTitle
+        )).firstMatch
+        XCTAssertTrue(normalRow.waitForExistence(timeout: 15), app.debugDescription)
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+
+        let select = app.buttons["Select"].firstMatch
+        XCTAssertTrue(select.waitForExistence(timeout: 5), app.debugDescription)
+        select.tap()
+        let done = app.buttons["Done"].firstMatch
+        if !done.waitForExistence(timeout: 2) {
+            // With VoiceOver active, a synthesized single tap may only focus.
+            // Its double tap then activates the focused toolbar control.
+            select.doubleTap()
+        }
+        XCTAssertTrue(done.waitForExistence(timeout: 5),
+                      "VoiceOver activation must enter selection mode")
+
+        let row = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", episodeTitle
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(row.isSelected, "Entering selection must not select an episode")
+        let markPlayed = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Mark 1 episode as played"
+        )).firstMatch
+        row.tap()
+        if !markPlayed.waitForExistence(timeout: 2) {
+            row.doubleTap()
+        }
+        XCTAssertTrue(markPlayed.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(row.isSelected, "The row must expose its selected trait to VoiceOver")
+        markPlayed.tap()
+        if row.waitForExistence(timeout: 2) {
+            // With VoiceOver active, a synthesized tap may only move focus to
+            // the action. Activate that same control before judging the result.
+            markPlayed.doubleTap()
+        }
+        XCTAssertFalse(row.waitForExistence(timeout: 3), "Played episode should leave Inbox")
+    }
+
     func testFolderMembershipPickerKeepsSelectionCurrent() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
