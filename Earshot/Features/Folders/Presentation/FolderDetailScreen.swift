@@ -759,7 +759,7 @@ struct FolderDetailScreen: View {
     }
 
     /// Just the podcast row's visuals — artwork, title, author. Shared by the
-    /// normal row (which adds the label + "Remove from folder" rotor) and the
+    /// navigation row (which adds the label + "Remove from folder" rotor) and the
     /// selectable row (which owns its own label + selection trait, #757).
     private func podcastRowVisual(for podcast: Podcast) -> some View {
         HStack(spacing: Spacing.md) {
@@ -787,12 +787,20 @@ struct FolderDetailScreen: View {
         let actions = [
             QuickActionItem(id: "removeFromFolder", label: "Remove from folder", isDestructive: true) { remove(podcast) },
         ]
-        // `.ignore` + one explicit label (the same "title, author" a `.combine`
-        // produced) — standardized with SubscriptionsView and SelectableRow so
-        // the scaffold #758 inherits has a single, unambiguous row pattern.
-        let base = podcastRowVisual(for: podcast)
-            .accessibilityElement(children: .ignore)
+        // A native link makes the podcast's episode list the default action,
+        // matching the Library row. Keep the folder removal in the actions
+        // rotor and context menu, and keep the podcast's stable row identity so
+        // VoiceOver returns to this row after navigating back.
+        let base = NavigationLink {
+            EpisodeListView(
+                podcast: podcast, showsBackToShows: false,
+                showsPlacementStatus: true
+            )
+        } label: {
+            podcastRowVisual(for: podcast)
+        }
             .accessibilityLabel(rowLabel(for: podcast))
+            .accessibilityHint("Opens podcast episodes")
             // Routed through the shared helper (#572, #577) so this row's rotor is
             // owned by the one custom action, like every other rotor in the app.
             .rotorActions(actions)

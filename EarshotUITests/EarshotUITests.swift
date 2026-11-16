@@ -834,7 +834,7 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(folder.waitForExistence(timeout: 5), app.debugDescription)
         folder.tap()
 
-        let podcast = app.descendants(matching: .any).matching(NSPredicate(
+        let podcast = app.buttons.matching(NSPredicate(
             format: "label == %@", "Folder test show"
         )).firstMatch
         XCTAssertTrue(podcast.waitForExistence(timeout: 5), app.debugDescription)
@@ -843,6 +843,50 @@ final class EarshotUITests: XCTestCase {
             app.navigationBars["Folder test show"].waitForExistence(timeout: 5),
             "Activating a podcast inside a folder should open its episode list"
         )
+        let back = app.navigationBars["Folder test show"].buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(podcast.waitForExistence(timeout: 5),
+                      "Back should return to the same folder podcast row")
+        let select = app.buttons["Select podcasts"].firstMatch
+        XCTAssertTrue(select.waitForExistence(timeout: 5))
+        select.tap()
+        let selectablePodcast = app.buttons.matching(NSPredicate(
+            format: "label == %@", "Folder test show"
+        )).firstMatch
+        XCTAssertTrue(selectablePodcast.waitForExistence(timeout: 5))
+        selectablePodcast.tap()
+        XCTAssertTrue(selectablePodcast.isSelected,
+                      "Selection mode must select the podcast instead of navigating")
+        XCTAssertFalse(app.navigationBars["Folder test show"].exists)
+    }
+
+    func testFolderPodcastIsOneVoiceOverStop() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library", "-folderRunTest"]
+        app.launch()
+        app.buttons["Folders"].firstMatch.tap()
+        let folder = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Folder path: Backlog test"
+        )).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 10), app.debugDescription)
+        folder.tap()
+        XCTAssertTrue(app.buttons["Folder test show"].waitForExistence(timeout: 5))
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        var speech: [String] = []
+        for _ in 0..<35 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.localizedCaseInsensitiveContains("New episodes") { break }
+        }
+        XCTAssertEqual(speech.filter { $0.contains("Folder test show") }.count, 1,
+                       "The podcast should be one VoiceOver row, not artwork/title fragments: \(speech)")
     }
 
     func testDownloadActivityUpdatesAfterDelayedFailureAndOffersBoundedRetry() {
