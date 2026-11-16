@@ -92,6 +92,20 @@ final class WatchPlayer {
     var hasLoadedItem: Bool { player.currentItem != nil }
     var currentChapterIndex: Int? { chapters.activeChapterIndex(at: positionSeconds) }
 
+    #if DEBUG
+    /// Deterministic presentation fixture for Watch UI automation; it never starts audio.
+    func loadUITestEpisode() {
+        episode = WatchEpisode(feedURL: "https://example.com/feed", guid: "watch-ui-test",
+                               title: "Sample episode", podcastTitle: "Sample podcast",
+                               audioURL: "https://example.com/sample.mp3")
+        positionSeconds = 125
+        durationSeconds = 600
+        status = "Ready to continue on Apple Watch"
+        chapters = [Chapter(index: 0, startTime: 0, title: "Introduction"),
+                    Chapter(index: 1, startTime: 120, title: "Interview")]
+    }
+    #endif
+
     init(library: WatchLibrary) {
         self.library = library
         let savedRate = UserDefaults.standard.float(forKey: "watchPlaybackRate")

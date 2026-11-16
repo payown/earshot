@@ -1,0 +1,19 @@
+Chapter 123 - One place to listen
+
+What to try first:
+
+Update Earshot to the proposed internal 1.2.6 (318) on iPhone and Apple Watch without deleting either app. On Watch Home, find the single Now Playing summary. With VoiceOver, check that it speaks the episode, podcast, playing or paused state, device, and position. Open it, return to Home, and check that focus returns to Now Playing. Confirm Library, Up Next, Inbox, Downloads, Bookmarks, and Settings remain reachable.
+
+Start an episode on Apple Watch. In Now Playing, try Play or Pause, skip backward and forward, restart, and adjust the playback position. Open Playback speed, Chapters when the episode has them, and Sleep timer. Check that each choice remains reachable and its selected state or result is spoken; return from each screen and check focus returns to its link. Try VoiceOver's two-finger double tap while playing, paused, and buffering on Home, Now Playing, and each secondary screen. It should act once on the established playback target.
+
+Open iPhone controls and Apple Watch controls without pressing Transfer. Merely viewing either set must not start audio, stop the other device, or move playback. While iPhone is playing, try its controls, then use Transfer to Apple Watch and wait for confirmation. Transfer back to iPhone. Note the last and first words heard, both positions, and whether either device kept playing unexpectedly. Repeat with the phone app in the background and with a brief connection interruption; a failed or uncertain transfer must say so without claiming success or closing either app.
+
+Pause an iPhone episode at the beginning and again later. Check that Continue saved episode on Apple Watch uses the latest saved place and leaves iPhone paused. Try with iPhone unreachable and an already downloaded Watch episode. The Watch should identify an unverified iPhone position and must not promise media it cannot access. Report the exact spoken message, position, device, connection state, and any focus jump or crash time. Immediate paired Queue refresh remains disabled; Queue changes can sync through iCloud when available.
+
+Kashe's story:
+
+Kashe opened the watch before leaving the house. Three places had offered to take her back to the same interview. This morning there was one. It told her what she was listening to, where it was playing, and how far she had gone.
+
+She opened the controls, changed the speed, and returned to the same spot in the list. Later she looked at the phone's controls while the interview played on her watch. Nothing moved until she chose Transfer. She waited for the answer before she put the phone away.
+
+“Show me where I am,” she told Renata. “Let me decide when to move.”
