@@ -821,6 +821,30 @@ final class EarshotUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Resume folder run"].exists)
     }
 
+    func testFolderPodcastRowOpensItsEpisodeList() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library", "-folderRunTest"]
+        app.launch()
+        let folders = app.buttons["Folders"].firstMatch
+        XCTAssertTrue(folders.waitForExistence(timeout: 10))
+        folders.tap()
+        let folder = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Folder path: Backlog test"
+        )).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 5), app.debugDescription)
+        folder.tap()
+
+        let podcast = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@", "Folder test show"
+        )).firstMatch
+        XCTAssertTrue(podcast.waitForExistence(timeout: 5), app.debugDescription)
+        podcast.tap()
+        XCTAssertTrue(
+            app.navigationBars["Folder test show"].waitForExistence(timeout: 5),
+            "Activating a podcast inside a folder should open its episode list"
+        )
+    }
+
     func testDownloadActivityUpdatesAfterDelayedFailureAndOffersBoundedRetry() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "downloads", "-downloadActivityTest"]
