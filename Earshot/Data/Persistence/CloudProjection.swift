@@ -256,6 +256,13 @@ actor CloudProjectionCoordinator: ModelActor {
         let lastSeenPubDate: Date?
     }
 
+    private func inboxScopeDiffers(_ old: PodcastValue, _ new: PodcastValue) -> Bool {
+        old.inboxIncluded != new.inboxIncluded
+            || old.inboxExcluded != new.inboxExcluded
+            || old.inboxMaxEpisodes != new.inboxMaxEpisodes
+            || old.inboxAgeLimitHours != new.inboxAgeLimitHours
+    }
+
     private struct EpisodeKey: Hashable, Comparable, Sendable {
         let feedURL: String
         let guid: String
@@ -1039,7 +1046,9 @@ actor CloudProjectionCoordinator: ModelActor {
     /// shell is promoted in place and receives a distinct restart marker in the
     /// same application-store save; the remote row remains the subscription
     /// authority and is never retimestamped as a local Follow.
-    private func applyRemoteActiveSubscription(feedURL: String) async throws -> Bool {
+    private func applyRemoteActiveSubscription(
+        feedURL: String
+    ) async throws -> Bool {
         let feed = FeedURLIdentity.canonical(feedURL)
         await PodcastIdentityWriteGate.shared.acquire(feedURLs: [feed])
         do {
@@ -1054,7 +1063,9 @@ actor CloudProjectionCoordinator: ModelActor {
         }
     }
 
-    private func applyRemoteActiveSubscriptionWhileLocked(feedURL feed: String) throws -> Bool {
+    private func applyRemoteActiveSubscriptionWhileLocked(
+        feedURL feed: String
+    ) throws -> Bool {
         refreshContextsFromStore()
         guard let remote = try projectionContext
             .fetch(FetchDescriptor<CloudPodcastProjection>())
@@ -1095,6 +1106,11 @@ actor CloudProjectionCoordinator: ModelActor {
         }
         let changed = existing == nil || wasCatalogOnly || before != value(podcast)
         if modelContext.hasChanges { try remoteSubscriptionSave(modelContext) }
+        // This feed's scope has already been saved. Notify before another feed
+        // can fail or reconciliation can stop; a retry would see no diff.
+        if existing == nil || wasCatalogOnly || inboxScopeDiffers(before, value(podcast)) {
+            postProjectionChange(.earshotInboxDidChange)
+        }
         return changed
     }
 
@@ -1155,6 +1171,7 @@ actor CloudProjectionCoordinator: ModelActor {
             for: Array(cloudByFeed.keys)
         )
         let pendingFollowFeeds = try pendingFollowFeedURLs(appContext)
+        var inboxScopeChanged = false
         for row in cloudByFeed.values.sorted(by: Self.projectionOrder) {
             let key = FeedURLIdentity.canonical(row.feedURL)
             if row.deletedAt != nil {
@@ -1165,8 +1182,9 @@ actor CloudProjectionCoordinator: ModelActor {
                     if remotePodcastDeletionDelayNanoseconds == 0 {
                         // Tests and non-UI coordinators retain deterministic,
                         // synchronous reconciliation.
-                        applicationChanged = SubscriptionDeletionRepository(context: appContext)
-                            .unsubscribe(podcast) || applicationChanged
+                        let removed = SubscriptionDeletionRepository(context: appContext)
+                            .unsubscribe(podcast)
+                        applicationChanged = removed || applicationChanged
                     } else {
                         scheduleRemotePodcastDeletion(podcast, feedURL: row.feedURL)
                         applicationChanged = true
@@ -1185,6 +1203,7 @@ actor CloudProjectionCoordinator: ModelActor {
                 applicationChanged = true
             }
             if value(row) != value(podcast) {
+                let before = value(podcast)
                 if localByFeed[key] != nil {
                     try PendingRemoteFeedGap.recordAdvance(
                         from: podcast.lastSeenPubDate, to: row.lastSeenPubDate,
@@ -1192,6 +1211,8 @@ actor CloudProjectionCoordinator: ModelActor {
                     )
                 }
                 copy(row, to: podcast)
+                inboxScopeChanged = inboxScopeDiffers(before, value(podcast))
+                    || inboxScopeChanged
             }
         }
         applicationChanged = try removeOrphanedLibraryRows(in: appContext)
@@ -1199,6 +1220,9 @@ actor CloudProjectionCoordinator: ModelActor {
         if appContext.hasChanges {
             try appContext.save()
             applicationChanged = true
+        }
+        if inboxScopeChanged {
+            postProjectionChange(.earshotInboxDidChange)
         }
 
         let podcasts = try podcastIdentity.allScalarPodcasts()
