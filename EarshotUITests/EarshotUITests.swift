@@ -908,9 +908,19 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(guide.waitForExistence(timeout: 10))
         guide.tap()
         XCTAssertTrue(app.navigationBars["Listening workflow guide"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["What each screen is for"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Find listening controls"].firstMatch.exists)
+        let screenPurpose = app.staticTexts["What each screen is for"].firstMatch
+        for _ in 0..<12 {
+            if screenPurpose.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(screenPurpose.isHittable,
+                      "The original workflow sections should remain reachable below the new controls section")
         let inbox = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Inbox helps you review")).firstMatch
-        XCTAssertTrue(inbox.exists)
+        for _ in 0..<4 {
+            if inbox.isHittable { break }
+            app.swipeUp()
+        }
         XCTAssertTrue(inbox.isHittable)
     }
 
