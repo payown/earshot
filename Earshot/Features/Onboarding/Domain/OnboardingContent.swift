@@ -41,12 +41,12 @@ enum OnboardingContent {
         OnboardingPage(
             id: 2, symbol: "lock.shield",
             title: "Your privacy",
-            body: "Earshot collects no data. Your subscriptions, listening history, and settings stay on this device. No crash reporting, no analytics, no third-party trackers, no advertising IDs."
+            body: "Your subscriptions, queue, folders, bookmarks, playback state, listening history, and shared settings can sync through your private iCloud account. Downloads and device-only settings stay on this device. Earshot has no in-app crash reporting, analytics, third-party trackers, or advertising IDs."
         ),
         OnboardingPage(
             id: 3, symbol: "bolt.circle",
             title: "Quick Actions",
-            body: "Every episode and podcast has Quick Actions — shortcuts you arrange yourself. With VoiceOver they appear in the Actions rotor in the order you choose."
+            body: "Arrange episode and podcast shortcuts in Settings, Quick Actions. With VoiceOver they appear in the Actions rotor in the order you choose."
         ),
         OnboardingPage(
             id: 4, symbol: "clock.arrow.circlepath",
@@ -62,7 +62,7 @@ enum OnboardingContent {
         OnboardingPage(
             id: 6, symbol: "checkmark.circle",
             title: "You're all set",
-            body: "You can revisit any of these settings any time from the Settings screen. Happy listening."
+            body: "Library filters change which episodes you see; a podcast's Episode Filters control which new episodes reach Inbox or Queue. Find the Inbox, Queue, and Downloads guide in Settings, Help & About."
         ),
     ]
 }

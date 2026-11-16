@@ -1,5 +1,13 @@
 # Inbox, Queue, and Downloads guide
 
+## Find listening controls
+
+In Library, open a podcast and use its All, Unplayed, or Partially Played filter to change which episode rows you see. These are display filters. In that podcast's settings, Episode Filters instead decide which new episodes enter Inbox or Queue; filtered episodes stay in the podcast library.
+
+Settings, Quick Actions controls which episode and podcast actions appear. With VoiceOver, use a row's Actions rotor to find enabled actions. The actual episode action says Download or Remove download according to the episode's state. Enable Export audio there if you want to share an episode's audio from its row.
+
+Inbox is for reviewing new episodes, Queue is the listening order, and Downloads is audio stored on this device. In Library, use Folders to group podcasts and hand-picked episodes. The sections below explain what each screen changes and how downloads work.
+
 ## What each screen is for
 
 Inbox helps you review newly arrived episodes and decide what to listen to. Clearing it dismisses the episodes currently in that Inbox scope. They remain in their podcasts, and new arrivals can appear after a later refresh.
@@ -32,7 +40,7 @@ For an hourly news podcast that you want to download only after choosing it:
 4. Set Inbox episode limit to 1. Leave Remove from inbox after at No limit if you want the latest episode to remain regardless of age.
 5. Refresh. After a successful refresh, older Inbox entries are dismissed and the newest eligible entry remains. This also works when the server reports no new feed content.
 
-The count and age limits are independent. No limit for age does not disable a count limit. Age removal uses publication time and leaves partially played episodes alone; the count limit still keeps the newest entries. These limits hide Inbox entries without deleting downloaded files, marking episodes played, or removing episodes from the podcast's library. Existing downloads remain until you remove them or another download-cleanup rule applies. Increasing a limit does not automatically restore entries already dismissed.
+The count and age limits are independent. No limit for age does not disable a count limit. Age removal uses publication time and leaves partially played episodes alone; the count limit keeps the newest untouched entries while retaining episodes you have started. These limits hide Inbox entries without deleting downloaded files, marking episodes played, or removing episodes from the podcast's library. Existing downloads remain until you remove them or another download-cleanup rule applies. Increasing a limit does not automatically restore entries already dismissed.
 
 Earlier versions, including 1.2.1 (255), did not consistently apply Inbox count and age limits after refresh. The correction is included in this guide's accompanying update.
 

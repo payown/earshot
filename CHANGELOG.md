@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - An open Inbox refreshes when iCloud changes a podcast's Inbox inclusion or limits, without changing episode dismissals or listening progress.
+- Onboarding now accurately explains optional private iCloud sync instead of saying listening data always stays on one device. The offline listening guide also points to filters, Quick Actions, Folders, and audio export.
 
 - Inbox count limits now keep partially played episodes visible in Inbox while limiting untouched episodes. Saved listening positions are unchanged. This also applies after an unchanged feed refresh.
 
