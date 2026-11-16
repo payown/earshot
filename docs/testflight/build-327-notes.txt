@@ -1,0 +1,14 @@
+Chapter 131 - The row that still belonged
+
+What to try first:
+
+1. Update Earshot to internal 1.2.6 (327) in place. Do not delete the app or reset your library. It retains build 326's work and adds folder navigation, clearer onboarding and safer Inbox selection.
+2. In Library, Folders, open a folder and double tap a podcast row. It should open that podcast's episodes. Go Back and check that VoiceOver returns sensibly to the folder row. Its Actions rotor should still offer “Remove from folder.” In Select mode, activating the row should select it instead of opening it.
+3. If you have a separate fresh test installation, visit all ten onboarding pages with Back and Next. Each heading should say its title and page number. On “Add your first podcast,” Next stays dimmed until you follow a podcast; after that, “Start Listening” should work on the last page. Do not erase your real library to test this. Existing users can open Settings, Help & About, “Inbox, Queue, and Downloads guide.” Check that the guide opens without a connection and remains readable at the largest text size.
+4. In Settings, Quick Actions, check the explanation. In a podcast episode list and Queue, double tap should open details; enabled episode actions belong in VoiceOver's Actions rotor. The configured download choice is “Download / Remove Download,” while an episode's action names its actual state.
+5. On iPad, open Inbox, choose “Select,” and activate one episode. It should announce selected and offer “Mark 1 episode as played.” Mark it Played; it should leave Inbox. Separately, remove a selected row or change its podcast's Inbox inclusion or folder membership before using a batch action. The count and focus should recover; an episode that left the chosen scope must not be marked Played by the stale action. Try both a sole row and one among several.
+6. Check two-device Inbox differences and Folder Run playback separately. Historical dismissals are not restored. Send the episode, device, OS, steps and spoken words for a wrong row, action, focus target or listening state. No new Watch handoff claim is made here.
+
+Kashe's story:
+
+Kashe opened a show from its folder, then returned to the same row. Later, she selected an Inbox episode just as the show left that scope. The old selection could not silently mark it Played. She checked the list and chose her next episode on purpose.
