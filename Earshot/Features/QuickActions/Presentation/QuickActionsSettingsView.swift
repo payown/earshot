@@ -10,7 +10,7 @@ struct QuickActionsSettingsView: View {
     var body: some View {
         List {
             Section {
-                Text("Episode, Podcast, and Queue actions fill the VoiceOver Actions rotor; the first enabled action is the default double-tap. Add, remove, or reorder them. Player skip increments add buttons to the full player. Rewind and Fast-forward actions configure each button's VoiceOver Actions rotor, including chapter and queue navigation; either button can perform either action. You can remove all player actions. A skip matching the primary interval in Playback settings is hidden from the extra-action lists and returns if that interval changes.")
+                Text("Episode, Podcast, and Queue actions fill the VoiceOver Actions rotor. Add, remove, or reorder them. In podcast episode lists and Queue, double tap opens details; use the rotor for other enabled actions. Player skip increments add buttons to the full player. Rewind and Fast-forward actions configure each button's VoiceOver Actions rotor, including chapter and queue navigation; either button can perform either action. You can remove all player actions. A skip matching the primary interval in Playback settings is hidden from the extra-action lists and returns if that interval changes.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
