@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Inbox batch actions count only selected episodes still visible in the current Inbox; a refresh removing a selected row no longer leaves an enabled action that does nothing.
 - Inbox batch actions recheck podcast Inbox policy and selected-folder membership when tapped, so a delayed refresh cannot mark or file an episode that already left the chosen scope.
 - An episode recovered during iCloud reconciliation receives an earlier synced Played state even when its catalog change arrives during another pass.
+- Feed updates and iCloud imports apply a recovered episode's existing Played state more promptly; cold-launch reconciliation remains background work.
 - An open Inbox refreshes when iCloud changes a podcast's Inbox inclusion or limits, without changing episode dismissals or listening progress.
 - Podcasts listed inside a folder now open their episode lists when activated. Remove from folder remains in the row actions, and selection mode still selects the podcast.
 - Onboarding now introduces Inbox, Queue, Downloads, filters, Quick Actions, folders, audio export, and optional private iCloud sync in ten pages instead of saying listening data always stays on one device. Quick Actions help now accurately distinguishes row double taps from VoiceOver rotor actions, and the offline listening guide points to these controls.

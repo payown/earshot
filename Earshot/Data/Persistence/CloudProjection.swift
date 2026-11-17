@@ -597,6 +597,11 @@ actor CloudProjectionCoordinator: ModelActor {
         reconcileTask == nil && !reconciliationRequestedWhileRunning && !isApplyingRemote
     }
 
+    func reconciliationStateForTesting() -> String {
+        "task=\(reconcileTask != nil), requested=\(reconciliationRequestedWhileRunning), " +
+        "applying=\(isApplyingRemote), active=\(activeReconciliationCount), stopped=\(isStopped)"
+    }
+
     nonisolated static func makeForTesting(
         applicationContainer: ModelContainer,
         projectionContainer: ModelContainer,
@@ -990,7 +995,7 @@ actor CloudProjectionCoordinator: ModelActor {
         await waitForActiveReconciliationsToDrain()
     }
 
-    private func scheduleReconciliation() {
+    private func scheduleReconciliation(priority: TaskPriority = .utility) {
         guard !isStopped else { return }
         guard reconcileTask == nil else {
             reconciliationRequestedWhileRunning = true
@@ -998,9 +1003,10 @@ actor CloudProjectionCoordinator: ModelActor {
         }
         let taskID = UUID()
         reconcileTaskID = taskID
-        // Keep the background priority while retaining the task so stop() can
-        // cancel and join it. Detached work is never left untracked.
-        reconcileTask = Task.detached(priority: .background) { [weak self] in
+        // Catalog and import changes need timely state reconciliation. Retain
+        // the task so stop() can cancel and join it; cold launch stays below
+        // user work by explicitly requesting background priority.
+        reconcileTask = Task.detached(priority: priority) { [weak self] in
             await self?.runScheduledReconciliation(taskID: taskID)
         }
     }
@@ -1010,7 +1016,7 @@ actor CloudProjectionCoordinator: ModelActor {
     /// background task so `stop()` can cancel and join it during reset or
     /// account replacement.
     func scheduleInitialReconciliationInBackground() {
-        scheduleReconciliation()
+        scheduleReconciliation(priority: .background)
     }
 
     private func runScheduledReconciliation(taskID: UUID) async {
