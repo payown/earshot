@@ -374,8 +374,11 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
 
         await coordinator.scheduleInitialReconciliationInBackground()
-        for _ in 0..<200 where checkpointCalls.withLock({ $0 }) == 0 {
-            try await Task.sleep(for: .milliseconds(5))
+        // The scheduled task has background priority and may not start within
+        // one second on a loaded CI simulator. Wait for admission before
+        // testing that stop cancels and joins the already-running work.
+        for _ in 0..<400 where checkpointCalls.withLock({ $0 }) == 0 {
+            try await Task.sleep(for: .milliseconds(50))
         }
         XCTAssertEqual(checkpointCalls.withLock { $0 }, 1)
 
@@ -507,13 +510,11 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         for _ in 0..<100 {
             center.post(name: .earshotCloudKitImportDidFinish, object: nil)
         }
-        // The coordinator is deliberately pinned to a background serial
-        // executor. Give its scheduled reconciliation enough time under a
-        // loaded CI simulator instead of treating main-queue scheduling as a
-        // proxy for whether the projection was applied.
-        for _ in 0..<500 {
-            if try ModelContext(app).fetchCount(FetchDescriptor<Podcast>()) == 1,
-               applyCount.withLock({ $0 }) == 1 { break }
+        // The applied notification follows the durable write. Repeatedly
+        // fetching the store while its background actor is reconciling can
+        // contend with the work this test is waiting for.
+        for _ in 0..<2_000 {
+            if applyCount.withLock({ $0 }) == 1 { break }
             try await Task.sleep(for: .milliseconds(10))
         }
 
@@ -1913,6 +1914,10 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
         try await coordinator.start()
         defer { Task { await coordinator.stop() } }
+        let catalogEvents = Mutex(0)
+        await coordinator.setCatalogNotificationCheckpointForTesting {
+            catalogEvents.withLock { $0 += 1 }
+        }
 
         let parsed = ParsedFeed(
             title: "Show", artworkURL: nil, description: nil, author: nil,
@@ -1932,16 +1937,102 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(outcome.added, 0)
         XCTAssertEqual(outcome.recoveredLocalCount, 2)
 
-        var recovered: Episode?
-        for _ in 0..<500 {
-            recovered = try ModelContext(app).fetch(FetchDescriptor<Episode>())
-                .first { $0.guid == "missing" }
-            if recovered?.isPlayed == true { break }
-            try await Task.sleep(for: .milliseconds(10))
+        for _ in 0..<400 where catalogEvents.withLock({ $0 }) == 0 {
+            try await Task.sleep(for: .milliseconds(5))
         }
+        XCTAssertGreaterThan(catalogEvents.withLock { $0 }, 0)
+        var reconciliationIdle = false
+        for _ in 0..<400 {
+            reconciliationIdle = await coordinator.reconciliationIsIdleForTesting()
+            if reconciliationIdle { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(reconciliationIdle, "Catalog reconciliation must finish")
+        let recovered = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+            .first { $0.guid == "missing" }
         XCTAssertTrue(recovered?.isPlayed == true,
                       "Single-feed recovery must apply the prior remote Played contribution")
         XCTAssertTrue(recovered?.inboxDismissed == true)
+        await coordinator.stop()
+    }
+
+    func testCatalogChangeDuringRemoteReconciliationAppliesNewEpisodeState() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/overlap.xml"
+        let podcast = Podcast(feedURL: feedURL, title: "Show")
+        app.mainContext.insert(podcast)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let remotePodcast = CloudPodcastProjection()
+        remotePodcast.feedURL = feedURL
+        remotePodcast.title = "Show"
+        projection.mainContext.insert(remotePodcast)
+        let remotePlayed = CloudEpisodeStateProjection()
+        remotePlayed.feedURL = feedURL
+        remotePlayed.episodeGUID = "new"
+        remotePlayed.sourceDeviceID = "first-device"
+        remotePlayed.isPlayed = true
+        remotePlayed.playedUpdatedAt = .now
+        projection.mainContext.insert(remotePlayed)
+        try projection.mainContext.save()
+
+        let center = NotificationCenter()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: center, deviceID: "second-device"
+        )
+        try await coordinator.start(performInitialReconciliation: false)
+        let gate = QueueApplicationRaceGate()
+        let reconciliationCount = Mutex(0)
+        let catalogNotificationCount = Mutex(0)
+        await coordinator.setFinalReconciliationCheckpointForTesting {
+            let isFirst = reconciliationCount.withLock { count in
+                count += 1
+                return count == 1
+            }
+            if isFirst { await gate.pause() }
+        }
+        await coordinator.setCatalogNotificationCheckpointForTesting {
+            catalogNotificationCount.withLock { $0 += 1 }
+        }
+
+        let initialReconciliation = Task { try await coordinator.reconcile() }
+        for _ in 0..<500 where reconciliationCount.withLock({ $0 }) == 0 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard reconciliationCount.withLock({ $0 }) == 1 else {
+            XCTFail("The initial reconciliation did not reach its final checkpoint")
+            await coordinator.stop()
+            return
+        }
+
+        let episode = Episode(
+            guid: "new", title: "New", audioURL: "https://example.com/new.mp3",
+            pubDate: .now
+        )
+        episode.podcast = podcast
+        app.mainContext.insert(episode)
+        try app.mainContext.save()
+        center.post(name: .earshotInboxDidChange, object: nil)
+        for _ in 0..<200 where catalogNotificationCount.withLock({ $0 }) == 0 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(catalogNotificationCount.withLock { $0 }, 1)
+
+        await gate.resume()
+        try await initialReconciliation.value
+        var reconciliationIdle = false
+        for _ in 0..<400 {
+            reconciliationIdle = await coordinator.reconciliationIsIdleForTesting()
+            if reconciliationIdle { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(reconciliationIdle, "Deferred catalog reconciliation must finish")
+        let recovered = try ModelContext(app).fetch(FetchDescriptor<Episode>())
+            .first { $0.guid == "new" }
+        XCTAssertTrue(recovered?.isPlayed == true,
+                      "A catalog change during reconciliation must apply prior remote Played state")
         await coordinator.stop()
     }
 
