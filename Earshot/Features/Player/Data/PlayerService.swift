@@ -802,7 +802,7 @@ final class PlayerService {
     ) {
         beginUserMediaAttempt()
         guard !audioURL.isEmpty else {
-            AppLog.player.error("playPreview called with no audio URL for \(title, privacy: .public)")
+            AppLog.player.error("playPreview called with no audio URL")
             return
         }
         // A detached @Model: built with `init` and deliberately never inserted into
@@ -2512,7 +2512,7 @@ final class PlayerService {
         } catch {
             let failure = error as NSError
             recordPlaybackDiagnostic("session.configure.failed domain=\(failure.domain) code=\(failure.code)")
-            AppLog.player.error("Failed to configure audio session: \(error.localizedDescription, privacy: .public)")
+            AppLog.player.error("Failed to configure audio session (code \(failure.code, privacy: .public))")
             return false
         }
         // A route may not support the stereo preference. That does not undo
@@ -2798,7 +2798,7 @@ final class PlayerService {
                 // The client persisted the pending boundary before network I/O.
             } catch {
                 AppLog.data.info(
-                    "Direct playback handoff upload deferred: \(error.localizedDescription, privacy: .public)"
+                    "Direct playback handoff upload deferred: \(NetworkDiagnostic.reason(error), privacy: .public)"
                 )
             }
         }
@@ -2818,7 +2818,7 @@ final class PlayerService {
                     await race.resolve(nil)
                 } catch {
                     AppLog.data.info(
-                        "Direct playback handoff fetch fell back to local state: \(error.localizedDescription, privacy: .public)"
+                        "Direct playback handoff fetch fell back to local state: \(NetworkDiagnostic.reason(error), privacy: .public)"
                     )
                     await race.resolve(nil)
                 }
@@ -3068,7 +3068,7 @@ final class PlayerService {
         // The finished episode just left the inbox — refresh the tab badge
         // (the badge no longer polls on every position save, #736).
         NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
-        AppLog.player.info("Marked episode played: \(episode.title, privacy: .public)")
+        AppLog.player.info("Marked episode played")
     }
 
     private func persistLastPlayingEpisode(_ episode: Episode) {
@@ -3109,7 +3109,7 @@ final class PlayerService {
             }
             return true
         } catch {
-            AppLog.player.error("Failed to persist playback state: \(error.localizedDescription, privacy: .public)")
+            AppLog.player.error("Failed to persist playback state: \(NetworkDiagnostic.reason(error), privacy: .public)")
             return false
         }
     }
@@ -3442,7 +3442,7 @@ final class PlayerService {
                 self.currentAudioProcessingMetrics = nil
                 item.audioMix = nil
                 AppLog.player.notice(
-                    "Audio processing unavailable for this media; using baseline playback: \(error.localizedDescription, privacy: .public)"
+                    "Audio processing unavailable for this media; using baseline playback: \(NetworkDiagnostic.reason(error), privacy: .public)"
                 )
             }
         }
