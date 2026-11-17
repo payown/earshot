@@ -462,7 +462,7 @@ final class EarshotUITests: XCTestCase {
         XCTAssertFalse(queued.label.contains("In Inbox"), "The Queue takes priority in Search")
     }
 
-    func testQuickActionsDownloadSettingNamesBothOutcomes() {
+    func testQuickActionsSettingsNameReversibleEpisodeActions() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
         app.launch()
@@ -477,6 +477,11 @@ final class EarshotUITests: XCTestCase {
             format: "label BEGINSWITH %@", "Download / Remove Download, enabled"
         ))
         XCTAssertTrue(download.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        let played = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Mark as Played / Unplayed, enabled"
+        ))
+        for _ in 0..<8 where !played.firstMatch.exists { app.swipeUp() }
+        XCTAssertTrue(played.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
     func testInboxVoiceOverHasOneStopPerEpisode() throws {
