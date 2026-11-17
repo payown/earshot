@@ -1,11 +1,13 @@
-# Earshot 1.2.6 (327) internal TestFlight receipt — 2026-11-16
+# Earshot 1.2.6 (327) TestFlight receipt — 2026-11-17
 
-Build 327 is an internal test candidate, not a public or App Store release.
+Build 327 reached the existing internal group on November 16 and the existing
+Public Testers group on November 17. It is not an App Store release.
 Its signed binary came from commit `eb3c10e935ffe7ccbcb40904dc0b3e4ade9963c4`
 on `test/earshot-internal327-20261116`. This branch combines ready-for-review
 PRs #1085 (folder podcast navigation), #1086 (onboarding and help), #1087
 (stale Inbox batch selection), and #1088 (activation-time scope guard, stacked
-after #1087). None of these PRs was merged for this release.
+after #1087). At the November 17 check, all four PRs were ready for review,
+open, and unmerged.
 
 ## Source and artifact
 
@@ -34,12 +36,14 @@ after #1087). None of these PRs was merged for this release.
   [build-327-notes.txt](build-327-notes.txt); ASC omits its final newline.
 - Internal build state: `IN_BETA_TESTING`. The existing Internal Testing Group
   `0d4027e4-f63b-4798-a882-5c8c29b16d89` has seven testers and
-  `hasAccessToAllBuilds=true`; it is the only group returned for this build.
+  `hasAccessToAllBuilds=true`.
   A manual add to this group was rejected with HTTP 422 because ASC cannot
   explicitly assign this all-builds internal group. No retry was made.
-- External state: `READY_FOR_BETA_SUBMISSION`; no public group or beta review
-  submission. `autoNotifyEnabled=true` does not establish delivery of any
-  individual notification.
+- On November 17 the existing Public Testers group
+  `9a7512e9-a451-4917-9554-51931777c252` was added to this same build.
+  Apple beta review is `APPROVED`; external build state is `IN_BETA_TESTING`.
+  ASC lists exactly these two groups. `autoNotifyEnabled=true` does not
+  establish delivery of any individual notification.
 - Xcode export created an unused `AWAITING_UPLOAD` reservation
   `a7b184a8-fb2e-4c2d-9cbd-a8f0f7b18baf` with zero files. Earlier exports
   for builds 324 and 326 show the same separate reservation pattern. The
@@ -47,9 +51,21 @@ after #1087). None of these PRs was merged for this release.
 
 ## Remaining acceptance
 
-Use the [detailed device test plan](build-327-device-test-plan.md). Physical
-VoiceOver folder focus/rotor, ten-page onboarding and largest-text behavior,
-and iPad Inbox selection/focus remain unverified. Two-device Inbox differences
-and Folder Run playback remain separate checks. Do not restore historical
-ambiguous dismissals. The four Watch scenarios Michael accepted on build 326
-are not claimed as new build 327 tests.
+Michael subsequently reported that the build 327 checklist tasks passed.
+Record this as his scoped acceptance of the folder and iPad Inbox checks in the
+[detailed device test plan](build-327-device-test-plan.md), not as proof of an
+optional fresh-install ten-page onboarding test or every unmentioned device,
+OS, or batch action. Two-device Inbox differences, Folder Run playback, and
+the unresolved build 324 crash remain separate checks. Do not restore
+historical ambiguous dismissals. The four Watch scenarios Michael accepted on
+build 326 are not claimed as new build 327 tests.
+
+## Main integration gate
+
+`main` requires linear history and the `Build and test (EarshotTests)` check;
+the protected branch requires zero GitHub approval reviews. Individual PR
+checks and the combined build 327 source CI passed. The first normal merge
+attempt for #1085 used a merge commit and GitHub rejected it with “Merge
+commits are not allowed on this repository.” The request did not execute, and
+main stayed unchanged. Do not claim a GitHub review approval or a merged PR.
+The fresh-install onboarding path remains physically unverified.
