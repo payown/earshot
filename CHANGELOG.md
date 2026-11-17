@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An episode recovered during iCloud reconciliation receives an earlier synced Played state even when its catalog change arrives during another pass.
 - An open Inbox refreshes when iCloud changes a podcast's Inbox inclusion or limits, without changing episode dismissals or listening progress.
 - Podcasts listed inside a folder now open their episode lists when activated. Remove from folder remains in the row actions, and selection mode still selects the podcast.
 - Onboarding now introduces Inbox, Queue, Downloads, filters, Quick Actions, folders, audio export, and optional private iCloud sync in ten pages instead of saying listening data always stays on one device. Quick Actions help now accurately distinguishes row double taps from VoiceOver rotor actions, and the offline listening guide points to these controls.
