@@ -374,8 +374,11 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
 
         await coordinator.scheduleInitialReconciliationInBackground()
-        for _ in 0..<200 where checkpointCalls.withLock({ $0 }) == 0 {
-            try await Task.sleep(for: .milliseconds(5))
+        // The scheduled task has background priority and may not start within
+        // one second on a loaded CI simulator. Wait for admission before
+        // testing that stop cancels and joins the already-running work.
+        for _ in 0..<400 where checkpointCalls.withLock({ $0 }) == 0 {
+            try await Task.sleep(for: .milliseconds(50))
         }
         XCTAssertEqual(checkpointCalls.withLock { $0 }, 1)
 
