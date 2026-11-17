@@ -9,6 +9,9 @@ final class QuickActionSettingsRotorActionTests: XCTestCase {
         XCTAssertEqual(QueueItemAction.download.label, "Download")
         XCTAssertEqual(EpisodeAction.download.id, "download")
         XCTAssertEqual(QueueItemAction.download.id, "download")
+        XCTAssertEqual(EpisodeAction.markPlayed.settingsLabel, "Mark as Played / Unplayed")
+        XCTAssertEqual(EpisodeAction.markPlayed.label, "Mark as played")
+        XCTAssertEqual(EpisodeAction.markPlayed.id, "markPlayed")
         XCTAssertEqual(EpisodeAction.playNow.settingsLabel, "Play now")
         XCTAssertEqual(QueueItemAction.playNow.settingsLabel, "Play now")
     }
