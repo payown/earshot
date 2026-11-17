@@ -31,10 +31,14 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
-    /// Names the configurable setting; actual episode actions keep their
-    /// state-specific Download or Remove download labels.
+    /// Names configurable settings; actual episode actions keep their
+    /// state-specific Download/Remove download and Played/Unplayed labels.
     var settingsLabel: String {
-        self == .download ? "Download / Remove Download" : label
+        switch self {
+        case .download: "Download / Remove Download"
+        case .markPlayed: "Mark as Played / Unplayed"
+        default: label
+        }
     }
 
     /// Base label. Dynamic variants (Mark as played/unplayed, Download/Remove

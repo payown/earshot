@@ -320,6 +320,8 @@ final class DownloadActivityTests: XCTestCase {
         XCTAssertTrue(sections.allSatisfy { !$0.paragraphs.isEmpty })
         XCTAssertTrue(sections.flatMap(\.paragraphs).contains { $0.contains("Read the summary") })
         XCTAssertTrue(sections.flatMap(\.paragraphs).contains { $0.contains("Download N episodes") })
+        XCTAssertTrue(sections.flatMap(\.paragraphs).contains { $0.contains("Mark as Played / Unplayed") })
+        XCTAssertTrue(sections.flatMap(\.paragraphs).contains { $0.contains("Episode actions — Available") })
         XCTAssertTrue(sections.flatMap(\.paragraphs).contains {
             $0.contains("If Delete downloads when done is on, Clear inbox also removes those episodes' downloaded audio.")
         })
