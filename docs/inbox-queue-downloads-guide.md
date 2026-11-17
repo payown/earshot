@@ -4,7 +4,11 @@
 
 In Library, open a podcast and use its All, Unplayed, or Partially Played filter to change which episode rows you see. These are display filters. In that podcast's settings, Episode Filters instead decide which new episodes enter Inbox or Queue; filtered episodes stay in the podcast library.
 
-Settings, Quick Actions controls which episode and podcast actions appear. With VoiceOver, use a row's Actions rotor to find enabled actions. The Mark as played setting appears as Mark as unplayed on an episode already marked played. The download action says Download or Remove download according to the episode's state. Enable Export audio there if you want to share an episode's audio from its row.
+Settings, Quick Actions controls which episode and podcast actions appear. With VoiceOver, use a row's Actions rotor to find enabled actions.
+
+To mark an already played episode unplayed, open Library, then its podcast. Set Filter episodes to All, focus the episode row, and choose Mark as unplayed from the Actions rotor. If that action is missing, open Settings, Quick Actions, Episode actions — Available, then add Mark as Played / Unplayed. To change several episodes, choose Select episodes, select the rows, choose the action naming how many episodes will be marked unplayed, then confirm Mark as unplayed. This changes only selected episodes, not every episode in the podcast.
+
+The download action says Download or Remove download according to the episode's state. Enable Export audio in Quick Actions if you want to share an episode's audio from its row.
 
 Inbox is for reviewing new episodes, Queue is the listening order, and Downloads is audio stored on this device. In Library, use Folders to group podcasts and hand-picked episodes. The sections below explain what each screen changes and how downloads work.
 
