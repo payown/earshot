@@ -903,6 +903,63 @@ final class EarshotUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Resume folder run"].exists)
     }
 
+    func testFolderPodcastRowOpensItsEpisodeList() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library", "-folderRunTest"]
+        app.launch()
+        let folders = app.buttons["Folders"].firstMatch
+        XCTAssertTrue(folders.waitForExistence(timeout: 10))
+        folders.tap()
+        let folder = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Folder path: Backlog test"
+        )).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 5), app.debugDescription)
+        folder.tap()
+
+        let podcast = app.buttons.matching(NSPredicate(
+            format: "label == %@", "Folder test show"
+        )).firstMatch
+        XCTAssertTrue(podcast.waitForExistence(timeout: 5), app.debugDescription)
+        podcast.tap()
+        XCTAssertTrue(
+            app.navigationBars["Folder test show"].waitForExistence(timeout: 5),
+            "Activating a podcast inside a folder should open its episode list"
+        )
+        let back = app.navigationBars["Folder test show"].buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(podcast.waitForExistence(timeout: 5),
+                      "Back should return to the same folder podcast row")
+        let select = app.buttons["Select podcasts"].firstMatch
+        XCTAssertTrue(select.waitForExistence(timeout: 5))
+        select.tap()
+        let selectablePodcast = app.buttons.matching(NSPredicate(
+            format: "label == %@", "Folder test show"
+        )).firstMatch
+        XCTAssertTrue(selectablePodcast.waitForExistence(timeout: 5))
+        selectablePodcast.tap()
+        XCTAssertTrue(selectablePodcast.isSelected,
+                      "Selection mode must select the podcast instead of navigating")
+        XCTAssertFalse(app.navigationBars["Folder test show"].exists)
+    }
+
+    func testFolderPodcastHasOneAccessibleButton() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library", "-folderRunTest"]
+        app.launch()
+        let folders = app.buttons["Folders"].firstMatch
+        XCTAssertTrue(folders.waitForExistence(timeout: 10))
+        folders.tap()
+        let folder = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Folder path: Backlog test"
+        )).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 10), app.debugDescription)
+        folder.tap()
+        let podcast = app.buttons.matching(NSPredicate(format: "label == %@", "Folder test show"))
+        XCTAssertTrue(podcast.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(podcast.count, 1, "The folder should expose one podcast button")
+    }
+
     func testDownloadActivityUpdatesAfterDelayedFailureAndOffersBoundedRetry() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "downloads", "-downloadActivityTest"]
@@ -990,9 +1047,19 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(guide.waitForExistence(timeout: 10))
         guide.tap()
         XCTAssertTrue(app.navigationBars["Listening workflow guide"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["What each screen is for"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Find listening controls"].firstMatch.exists)
+        let screenPurpose = app.staticTexts["What each screen is for"].firstMatch
+        for _ in 0..<12 {
+            if screenPurpose.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(screenPurpose.isHittable,
+                      "The original workflow sections should remain reachable below the new controls section")
         let inbox = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Inbox helps you review")).firstMatch
-        XCTAssertTrue(inbox.exists)
+        for _ in 0..<4 {
+            if inbox.isHittable { break }
+            app.swipeUp()
+        }
         XCTAssertTrue(inbox.isHittable)
     }
 

@@ -199,9 +199,8 @@ enum CompactProjectionSeedMarker: Equatable, Sendable {
 
 actor CloudProjectionCoordinator: ModelActor {
     /// Marks UI change notifications emitted while applying remote projection
-    /// state. NotificationCenter delivers the observer on the main queue and
-    /// then hops back to this actor; checking `isApplyingRemote` after that hop
-    /// is too late because reconciliation may already have ended. Carry the
+    /// state. Notification callbacks hop back to this actor; checking
+    /// `isApplyingRemote` after that hop may see a later pass. Carry the
     /// origin with the event so UI consumers still refresh without feeding the
     /// projection's own write back into another reconciliation pass.
     nonisolated static let notificationOriginKey =
@@ -417,6 +416,8 @@ actor CloudProjectionCoordinator: ModelActor {
     private var resetSaveCheckpointForTesting: (@Sendable () -> Void)?
     private var scheduledReconciliationCheckpointForTesting: (@Sendable () async -> Void)?
     private var directReconciliationCheckpointForTesting: (@Sendable () async -> Void)?
+    private var finalReconciliationCheckpointForTesting: (@Sendable () async -> Void)?
+    private var catalogNotificationCheckpointForTesting: (@Sendable () -> Void)?
     #endif
 
     private init(
@@ -580,6 +581,22 @@ actor CloudProjectionCoordinator: ModelActor {
         directReconciliationCheckpointForTesting = checkpoint
     }
 
+    func setFinalReconciliationCheckpointForTesting(
+        _ checkpoint: @escaping @Sendable () async -> Void
+    ) {
+        finalReconciliationCheckpointForTesting = checkpoint
+    }
+
+    func setCatalogNotificationCheckpointForTesting(
+        _ checkpoint: @escaping @Sendable () -> Void
+    ) {
+        catalogNotificationCheckpointForTesting = checkpoint
+    }
+
+    func reconciliationIsIdleForTesting() -> Bool {
+        reconcileTask == nil && !reconciliationRequestedWhileRunning && !isApplyingRemote
+    }
+
     nonisolated static func makeForTesting(
         applicationContainer: ModelContainer,
         projectionContainer: ModelContainer,
@@ -627,7 +644,7 @@ actor CloudProjectionCoordinator: ModelActor {
         importObserver = center.addObserver(
             forName: .earshotCloudKitImportDidFinish,
             object: nil,
-            queue: .main
+            queue: nil
         ) { [weak self] _ in
             Task { await self?.scheduleReconciliation() }
         }
@@ -653,16 +670,16 @@ actor CloudProjectionCoordinator: ModelActor {
                   !snapshots.isEmpty else { return }
             Task { await self?.handleLocalEpisodeStateChanges(snapshots) }
         }
-        // Feed refresh uses this existing event after its store save. Running
-        // reconciliation on the next main-actor turn lets a newly refetched
-        // episode receive any CloudKit state that arrived before its metadata.
+        // Feed refresh uses this existing event after its store save. Schedule
+        // reconciliation on this actor so a newly refetched episode receives
+        // any CloudKit state that arrived before its metadata.
         catalogObserver = center.addObserver(
             forName: .earshotInboxDidChange,
             object: nil,
-            queue: .main
+            queue: nil
         ) { [weak self] notification in
             guard !Self.isProjectionOriginated(notification) else { return }
-            Task { await self?.scheduleReconciliationUnlessApplyingRemote() }
+            Task { await self?.scheduleReconciliationForCatalogChange() }
         }
         queueObserver = center.addObserver(
             forName: .earshotQueueDidChange,
@@ -788,10 +805,18 @@ actor CloudProjectionCoordinator: ModelActor {
         }
     }
 
-    private func scheduleReconciliationUnlessApplyingRemote() {
-        // Reconciliation itself posts the Inbox notification after applying
-        // remote state. Only an external catalog refresh needs another pass.
-        guard !isStopped, !isApplyingRemote else { return }
+    private func scheduleReconciliationForCatalogChange() {
+        // The observer already excludes projection-originated notifications.
+        // An external catalog change during remote application still needs a
+        // pass after this one, or its newly inserted episode misses cloud state.
+        #if DEBUG
+        catalogNotificationCheckpointForTesting?()
+        #endif
+        guard !isStopped else { return }
+        if isApplyingRemote {
+            reconciliationRequestedWhileRunning = true
+            return
+        }
         scheduleReconciliation()
     }
 
@@ -1012,6 +1037,9 @@ actor CloudProjectionCoordinator: ModelActor {
         reconcileTask = nil
         reconcileTaskID = nil
         guard !isStopped, reconciliationRequestedWhileRunning else { return }
+        // A separate direct pass may still be applying remote state. Leave
+        // the request for that pass's defer instead of starting too early.
+        guard !isApplyingRemote else { return }
         reconciliationRequestedWhileRunning = false
         scheduleReconciliation()
     }
@@ -1129,7 +1157,15 @@ actor CloudProjectionCoordinator: ModelActor {
         refreshContextsFromStore()
         guard !isApplyingRemote else { return }
         isApplyingRemote = true
-        defer { isApplyingRemote = false }
+        defer {
+            isApplyingRemote = false
+            // Scheduled work is drained by finishReconciliationTask. A direct
+            // reconciliation has no owner task, so start its deferred pass here.
+            if reconcileTask == nil, reconciliationRequestedWhileRunning {
+                reconciliationRequestedWhileRunning = false
+                scheduleReconciliation()
+            }
+        }
         try publishPendingUnfollowIntents()
         refreshContextsFromStore()
         let activeRemoteFeeds: [String]
@@ -1331,6 +1367,11 @@ actor CloudProjectionCoordinator: ModelActor {
         if applicationChanged {
             center.post(name: .earshotCloudProjectionDidApply, object: nil)
         }
+        #if DEBUG
+        if let finalReconciliationCheckpointForTesting {
+            await finalReconciliationCheckpointForTesting()
+        }
+        #endif
     }
 
     private func postProjectionChange(_ name: Notification.Name) {
