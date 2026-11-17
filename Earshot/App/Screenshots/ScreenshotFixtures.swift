@@ -67,6 +67,12 @@ enum ScreenshotFixtures {
         context.insert(tw)
         context.insert(op)
 
+        if CommandLine.arguments.contains("-inboxSelectionFolderScopeTest") {
+            let folder = PodcastFolder(name: "Scope test folder")
+            context.insert(folder)
+            context.insert(FolderMembership(folder: folder, podcast: tw))
+        }
+
         if CommandLine.arguments.contains("-playerTransportActionLayoutTest") {
             let layoutActions: [TransportAction] = CommandLine.arguments.contains("-playerTransportActionOverflowTest")
                 ? [.skipBack120, .skipBack300, .skipForward60, .skipForward120,

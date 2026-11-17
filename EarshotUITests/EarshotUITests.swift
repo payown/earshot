@@ -541,6 +541,48 @@ final class EarshotUITests: XCTestCase {
         XCTAssertFalse(noSelection.isEnabled, "An empty Inbox selection must not offer a no-op action")
     }
 
+    func testInboxBatchDoesNotMarkEpisodePlayedAfterPodcastLeavesScope() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
+                               "-inboxSelectionScopeTest"]
+        app.launch()
+        app.buttons["Inbox"].firstMatch.tap()
+
+        let title = "#169 – Apple's Price Hikes"
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Select"].firstMatch.tap()
+        row.tap()
+        XCTAssertTrue(app.buttons["Mark 1 episode as played"].firstMatch.waitForExistence(timeout: 5))
+
+        app.buttons["Simulate podcast Inbox exclusion"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Scope test played: no"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Mark 1 episode as played"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Scope test played: no"].firstMatch.waitForExistence(timeout: 5),
+                      "An episode excluded from Inbox before activation must not be marked Played")
+    }
+
+    func testInboxBatchDoesNotMarkEpisodePlayedAfterFolderMembershipLeavesScope() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
+                               "-inboxSelectionFolderScopeTest"]
+        app.launch()
+        app.buttons["Inbox"].firstMatch.tap()
+
+        let title = "#169 – Apple's Price Hikes"
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 20), app.debugDescription)
+        app.buttons["Select"].firstMatch.tap()
+        row.tap()
+        XCTAssertTrue(app.buttons["Mark 1 episode as played"].firstMatch.waitForExistence(timeout: 5))
+
+        app.buttons["Simulate folder membership removal"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Scope test played: no"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Mark 1 episode as played"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Scope test played: no"].firstMatch.waitForExistence(timeout: 5),
+                      "A podcast removed from the selected folder before activation must not be marked Played")
+    }
+
     func testIPadInboxVoiceOverSelectionAndMarkPlayed() throws {
         guard #available(iOS 27.0, *) else {
             throw XCTSkip("VoiceOver UI automation requires iOS 27")

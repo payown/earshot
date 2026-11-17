@@ -1947,12 +1947,38 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             if reconciliationIdle { break }
             try await Task.sleep(for: .milliseconds(50))
         }
-        XCTAssertTrue(reconciliationIdle, "Catalog reconciliation must finish")
+        let reconciliationState = await coordinator.reconciliationStateForTesting()
+        XCTAssertTrue(reconciliationIdle,
+                      "Catalog reconciliation must finish (\(reconciliationState), " +
+                      "catalog events: \(catalogEvents.withLock { $0 }))")
         let recovered = try ModelContext(app).fetch(FetchDescriptor<Episode>())
             .first { $0.guid == "missing" }
         XCTAssertTrue(recovered?.isPlayed == true,
                       "Single-feed recovery must apply the prior remote Played contribution")
         XCTAssertTrue(recovered?.inboxDismissed == true)
+        await coordinator.stop()
+    }
+
+    func testCatalogChangeSchedulesReconciliationAtUtilityPriority() async throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let center = NotificationCenter()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, center: center
+        )
+        try await coordinator.start(performInitialReconciliation: false)
+        defer { Task { await coordinator.stop() } }
+
+        let scheduledPriority = Mutex<TaskPriority?>(nil)
+        await coordinator.setScheduledReconciliationCheckpointForTesting {
+            scheduledPriority.withLock { $0 = Task.currentPriority }
+        }
+        center.post(name: .earshotInboxDidChange, object: nil)
+        for _ in 0..<400 where scheduledPriority.withLock({ $0 }) == nil {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(scheduledPriority.withLock { $0 }, .utility,
+                       "A catalog update must schedule utility-priority reconciliation")
         await coordinator.stop()
     }
 
