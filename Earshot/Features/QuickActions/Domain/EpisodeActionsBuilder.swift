@@ -164,6 +164,7 @@ func buildEpisodeActions(
                 // episode never jumps back into the inbox (#546).
                 let nowPlayed = !played
                 let wasDismissed = episode.inboxDismissed
+                let completedAt = episode.playedAt
                 // Invoked before the flip so the surface can still find this
                 // row's neighbor in its visible list (#579).
                 onMarkPlayed?(nowPlayed)
@@ -178,6 +179,11 @@ func buildEpisodeActions(
                     DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
                 }
                 if saveQuickAction(context, "played state") {
+                    if !nowPlayed {
+                        PlayerService.discardStaleLivePositionAfterMarkUnplayed(
+                            episode, completedAt: completedAt
+                        )
+                    }
                     postEpisodeUserStateChanges(
                         [episode],
                         playedChangedExplicitly: true,

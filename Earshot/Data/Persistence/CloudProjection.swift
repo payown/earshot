@@ -1323,7 +1323,7 @@ actor CloudProjectionCoordinator: ModelActor {
         // describe state that a prior remote reconciliation applied locally;
         // treating that as a fresh local edit would manufacture a rewind.
         try publishLocalEpisodeStateChanges(now: .now, onlyMissingOwnRows: true)
-        let episodeChanged = try applyRemoteEpisodeStates(
+        let episodeChanged = try await applyRemoteEpisodeStates(
             appContext: appContext,
             cloudContext: cloudContext
         )
@@ -3114,13 +3114,14 @@ actor CloudProjectionCoordinator: ModelActor {
     private func applyRemoteEpisodeStates(
         appContext: ModelContext,
         cloudContext: ModelContext
-    ) throws -> Bool {
+    ) async throws -> Bool {
         let rows = try cloudContext.fetch(FetchDescriptor<CloudEpisodeStateProjection>())
             .filter { $0.deletedAt == nil && !$0.episodeGUID.isEmpty }
         let grouped = Dictionary(grouping: rows, by: Self.episodeKey)
         let episodes = applicationEpisodes(matching: Set(grouped.keys))
         let pendingPlayed = try latestPendingPlayedMutations(in: appContext)
         var changed = false
+        var resetTicksToDiscard: [(feedURL: String?, guid: String, resetAt: Date)] = []
         for key in grouped.keys.sorted() {
             guard let episode = episodes[key], let contributions = grouped[key] else { continue }
 
@@ -3166,6 +3167,20 @@ actor CloudProjectionCoordinator: ModelActor {
                     ?? 0
             )
 
+            // An explicit other-device Unplayed reset supersedes this phone's
+            // older crash-recovery tick even if its saved row is already
+            // Unplayed. A pending local action owns its own checkpoint.
+            if !mergedPlayed, !pendingWins, mergedPosition == 0,
+               let playedWinner, !playedWinner.isPlayed,
+               playedWinner.sourceDeviceID != deviceID,
+               playedWinner.playedUpdatedAt != .distantPast {
+                resetTicksToDiscard.append((
+                    feedURL: episode.podcast?.feedURL,
+                    guid: episode.guid,
+                    resetAt: playedWinner.playedUpdatedAt
+                ))
+            }
+
             if mergedPlayed {
                 if !episode.isPlayed {
                     episode.isPlayed = true
@@ -3186,6 +3201,17 @@ actor CloudProjectionCoordinator: ModelActor {
             }
         }
         if appContext.hasChanges { try appContext.save() }
+        if !resetTicksToDiscard.isEmpty {
+            let ticks = resetTicksToDiscard
+            await MainActor.run {
+                for tick in ticks {
+                    LivePlaybackPositionRecovery.discardTickOlderThan(
+                        feedURL: tick.feedURL, guid: tick.guid,
+                        savedPosition: 0, cutoff: tick.resetAt
+                    )
+                }
+            }
+        }
         return changed
     }
 

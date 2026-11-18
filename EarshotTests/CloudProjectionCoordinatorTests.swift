@@ -2893,6 +2893,84 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(episode.isPlayed)
     }
 
+    func testRemoteMarkUnplayedDoesNotReusePreCompletionLiveTick() async throws {
+        try await assertRemoteMarkUnplayedResume(liveTickOffset: -60, expectedPosition: 0)
+    }
+
+    func testRemoteMarkUnplayedDiscardsTickBetweenCompletionAndReset() async throws {
+        try await assertRemoteMarkUnplayedResume(liveTickOffset: 1, expectedPosition: 0)
+    }
+
+    func testRemoteMarkUnplayedPreservesTickNewerThanReset() async throws {
+        try await assertRemoteMarkUnplayedResume(liveTickOffset: 120, expectedPosition: 598)
+    }
+
+    func testRemoteMarkUnplayedClearsOldTickWhenLocalStateIsAlreadyUnplayed() async throws {
+        try await assertRemoteMarkUnplayedResume(
+            liveTickOffset: 1, expectedPosition: 0,
+            locallyUnplayedBeforeReset: true
+        )
+    }
+
+    private func assertRemoteMarkUnplayedResume(
+        liveTickOffset: TimeInterval, expectedPosition: Int,
+        locallyUnplayedBeforeReset: Bool = false
+    ) async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let projection = try makeProjectionContainer()
+        let remote = episodeStateRow(
+            device: "other-device", position: 0,
+            updatedAt: Date.now.addingTimeInterval(-120).timeIntervalSince1970
+        )
+        remote.isPlayed = true
+        projection.mainContext.insert(remote)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+        let completed = try XCTUnwrap(applicationEpisode(in: app))
+        XCTAssertTrue(completed.isPlayed)
+        let completedAt = try XCTUnwrap(completed.playedAt)
+        if locallyUnplayedBeforeReset {
+            completed.isPlayed = false
+            try app.mainContext.save()
+        }
+
+        let defaults = UserDefaults.standard
+        let key = DownloadTaskKey.key(feedURL: completed.podcast?.feedURL, guid: completed.guid)
+        defaults.set(key, forKey: PlayerService.LivePositionKey.episode)
+        defaults.set(598, forKey: PlayerService.LivePositionKey.seconds)
+        defaults.set(completedAt.addingTimeInterval(liveTickOffset),
+                     forKey: PlayerService.LivePositionKey.updatedAt)
+        defer {
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.episode)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.seconds)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.updatedAt)
+        }
+
+        remote.isPlayed = false
+        remote.playedUpdatedAt = Date.now.addingTimeInterval(60)
+        remote.positionUpdatedAt = remote.playedUpdatedAt
+        remote.positionResetAt = remote.playedUpdatedAt
+        remote.modifiedAt = remote.playedUpdatedAt
+        try projection.mainContext.save()
+        try await coordinator.reconcile()
+
+        let context = ModelContext(app)
+        let episode = try XCTUnwrap(context.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertFalse(episode.isPlayed)
+        XCTAssertEqual(episode.positionSeconds, 0)
+        AppSettingsStore(context: context).setRawValue(key, for: SettingsKey.lastPlayingEpisodeID)
+        let player = PlayerService()
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        player.load(episode)
+        XCTAssertEqual(player.currentPositionSeconds, Double(expectedPosition),
+                       "Remote Unplayed must discard only ticks older than its reset event")
+    }
+
     func testInboxDismissalSyncsIndependentlyFromPlayedState() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 0)
         let projection = try makeProjectionContainer()

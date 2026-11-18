@@ -589,6 +589,80 @@ final class AdvancedPlaybackTests: XCTestCase {
                        "Marking a completed episode unplayed must not resurrect another session's tick")
     }
 
+    func test_replayAfterRemoteCompletionThenMarkUnplayed_ignoresOlderLiveTick() async throws {
+        let context = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: context)
+        let episode = makeEpisode(context)
+        let podcast = try XCTUnwrap(episode.podcast)
+        episode.isPlayed = true
+        episode.positionSeconds = 0
+        let completionTime = try XCTUnwrap(episode.playedAt)
+        try context.save()
+
+        let defaults = UserDefaults.standard
+        let key = DownloadTaskKey.key(feedURL: podcast.feedURL, guid: episode.guid)
+        AppSettingsStore(context: context).setRawValue(key, for: SettingsKey.lastPlayingEpisodeID)
+        defaults.set(key, forKey: PlayerService.LivePositionKey.episode)
+        defaults.set(598, forKey: PlayerService.LivePositionKey.seconds)
+        defaults.set(completionTime.addingTimeInterval(-60),
+                     forKey: PlayerService.LivePositionKey.updatedAt)
+        defer {
+            player.stopAndUnload()
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.episode)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.seconds)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.updatedAt)
+        }
+
+        // The phone still thinks this is the last loaded episode when another
+        // device's completion arrives. The user then tries Mark as unplayed.
+        let changed = await EpisodeRepository(context: context).markSelectedUnplayed(
+            in: podcast, ids: [episode.persistentModelID]
+        )
+        XCTAssertEqual(changed, 1)
+        XCTAssertFalse(episode.isPlayed)
+        XCTAssertEqual(episode.positionSeconds, 0)
+
+        player.load(episode)
+        XCTAssertEqual(player.currentPositionSeconds, 0,
+                       "An older live tick must not restart a completed episode near its end")
+    }
+
+    func test_markUnplayedKeepsNewerSameEpisodeRecoveryTick() async throws {
+        let context = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: context)
+        let episode = makeEpisode(context)
+        let podcast = try XCTUnwrap(episode.podcast)
+        episode.isPlayed = true
+        episode.positionSeconds = 0
+        let completionTime = try XCTUnwrap(episode.playedAt)
+        try context.save()
+
+        let defaults = UserDefaults.standard
+        let key = DownloadTaskKey.key(feedURL: podcast.feedURL, guid: episode.guid)
+        AppSettingsStore(context: context).setRawValue(key, for: SettingsKey.lastPlayingEpisodeID)
+        defaults.set(key, forKey: PlayerService.LivePositionKey.episode)
+        defaults.set(125, forKey: PlayerService.LivePositionKey.seconds)
+        defaults.set(completionTime.addingTimeInterval(60),
+                     forKey: PlayerService.LivePositionKey.updatedAt)
+        defer {
+            player.stopAndUnload()
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.episode)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.seconds)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.updatedAt)
+        }
+
+        let changed = await EpisodeRepository(context: context).markSelectedUnplayed(
+            in: podcast, ids: [episode.persistentModelID]
+        )
+        XCTAssertEqual(changed, 1)
+        XCTAssertEqual(defaults.integer(forKey: PlayerService.LivePositionKey.seconds), 125)
+        player.load(episode)
+        XCTAssertEqual(player.currentPositionSeconds, 125,
+                       "A replay tick newer than the completion remains valid crash recovery")
+    }
+
     func test_replayAfterQueueAdvance_doesNotReuseFinishedEpisodesLiveTick() throws {
         let ctx = TestStore.freshContext()
         let player = PlayerService()
