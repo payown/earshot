@@ -250,8 +250,8 @@ final class StatsTests: XCTestCase {
         XCTAssertTrue(csv.contains("Old-only export"))
         XCTAssertTrue(csv.contains(",75,1"))
 
-        // StatsScreen disables the export button when the selected period's
-        // totalSeconds is zero, although this exported row still exists.
+        // The UI regression separately verifies that this retained row keeps
+        // Export enabled when the selected period's total is zero.
     }
 
     func testHistoryExportIncludesOtherPodcastWhenSelectedScopeIsEmpty() async throws {
