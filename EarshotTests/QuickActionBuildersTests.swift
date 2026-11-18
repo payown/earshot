@@ -465,6 +465,34 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertFalse(episode.isPlayed, "state still flips after the spy returns")
     }
 
+    func testMarkUnplayedQuickActionClearsOnlyOlderMatchingRecoveryTick() throws {
+        let context = TestStore.freshContext()
+        let episode = makeEpisode(context, played: true)
+        let completedAt = try XCTUnwrap(episode.playedAt)
+        let key = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        let defaults = UserDefaults.standard
+        defaults.set(key, forKey: PlayerService.LivePositionKey.episode)
+        defaults.set(598, forKey: PlayerService.LivePositionKey.seconds)
+        defaults.set(completedAt.addingTimeInterval(-60),
+                     forKey: PlayerService.LivePositionKey.updatedAt)
+        defer {
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.episode)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.seconds)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.updatedAt)
+        }
+
+        let actions = buildEpisodeActions(
+            episode: episode, order: [.markPlayed], player: PlayerService(),
+            downloads: DownloadManager(), context: context,
+            onShowNotes: {}, onShare: {}, onBookmarks: {}
+        )
+        actions.first?.run()
+
+        XCTAssertFalse(episode.isPlayed)
+        XCTAssertNil(defaults.object(forKey: PlayerService.LivePositionKey.episode))
+        XCTAssertNil(defaults.object(forKey: PlayerService.LivePositionKey.seconds))
+    }
+
     func testMarkPlayedNilRunnerStillFlipsAndSaves() {
         // Regression guard: #579 — surfaces that pass no onMarkPlayed (the
         // default) keep the pre-#579 behavior: activation flips isPlayed and

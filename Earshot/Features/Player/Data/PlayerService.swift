@@ -5,6 +5,33 @@ import Observation
 import SwiftData
 import UIKit
 
+/// The crash-recovery checkpoint is process local. Its three UserDefaults keys
+/// are written together by the main-actor player; remote reconciliation hops to
+/// that same actor before removing them, using only immutable episode values.
+@MainActor
+enum LivePlaybackPositionRecovery {
+    enum Key {
+        static let episode = "live_playback_episode_key"
+        static let seconds = "live_playback_seconds"
+        static let updatedAt = "live_playback_updated_at"
+    }
+
+    static func discardTickOlderThan(
+        feedURL: String?, guid: String, savedPosition: Int,
+        cutoff: Date?
+    ) {
+        guard savedPosition == 0, let cutoff else { return }
+        let defaults = UserDefaults.standard
+        let identity = DownloadTaskKey.key(feedURL: feedURL, guid: guid)
+        guard defaults.string(forKey: Key.episode) == identity else { return }
+        if let updatedAt = defaults.object(forKey: Key.updatedAt) as? Date,
+           updatedAt >= cutoff { return }
+        defaults.removeObject(forKey: Key.episode)
+        defaults.removeObject(forKey: Key.seconds)
+        defaults.removeObject(forKey: Key.updatedAt)
+    }
+}
+
 extension Notification.Name {
     /// Posted immediately BEFORE persisted episodes are deleted out from under
     /// the player (#574). Posters include:
@@ -2639,11 +2666,7 @@ final class PlayerService {
 
     // MARK: Live playback position — crash recovery without a per-tick store save (#736)
 
-    enum LivePositionKey {
-        static let episode = "live_playback_episode_key"
-        static let seconds = "live_playback_seconds"
-        static let updatedAt = "live_playback_updated_at"
-    }
+    typealias LivePositionKey = LivePlaybackPositionRecovery.Key
 
     /// Records the in-flight playback position to `UserDefaults` (NOT SwiftData)
     /// on the ~5s tick. A `context.save()` there invalidates every live `@Query`
@@ -2672,6 +2695,21 @@ final class PlayerService {
         defaults.removeObject(forKey: LivePositionKey.episode)
         defaults.removeObject(forKey: LivePositionKey.seconds)
         defaults.removeObject(forKey: LivePositionKey.updatedAt)
+    }
+
+    /// An explicit Mark as unplayed can follow a completion imported from
+    /// another device while this phone still owns an older crash-recovery tick.
+    /// The played flip clears `playedAt`, so invalidate that stale tick only
+    /// after the action saves and while its former completion time is available.
+    /// A newer tick belongs to a genuine replay and must remain recoverable.
+    static func discardStaleLivePositionAfterMarkUnplayed(
+        _ episode: Episode, completedAt: Date?
+    ) {
+        guard !episode.isPlayed else { return }
+        LivePlaybackPositionRecovery.discardTickOlderThan(
+            feedURL: episode.podcast?.feedURL, guid: episode.guid,
+            savedPosition: episode.positionSeconds, cutoff: completedAt
+        )
     }
 
     /// The UserDefaults live position stored for `episode`, or nil if the stored
