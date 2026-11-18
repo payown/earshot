@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Replaying a completed episode after explicitly marking it Unplayed no longer reuses an older matching crash-recovery position. A newer replay checkpoint and another episode's saved place remain intact.
+
 - Player, media-sampling, discovery Queue and Queue-save diagnostics now use fixed operation names and safe error categories instead of public episode titles or free-form error text. Playback and Queue behavior are unchanged.
 - Inbox batch actions count only selected episodes still visible in the current Inbox; a refresh removing a selected row no longer leaves an enabled action that does nothing.
 - Inbox batch actions recheck podcast Inbox policy and selected-folder membership when tapped, so a delayed refresh cannot mark or file an episode that already left the chosen scope.

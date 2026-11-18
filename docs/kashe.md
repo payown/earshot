@@ -76,6 +76,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 
 ## Details established so far
 
+- Kashe returns to a normally completed interview, marks it Unplayed and hears
+  its opening again while a different paused interview keeps its saved place
+  (Chapter 133).
+
 - Kashe opens a podcast from its folder, then returns to that row; a stale Inbox
   selection cannot mark a show Played after it leaves the chosen scope
   (Chapter 131).
@@ -4228,3 +4232,19 @@ Several public playback, Queue and discovery diagnostics now omit private titles
 Kashe's story:
 
 Kashe found an interview she had finished. The setting named both directions; the episode offered “Mark as unplayed.” On her other device, she knew which row to look for and kept the place she had saved.
+
+---
+
+Chapter 133 - A fresh place to begin
+
+What to try first:
+
+1. Update in place to internal Earshot 1.3.0 (329). Do not delete Earshot, reset your library or remove downloads. This includes build 328's sync, Inbox, privacy and Quick Actions work. Immediate paired Watch Queue snapshots remain disabled.
+2. Find an episode that finished normally and now says Played. In Library > podcast > Filter episodes > All, use its VoiceOver Actions rotor to choose “Mark as unplayed.” If needed, enable “Mark as Played / Unplayed” in Settings > Quick Actions > Episode actions. Play the episode. It should begin at the start rather than jump back near its old ending.
+3. If an episode was marked Played manually while it still had a saved listening place, mark it Unplayed and check that the saved place remains. This is separate from replaying a naturally completed episode at zero. Check a different episode's saved place too; neither should be cleared by this fix.
+4. If you have a second device on the same iCloud account, let a completed episode sync, mark it Unplayed on that device, then reopen and play it on the first. A saved zero-position reset should start at zero. A genuine replay position saved after that reset should remain. Note the episode, device, approximate position and exact steps if either result differs.
+5. Recheck the build 328 Inbox/catalog comparison only if you have a known mismatched episode: refresh its podcast, then compare Played status, saved position, Inbox inclusion and each device's Inbox count and age settings. Do not reset data to make a test case. Watch Queue prompt sync, fresh-install onboarding and physical iPad VoiceOver remain separate open checks; previously accepted Watch playback and folder/guide checks need no routine repeat.
+
+Kashe's story:
+
+Kashe finished an interview on the way home. The next morning she wanted to hear its opening again, so she marked it Unplayed. It started at the beginning. Another interview she had paused halfway through still knew where she left it.
