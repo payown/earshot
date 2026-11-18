@@ -27,6 +27,8 @@ struct StatsScreen: View {
     @State private var stats: ListeningStats = .empty
     // nil means the bounded background store check has not finished yet.
     @State private var hasRetainedHistory: Bool?
+    @State private var historyLoadFailed = false
+    @AccessibilityFocusState private var statsPeriodFocused: Bool
     @State private var exportFile: StatsCSVFile?
     @State private var reloadTask: Task<Void, Never>?
     @State private var exportTask: Task<Void, Never>?
@@ -47,9 +49,22 @@ struct StatsScreen: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityLabel("Stats period")
+                .accessibilityFocused($statsPeriodFocused)
             }
 
-            if stats.totalSeconds == 0 {
+            if historyLoadFailed {
+                Section {
+                    ContentUnavailableView(
+                        "Could not check listening history",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    Button("Try again") { retryHistoryLoad() }
+                }
+            } else if hasRetainedHistory == nil {
+                Section {
+                    ContentUnavailableView("Checking listening history", systemImage: "clock")
+                }
+            } else if stats.totalSeconds == 0 {
                 // Lead with the empty state so a VoiceOver user meets it first,
                 // rather than wading through a column of zeroes.
                 Section {
@@ -238,9 +253,23 @@ struct StatsScreen: View {
         case folder(String)
     }
 
+    private func retryHistoryLoad() {
+        Announcer.announce("Checking listening history")
+        reload(announcement: .period(period.label))
+        let generation = reloadGeneration
+        // Try again disappears when loading begins. Keep VoiceOver on the
+        // persistent period control while the result replaces the status.
+        Task { @MainActor in
+            await Task.yield()
+            guard generation == reloadGeneration else { return }
+            statsPeriodFocused = true
+        }
+    }
+
     private func reload(announcement: ReloadAnnouncement? = nil) {
         reloadTask?.cancel()
         reloadGeneration += 1
+        historyLoadFailed = false
         let generation = reloadGeneration
         let modelContainer = context.container
         let requestedPeriod = period
@@ -248,6 +277,11 @@ struct StatsScreen: View {
         let podcastIDs = selectedPodcastIDs
         reloadTask = Task { @MainActor in
             do {
+                #if DEBUG
+                if StatsLoadFailureFixture.consume() {
+                    throw NSError(domain: "StatsLoadUITest", code: 1)
+                }
+                #endif
                 let report = try await StatsSnapshotLoader.load(
                     modelContainer: modelContainer,
                     period: requestedPeriod,
@@ -275,9 +309,14 @@ struct StatsScreen: View {
             } catch is CancellationError {
                 return
             } catch {
+                guard generation == reloadGeneration, !Task.isCancelled else { return }
+                hasRetainedHistory = nil
+                stats = .empty
+                historyLoadFailed = true
                 AppLog.data.error(
                     "Stats load failed: \(error.localizedDescription, privacy: .public)"
                 )
+                Announcer.announce("Could not check listening history")
             }
         }
     }
@@ -321,6 +360,7 @@ struct StatsScreen: View {
                 reloadGeneration += 1
                 stats = .empty
                 hasRetainedHistory = false
+                historyLoadFailed = false
                 Announcer.announce("Listening history deleted")
             } catch {
                 AppLog.data.error(
@@ -331,6 +371,21 @@ struct StatsScreen: View {
         }
     }
 }
+
+#if DEBUG
+/// A one-time, process-local failure for the disposable UI regression fixture.
+@MainActor
+private enum StatsLoadFailureFixture {
+    private static var didFail = false
+
+    static func consume() -> Bool {
+        guard ProcessInfo.processInfo.arguments.contains("-statsLoadFailsOnceUITest"),
+              !didFail else { return false }
+        didFail = true
+        return true
+    }
+}
+#endif
 
 /// Explain a confirmed empty history without attaching an empty hint while
 /// retained sessions can be exported or the background check is still loading.

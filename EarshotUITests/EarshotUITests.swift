@@ -567,6 +567,44 @@ final class EarshotUITests: XCTestCase {
                           "VoiceOver must announce CSV scope before the share action")
     }
 
+    func testStatsHistoryLoadFailureCanRetryAndExport() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library",
+                               "-historyExportOldOnlyTest", "-statsLoadFailsOnceUITest"]
+        app.launch()
+        let settingsTab = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 15), app.debugDescription)
+        settingsTab.tap()
+        let history = app.buttons["History & Stats"]
+        for _ in 0..<6 where !history.exists { app.swipeUp() }
+        XCTAssertTrue(history.waitForExistence(timeout: 5), app.debugDescription)
+        history.tap()
+        let stats = app.buttons["Listening stats"]
+        XCTAssertTrue(stats.waitForExistence(timeout: 5), app.debugDescription)
+        stats.tap()
+
+        XCTAssertTrue(app.staticTexts["Could not check listening history"]
+            .waitForExistence(timeout: 10), app.debugDescription)
+        let export = app.buttons["Export history (CSV)"]
+        XCTAssertTrue(export.exists)
+        XCTAssertFalse(export.isEnabled)
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.exists)
+
+        XCTAssertTrue(app.segmentedControls["Stats period"].exists)
+        retry.tap()
+
+        XCTAssertTrue(app.staticTexts["No listening in this view"]
+            .waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Could not check listening history"].exists)
+        let enabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: export
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed)
+        XCTAssertTrue(app.segmentedControls["Stats period"].exists,
+                      "The persistent focus target remains available after Retry")
+    }
+
     func testInboxVoiceOverHasOneStopPerEpisode() throws {
         guard #available(iOS 27.0, *) else {
             throw XCTSkip("VoiceOver UI automation requires iOS 27")
