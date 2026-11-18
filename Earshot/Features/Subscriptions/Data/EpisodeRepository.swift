@@ -126,6 +126,7 @@ final class EpisodeRepository {
                 continue
             }
             let ownership = deleteAfterPlayed ? DownloadCleanup.bulkOwnership(for: selected, in: context) : nil
+            let priorCompletions = played ? [] : selected.map { ($0, $0.playedAt) }
             for episode in selected {
                 episode.isPlayed = played
                 episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
@@ -136,6 +137,11 @@ final class EpisodeRepository {
                 }
             }
             guard save(changedEpisodes: selected, notifyInbox: false) else { break }
+            for (episode, completedAt) in priorCompletions {
+                PlayerService.discardStaleLivePositionAfterMarkUnplayed(
+                    episode, completedAt: completedAt
+                )
+            }
             changedCount += selected.count
             await Task.yield()
         }
