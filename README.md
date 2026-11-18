@@ -10,6 +10,10 @@ The app includes subscriptions, podcast search, show notes, downloads, OPML
 import, a customizable episode Actions rotor, background audio, and system
 media controls. Its interface and testing prioritize VoiceOver.
 
+The [current product requirements](docs/PRD-current.md) describe the native app
+and proposed feature backlog. The [May 2026 PRD](docs/PRD.md) remains the
+historical design record.
+
 ## Build
 
 Use Xcode 27.0 or later with Swift 6.4 and XcodeGen 2.46.0. The project source
