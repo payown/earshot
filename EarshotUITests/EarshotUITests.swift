@@ -484,6 +484,45 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(played.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
+    func testStatsExportUsesRetainedHistoryNotSelectedWeekTotal() {
+        for hasOldHistory in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+            if hasOldHistory { app.launchArguments.append("-historyExportOldOnlyTest") }
+            app.launch()
+
+            let settingsTab = app.tabBars.buttons["Settings"]
+            XCTAssertTrue(settingsTab.waitForExistence(timeout: 15), app.debugDescription)
+            settingsTab.tap()
+            let history = app.buttons["History & Stats"]
+            for _ in 0..<6 where !history.exists { app.swipeUp() }
+            XCTAssertTrue(history.waitForExistence(timeout: 5), app.debugDescription)
+            history.tap()
+            let stats = app.buttons["Listening stats"]
+            XCTAssertTrue(stats.waitForExistence(timeout: 5), app.debugDescription)
+            stats.tap()
+            let export = app.buttons["Export history (CSV)"]
+            XCTAssertTrue(export.waitForExistence(timeout: 10), app.debugDescription)
+            if hasOldHistory {
+                let enabled = XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "enabled == true"), object: export
+                )
+                XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed,
+                               "A retained old session is exportable despite an empty This Week view")
+                XCTAssertTrue(app.staticTexts["No listening in this view"].exists)
+                let explanation = app.staticTexts.matching(NSPredicate(
+                    format: "label CONTAINS %@", "Other retained listening history is available to export."
+                )).firstMatch
+                XCTAssertTrue(explanation.exists, app.debugDescription)
+                XCTAssertFalse(app.staticTexts["No listening yet"].exists)
+            } else {
+                XCTAssertTrue(app.staticTexts["No listening yet"].waitForExistence(timeout: 10))
+                XCTAssertFalse(export.isEnabled)
+            }
+            app.terminate()
+        }
+    }
+
     func testInboxVoiceOverHasOneStopPerEpisode() throws {
         guard #available(iOS 27.0, *) else {
             throw XCTSkip("VoiceOver UI automation requires iOS 27")

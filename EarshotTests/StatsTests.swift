@@ -242,6 +242,7 @@ final class StatsTests: XCTestCase {
             includeStreak: false, podcastIDs: nil
         )
         XCTAssertEqual(thisWeek.stats.totalSeconds, 0)
+        XCTAssertTrue(thisWeek.hasRetainedHistory)
 
         let csvURL = try await StatsSnapshotLoader.exportCSV(modelContainer: ctx.container)
         defer { try? FileManager.default.removeItem(at: csvURL) }
@@ -265,12 +266,39 @@ final class StatsTests: XCTestCase {
             includeStreak: false, podcastIDs: [inside.persistentModelID]
         )
         XCTAssertEqual(selectedScope.stats.totalSeconds, 0)
+        XCTAssertTrue(selectedScope.hasRetainedHistory)
 
         let csvURL = try await StatsSnapshotLoader.exportCSV(modelContainer: ctx.container)
         defer { try? FileManager.default.removeItem(at: csvURL) }
         let csv = try String(contentsOf: csvURL, encoding: .utf8)
         XCTAssertTrue(csv.contains("Outside selected folder"))
         XCTAssertFalse(csv.contains("Inside selected folder"))
+    }
+
+    func testHistoryExportAvailabilityTracksEmptyAndDeletedStores() async throws {
+        let ctx = TestStore.freshContext()
+        let empty = try await StatsSnapshotLoader.load(
+            modelContainer: ctx.container, period: .thisWeek,
+            includeStreak: false, podcastIDs: nil
+        )
+        XCTAssertFalse(empty.hasRetainedHistory)
+
+        let podcast = makePodcast(ctx, "Delete export fixture")
+        makeSession(ctx, podcast: podcast, seconds: 60, date: .now)
+        try ctx.save()
+        let populated = try await StatsSnapshotLoader.load(
+            modelContainer: ctx.container, period: .thisWeek,
+            includeStreak: false, podcastIDs: nil
+        )
+        XCTAssertTrue(populated.hasRetainedHistory)
+
+        let deletion = try await StatsSnapshotLoader.deleteAllHistory(modelContainer: ctx.container)
+        XCTAssertEqual(deletion.removed, 1)
+        let deleted = try await StatsSnapshotLoader.load(
+            modelContainer: ctx.container, period: .thisWeek,
+            includeStreak: false, podcastIDs: nil
+        )
+        XCTAssertFalse(deleted.hasRetainedHistory)
     }
 
     func testStreakOnlyComputedWhenIncluded() {

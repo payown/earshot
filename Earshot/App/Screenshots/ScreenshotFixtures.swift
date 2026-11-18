@@ -67,6 +67,15 @@ enum ScreenshotFixtures {
         context.insert(tw)
         context.insert(op)
 
+        if CommandLine.arguments.contains("-historyExportOldOnlyTest") {
+            // DEBUG-only disposable store: outside This Week but inside the
+            // default 90-day retention window. No real library is touched.
+            context.insert(ListeningSession(
+                podcast: tw, durationSeconds: 75,
+                date: .now.addingTimeInterval(-40 * 86_400)
+            ))
+        }
+
         if CommandLine.arguments.contains("-inboxSelectionFolderScopeTest") {
             let folder = PodcastFolder(name: "Scope test folder")
             context.insert(folder)
