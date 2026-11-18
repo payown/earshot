@@ -49,11 +49,7 @@ struct StatsScreen: View {
                 .accessibilityLabel("Stats period")
             }
 
-            if hasRetainedHistory == nil {
-                Section {
-                    ContentUnavailableView("Checking listening history", systemImage: "clock")
-                }
-            } else if stats.totalSeconds == 0 {
+            if stats.totalSeconds == 0 {
                 // Lead with the empty state so a VoiceOver user meets it first,
                 // rather than wading through a column of zeroes.
                 Section {
