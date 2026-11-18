@@ -94,6 +94,10 @@ struct StatsScreen: View {
             }
 
             Section("Data") {
+                Text("Export includes all retained listening sessions, regardless of the selected period or folder.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
                 Button {
                     exportHistory()
                 } label: {

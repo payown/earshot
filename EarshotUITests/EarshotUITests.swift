@@ -503,6 +503,12 @@ final class EarshotUITests: XCTestCase {
             stats.tap()
             let export = app.buttons["Export history (CSV)"]
             XCTAssertTrue(export.waitForExistence(timeout: 10), app.debugDescription)
+            let scope = app.staticTexts[
+                "Export includes all retained listening sessions, regardless of the selected period or folder."
+            ]
+            XCTAssertTrue(scope.exists, "Export scope must be visible before sharing history")
+            XCTAssertLessThan(scope.frame.minY, export.frame.minY,
+                              "Export scope must precede the button in reading order")
             if hasOldHistory {
                 let enabled = XCTNSPredicateExpectation(
                     predicate: NSPredicate(format: "enabled == true"), object: export
@@ -521,6 +527,44 @@ final class EarshotUITests: XCTestCase {
             }
             app.terminate()
         }
+    }
+
+    func testStatsExportScopeIsSpokenBeforeShareAction() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library",
+                               "-historyExportOldOnlyTest"]
+        app.launch()
+        let settingsTab = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 15), app.debugDescription)
+        settingsTab.tap()
+        let history = app.buttons["History & Stats"]
+        for _ in 0..<6 where !history.exists { app.swipeUp() }
+        XCTAssertTrue(history.waitForExistence(timeout: 5), app.debugDescription)
+        history.tap()
+        let stats = app.buttons["Listening stats"]
+        XCTAssertTrue(stats.waitForExistence(timeout: 5), app.debugDescription)
+        stats.tap()
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        var speech: [String] = []
+        for _ in 0..<45 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("Export history (CSV)") { break }
+        }
+        let scopeIndex = try XCTUnwrap(speech.firstIndex(where: {
+            $0.contains("Export includes all retained listening sessions")
+        }), "VoiceOver missed the export scope: \(speech)")
+        let exportIndex = try XCTUnwrap(speech.firstIndex(where: {
+            $0.contains("Export history (CSV)")
+        }), "VoiceOver missed the Export button: \(speech)")
+        XCTAssertLessThan(scopeIndex, exportIndex,
+                          "VoiceOver must announce CSV scope before the share action")
     }
 
     func testInboxVoiceOverHasOneStopPerEpisode() throws {
