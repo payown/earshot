@@ -5,6 +5,33 @@ import Observation
 import SwiftData
 import UIKit
 
+/// The crash-recovery checkpoint is process local. Its three UserDefaults keys
+/// are written together by the main-actor player; remote reconciliation hops to
+/// that same actor before removing them, using only immutable episode values.
+@MainActor
+enum LivePlaybackPositionRecovery {
+    enum Key {
+        static let episode = "live_playback_episode_key"
+        static let seconds = "live_playback_seconds"
+        static let updatedAt = "live_playback_updated_at"
+    }
+
+    static func discardTickOlderThan(
+        feedURL: String?, guid: String, savedPosition: Int,
+        cutoff: Date?
+    ) {
+        guard savedPosition == 0, let cutoff else { return }
+        let defaults = UserDefaults.standard
+        let identity = DownloadTaskKey.key(feedURL: feedURL, guid: guid)
+        guard defaults.string(forKey: Key.episode) == identity else { return }
+        if let updatedAt = defaults.object(forKey: Key.updatedAt) as? Date,
+           updatedAt >= cutoff { return }
+        defaults.removeObject(forKey: Key.episode)
+        defaults.removeObject(forKey: Key.seconds)
+        defaults.removeObject(forKey: Key.updatedAt)
+    }
+}
+
 extension Notification.Name {
     /// Posted immediately BEFORE persisted episodes are deleted out from under
     /// the player (#574). Posters include:
@@ -802,7 +829,7 @@ final class PlayerService {
     ) {
         beginUserMediaAttempt()
         guard !audioURL.isEmpty else {
-            AppLog.player.error("playPreview called with no audio URL for \(title, privacy: .public)")
+            AppLog.player.error("playPreview called with no audio URL")
             return
         }
         // A detached @Model: built with `init` and deliberately never inserted into
@@ -2512,7 +2539,7 @@ final class PlayerService {
         } catch {
             let failure = error as NSError
             recordPlaybackDiagnostic("session.configure.failed domain=\(failure.domain) code=\(failure.code)")
-            AppLog.player.error("Failed to configure audio session: \(error.localizedDescription, privacy: .public)")
+            AppLog.player.error("Failed to configure audio session (code \(failure.code, privacy: .public))")
             return false
         }
         // A route may not support the stereo preference. That does not undo
@@ -2639,11 +2666,7 @@ final class PlayerService {
 
     // MARK: Live playback position — crash recovery without a per-tick store save (#736)
 
-    enum LivePositionKey {
-        static let episode = "live_playback_episode_key"
-        static let seconds = "live_playback_seconds"
-        static let updatedAt = "live_playback_updated_at"
-    }
+    typealias LivePositionKey = LivePlaybackPositionRecovery.Key
 
     /// Records the in-flight playback position to `UserDefaults` (NOT SwiftData)
     /// on the ~5s tick. A `context.save()` there invalidates every live `@Query`
@@ -2672,6 +2695,21 @@ final class PlayerService {
         defaults.removeObject(forKey: LivePositionKey.episode)
         defaults.removeObject(forKey: LivePositionKey.seconds)
         defaults.removeObject(forKey: LivePositionKey.updatedAt)
+    }
+
+    /// An explicit Mark as unplayed can follow a completion imported from
+    /// another device while this phone still owns an older crash-recovery tick.
+    /// The played flip clears `playedAt`, so invalidate that stale tick only
+    /// after the action saves and while its former completion time is available.
+    /// A newer tick belongs to a genuine replay and must remain recoverable.
+    static func discardStaleLivePositionAfterMarkUnplayed(
+        _ episode: Episode, completedAt: Date?
+    ) {
+        guard !episode.isPlayed else { return }
+        LivePlaybackPositionRecovery.discardTickOlderThan(
+            feedURL: episode.podcast?.feedURL, guid: episode.guid,
+            savedPosition: episode.positionSeconds, cutoff: completedAt
+        )
     }
 
     /// The UserDefaults live position stored for `episode`, or nil if the stored
@@ -2798,7 +2836,7 @@ final class PlayerService {
                 // The client persisted the pending boundary before network I/O.
             } catch {
                 AppLog.data.info(
-                    "Direct playback handoff upload deferred: \(error.localizedDescription, privacy: .public)"
+                    "Direct playback handoff upload deferred: \(NetworkDiagnostic.reason(error), privacy: .public)"
                 )
             }
         }
@@ -2818,7 +2856,7 @@ final class PlayerService {
                     await race.resolve(nil)
                 } catch {
                     AppLog.data.info(
-                        "Direct playback handoff fetch fell back to local state: \(error.localizedDescription, privacy: .public)"
+                        "Direct playback handoff fetch fell back to local state: \(NetworkDiagnostic.reason(error), privacy: .public)"
                     )
                     await race.resolve(nil)
                 }
@@ -3068,7 +3106,7 @@ final class PlayerService {
         // The finished episode just left the inbox — refresh the tab badge
         // (the badge no longer polls on every position save, #736).
         NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
-        AppLog.player.info("Marked episode played: \(episode.title, privacy: .public)")
+        AppLog.player.info("Marked episode played")
     }
 
     private func persistLastPlayingEpisode(_ episode: Episode) {
@@ -3109,7 +3147,7 @@ final class PlayerService {
             }
             return true
         } catch {
-            AppLog.player.error("Failed to persist playback state: \(error.localizedDescription, privacy: .public)")
+            AppLog.player.error("Failed to persist playback state: \(NetworkDiagnostic.reason(error), privacy: .public)")
             return false
         }
     }
@@ -3442,7 +3480,7 @@ final class PlayerService {
                 self.currentAudioProcessingMetrics = nil
                 item.audioMix = nil
                 AppLog.player.notice(
-                    "Audio processing unavailable for this media; using baseline playback: \(error.localizedDescription, privacy: .public)"
+                    "Audio processing unavailable for this media; using baseline playback: \(NetworkDiagnostic.reason(error), privacy: .public)"
                 )
             }
         }

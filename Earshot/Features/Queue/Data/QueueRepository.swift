@@ -1301,7 +1301,7 @@ final class QueueRepository {
             return true
         } catch {
             context.rollback()
-            AppLog.player.error("Queue save failed: \(error.localizedDescription, privacy: .public)")
+            AppLog.player.error("Queue save failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
             return false
         }
     }

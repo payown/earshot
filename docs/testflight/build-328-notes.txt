@@ -1,0 +1,16 @@
+Chapter 132 - The place she can name
+
+What to try first:
+
+1. Update in place to internal Earshot 1.3.0 (328); do not delete the app, reset your library or remove downloads. Build 327's work remains. Immediate paired Watch Queue snapshots stay disabled.
+2. In Settings > Quick Actions > Episode actions, find “Mark as Played / Unplayed” in Enabled or Available. Enable it if needed. In Library > podcast > Filter episodes > All, focus a played episode and choose “Mark as unplayed” in VoiceOver's Actions rotor. Double tap still opens details. For several episodes, use Select episodes and confirm the counted action. Help & About explains both routes.
+3. On two devices in the same iCloud account, find a recent episode present on one but missing on the other. Refresh that podcast on the second device; check for one row, its Played state and saved position, then reopen the app. If Inboxes differ, report the episode and each device's Inbox inclusion, count and age settings. “Last completed on this device” does not mean the other device has every episode.
+4. Mark an episode Played with one to three minutes left. After sync, check Unplayed and Partially Played on both devices; it should stay Played. Starting an episode from a list deliberately puts it in Queue. If a partially heard episode leaves Inbox, check Queue and Partially Played for its saved place. Report lost progress separately; do not reset history.
+5. While Inbox is open on one device, change a podcast's Inbox inclusion on the other. After sync, the list and selection should update; a row that left the scope must not be marked Played. Report exact steps and spoken words if not.
+6. Watch Queue uses iCloud; “Refresh Queue” should say immediate paired refresh is unavailable. Local Queue and playback remain usable. Check eventual arrival only while connected. Previously accepted Watch playback and folder/guide checks need no routine repeat. Fresh-install onboarding and prompt Watch Queue sync remain unverified.
+
+Several public playback, Queue and discovery diagnostics now omit private titles and free-form errors. The broader audit remains open; no real leak was established.
+
+Kashe's story:
+
+Kashe found an interview she had finished. The setting named both directions; the episode offered “Mark as unplayed.” On her other device, she knew which row to look for and kept the place she had saved.

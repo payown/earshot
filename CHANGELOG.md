@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Quick Actions now calls its reversible setting “Mark as Played / Unplayed.” The offline Help guide explains how to find the existing Mark as unplayed action for an episode and for selected episodes. Episode-row actions and double-tap behavior are unchanged.
 - Podcast episode rows in Library and Library Search now show one placement badge: Now Playing, Queued, or In Inbox, in that order. VoiceOver speaks the same status before the episode title while keeping the existing played and download details.
 - Auto-queue count-cap eviction and catalog Queue removal now keep a completed episode Played when removing its Queue item, so it does not return to the Unplayed filter.
 - Quick Actions settings names the configurable Episode and Queue download choice “Download / Remove Download”; episode actions still say “Download” or “Remove download” for the actual state.
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Player, media-sampling, discovery Queue and Queue-save diagnostics now use fixed operation names and safe error categories instead of public episode titles or free-form error text. Playback and Queue behavior are unchanged.
 - Inbox batch actions count only selected episodes still visible in the current Inbox; a refresh removing a selected row no longer leaves an enabled action that does nothing.
 - Inbox batch actions recheck podcast Inbox policy and selected-folder membership when tapped, so a delayed refresh cannot mark or file an episode that already left the chosen scope.
 - An episode recovered during iCloud reconciliation receives an earlier synced Played state even when its catalog change arrives during another pass.

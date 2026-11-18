@@ -423,7 +423,7 @@ struct PodcastPreviewView: View {
             ).queuedEpisodeIdentities()
         } catch {
             AppLog.player.error(
-                "Discovery queue membership refresh failed: \(error.localizedDescription, privacy: .public)"
+                "Discovery queue membership refresh failed: \(NetworkDiagnostic.reason(error), privacy: .public)"
             )
         }
     }

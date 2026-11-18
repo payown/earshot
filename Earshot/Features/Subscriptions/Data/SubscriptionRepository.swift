@@ -1018,7 +1018,7 @@ extension SubscriptionRepository {
             _ = try MediaTransportDiagnostics.capture(in: context, trigger: trigger)
         } catch {
             AppLog.networking.error(
-                "Media transport sample failed: \(error.localizedDescription, privacy: .public) (#709)"
+                "Media transport sample failed: \(NetworkDiagnostic.reason(error), privacy: .public) (#709)"
             )
         }
     }
