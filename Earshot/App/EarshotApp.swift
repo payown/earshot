@@ -1620,7 +1620,13 @@ struct EarshotApp: App {
     #if DEBUG
     private static func screenshotContainer() -> ModelContainer? {
         guard ScreenshotHarness.isSeeding else { return nil }
-        return try? ModelContainerFactory.makeInMemory()
+        do {
+            return try ModelContainerFactory.makeInMemory()
+        } catch {
+            // A seeded UI run must never fall through to the real library.
+            // In particular, some tests exercise confirmed deletion.
+            fatalError("Could not create the seeded in-memory test store")
+        }
     }
     #else
     private static func screenshotContainer() -> ModelContainer? { nil }
