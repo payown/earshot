@@ -605,6 +605,37 @@ final class EarshotUITests: XCTestCase {
                       "The persistent focus target remains available after Retry")
     }
 
+    func testStatsConfirmedDeletionClearsPriorLoadError() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library",
+                               "-historyExportOldOnlyTest", "-statsLoadFailsOnceUITest"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Settings"].tap()
+        let history = app.buttons["History & Stats"]
+        for _ in 0..<6 where !history.exists { app.swipeUp() }
+        XCTAssertTrue(history.waitForExistence(timeout: 5))
+        history.tap()
+        XCTAssertTrue(app.buttons["Listening stats"].waitForExistence(timeout: 5))
+        app.buttons["Listening stats"].tap()
+
+        XCTAssertTrue(app.staticTexts["Could not check listening history"]
+            .waitForExistence(timeout: 10))
+        app.buttons["Delete all history"].tap()
+        let alert = app.alerts["Delete all listening history?"]
+        let sheet = app.sheets["Delete all listening history?"]
+        let dialog = alert.exists ? alert : sheet
+        XCTAssertTrue(dialog.waitForExistence(timeout: 5), app.debugDescription)
+        let destructiveAction = dialog.buttons["Delete all history"]
+        XCTAssertTrue(destructiveAction.exists, app.debugDescription)
+        destructiveAction.tap()
+
+        XCTAssertTrue(app.staticTexts["No listening yet"].waitForExistence(timeout: 10),
+                      app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Could not check listening history"].exists)
+        XCTAssertFalse(app.buttons["Export history (CSV)"].isEnabled)
+    }
+
     func testInboxVoiceOverHasOneStopPerEpisode() throws {
         guard #available(iOS 27.0, *) else {
             throw XCTSkip("VoiceOver UI automation requires iOS 27")
