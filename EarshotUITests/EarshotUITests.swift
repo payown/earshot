@@ -484,6 +484,158 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(played.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
+    func testStatsExportUsesRetainedHistoryNotSelectedWeekTotal() {
+        for hasOldHistory in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+            if hasOldHistory { app.launchArguments.append("-historyExportOldOnlyTest") }
+            app.launch()
+
+            let settingsTab = app.tabBars.buttons["Settings"]
+            XCTAssertTrue(settingsTab.waitForExistence(timeout: 15), app.debugDescription)
+            settingsTab.tap()
+            let history = app.buttons["History & Stats"]
+            for _ in 0..<6 where !history.exists { app.swipeUp() }
+            XCTAssertTrue(history.waitForExistence(timeout: 5), app.debugDescription)
+            history.tap()
+            let stats = app.buttons["Listening stats"]
+            XCTAssertTrue(stats.waitForExistence(timeout: 5), app.debugDescription)
+            stats.tap()
+            let export = app.buttons["Export history (CSV)"]
+            XCTAssertTrue(export.waitForExistence(timeout: 10), app.debugDescription)
+            let scope = app.staticTexts[
+                "Export includes all retained listening sessions, regardless of the selected period or folder."
+            ]
+            XCTAssertTrue(scope.exists, "Export scope must be visible before sharing history")
+            XCTAssertLessThan(scope.frame.minY, export.frame.minY,
+                              "Export scope must precede the button in reading order")
+            if hasOldHistory {
+                let enabled = XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "enabled == true"), object: export
+                )
+                XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed,
+                               "A retained old session is exportable despite an empty This Week view")
+                XCTAssertTrue(app.staticTexts["No listening in this view"].exists)
+                let explanation = app.staticTexts.matching(NSPredicate(
+                    format: "label CONTAINS %@", "Other retained listening history is available to export."
+                )).firstMatch
+                XCTAssertTrue(explanation.exists, app.debugDescription)
+                XCTAssertFalse(app.staticTexts["No listening yet"].exists)
+            } else {
+                XCTAssertTrue(app.staticTexts["No listening yet"].waitForExistence(timeout: 10))
+                XCTAssertFalse(export.isEnabled)
+            }
+            app.terminate()
+        }
+    }
+
+    func testStatsExportScopeIsSpokenBeforeShareAction() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library",
+                               "-historyExportOldOnlyTest"]
+        app.launch()
+        let settingsTab = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 15), app.debugDescription)
+        settingsTab.tap()
+        let history = app.buttons["History & Stats"]
+        for _ in 0..<6 where !history.exists { app.swipeUp() }
+        XCTAssertTrue(history.waitForExistence(timeout: 5), app.debugDescription)
+        history.tap()
+        let stats = app.buttons["Listening stats"]
+        XCTAssertTrue(stats.waitForExistence(timeout: 5), app.debugDescription)
+        stats.tap()
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        var speech: [String] = []
+        for _ in 0..<45 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("Export history (CSV)") { break }
+        }
+        let scopeIndex = try XCTUnwrap(speech.firstIndex(where: {
+            $0.contains("Export includes all retained listening sessions")
+        }), "VoiceOver missed the export scope: \(speech)")
+        let exportIndex = try XCTUnwrap(speech.firstIndex(where: {
+            $0.contains("Export history (CSV)")
+        }), "VoiceOver missed the Export button: \(speech)")
+        XCTAssertLessThan(scopeIndex, exportIndex,
+                          "VoiceOver must announce CSV scope before the share action")
+    }
+
+    func testStatsHistoryLoadFailureCanRetryAndExport() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library",
+                               "-historyExportOldOnlyTest", "-statsLoadFailsOnceUITest"]
+        app.launch()
+        let settingsTab = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 15), app.debugDescription)
+        settingsTab.tap()
+        let history = app.buttons["History & Stats"]
+        for _ in 0..<6 where !history.exists { app.swipeUp() }
+        XCTAssertTrue(history.waitForExistence(timeout: 5), app.debugDescription)
+        history.tap()
+        let stats = app.buttons["Listening stats"]
+        XCTAssertTrue(stats.waitForExistence(timeout: 5), app.debugDescription)
+        stats.tap()
+
+        XCTAssertTrue(app.staticTexts["Could not check listening history"]
+            .waitForExistence(timeout: 10), app.debugDescription)
+        let export = app.buttons["Export history (CSV)"]
+        XCTAssertTrue(export.exists)
+        XCTAssertFalse(export.isEnabled)
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.exists)
+
+        XCTAssertTrue(app.segmentedControls["Stats period"].exists)
+        retry.tap()
+
+        XCTAssertTrue(app.staticTexts["No listening in this view"]
+            .waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Could not check listening history"].exists)
+        let enabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: export
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed)
+        XCTAssertTrue(app.segmentedControls["Stats period"].exists,
+                      "The persistent focus target remains available after Retry")
+    }
+
+    func testStatsConfirmedDeletionClearsPriorLoadError() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library",
+                               "-historyExportOldOnlyTest", "-statsLoadFailsOnceUITest"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Settings"].tap()
+        let history = app.buttons["History & Stats"]
+        for _ in 0..<6 where !history.exists { app.swipeUp() }
+        XCTAssertTrue(history.waitForExistence(timeout: 5))
+        history.tap()
+        XCTAssertTrue(app.buttons["Listening stats"].waitForExistence(timeout: 5))
+        app.buttons["Listening stats"].tap()
+
+        XCTAssertTrue(app.staticTexts["Could not check listening history"]
+            .waitForExistence(timeout: 10))
+        app.buttons["Delete all history"].tap()
+        let alert = app.alerts["Delete all listening history?"]
+        let sheet = app.sheets["Delete all listening history?"]
+        let dialog = alert.exists ? alert : sheet
+        XCTAssertTrue(dialog.waitForExistence(timeout: 5), app.debugDescription)
+        let destructiveAction = dialog.buttons["Delete all history"]
+        XCTAssertTrue(destructiveAction.exists, app.debugDescription)
+        destructiveAction.tap()
+
+        XCTAssertTrue(app.staticTexts["No listening yet"].waitForExistence(timeout: 10),
+                      app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Could not check listening history"].exists)
+        XCTAssertFalse(app.buttons["Export history (CSV)"].isEnabled)
+    }
+
     func testInboxVoiceOverHasOneStopPerEpisode() throws {
         guard #available(iOS 27.0, *) else {
             throw XCTSkip("VoiceOver UI automation requires iOS 27")

@@ -252,6 +252,7 @@ final class StatsRepository {
 
 struct StatsSnapshotReport: Sendable, Equatable {
     let stats: ListeningStats
+    let hasRetainedHistory: Bool
     let executedStoreWorkOnMainThread: Bool
 }
 
@@ -296,8 +297,15 @@ enum StatsSnapshotLoader {
             cancellationCheck: { try Task.checkCancellation() }
         )
         try Task.checkCancellation()
+        // Export writes every retained session, independent of the currently
+        // selected Stats period or folder. A one-row probe keeps this check
+        // bounded even when the history is large.
+        var historyProbe = FetchDescriptor<ListeningSession>()
+        historyProbe.fetchLimit = 1
+        let hasRetainedHistory = try !context.fetch(historyProbe).isEmpty
         return StatsSnapshotReport(
             stats: stats,
+            hasRetainedHistory: hasRetainedHistory,
             executedStoreWorkOnMainThread: executedOnMain || Thread.isMainThread
         )
     }

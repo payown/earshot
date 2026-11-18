@@ -228,6 +228,79 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(all.totalSeconds, 150)
     }
 
+    func testOldOnlyHistoryIsExportedDespiteEmptyCurrentPeriod() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Old-only export")
+        makeSession(
+            ctx, podcast: podcast, seconds: 75,
+            date: Date.now.addingTimeInterval(-40 * 86_400)
+        )
+        try ctx.save()
+
+        let thisWeek = try await StatsSnapshotLoader.load(
+            modelContainer: ctx.container, period: .thisWeek,
+            includeStreak: false, podcastIDs: nil
+        )
+        XCTAssertEqual(thisWeek.stats.totalSeconds, 0)
+        XCTAssertTrue(thisWeek.hasRetainedHistory)
+
+        let csvURL = try await StatsSnapshotLoader.exportCSV(modelContainer: ctx.container)
+        defer { try? FileManager.default.removeItem(at: csvURL) }
+        let csv = try String(contentsOf: csvURL, encoding: .utf8)
+        XCTAssertTrue(csv.contains("Old-only export"))
+        XCTAssertTrue(csv.contains(",75,1"))
+
+        // The UI regression separately verifies that this retained row keeps
+        // Export enabled when the selected period's total is zero.
+    }
+
+    func testHistoryExportIncludesOtherPodcastWhenSelectedScopeIsEmpty() async throws {
+        let ctx = TestStore.freshContext()
+        let outside = makePodcast(ctx, "Outside selected folder")
+        let inside = makePodcast(ctx, "Inside selected folder")
+        makeSession(ctx, podcast: outside, seconds: 90, date: .now)
+        try ctx.save()
+
+        let selectedScope = try await StatsSnapshotLoader.load(
+            modelContainer: ctx.container, period: .allTime,
+            includeStreak: false, podcastIDs: [inside.persistentModelID]
+        )
+        XCTAssertEqual(selectedScope.stats.totalSeconds, 0)
+        XCTAssertTrue(selectedScope.hasRetainedHistory)
+
+        let csvURL = try await StatsSnapshotLoader.exportCSV(modelContainer: ctx.container)
+        defer { try? FileManager.default.removeItem(at: csvURL) }
+        let csv = try String(contentsOf: csvURL, encoding: .utf8)
+        XCTAssertTrue(csv.contains("Outside selected folder"))
+        XCTAssertFalse(csv.contains("Inside selected folder"))
+    }
+
+    func testHistoryExportAvailabilityTracksEmptyAndDeletedStores() async throws {
+        let ctx = TestStore.freshContext()
+        let empty = try await StatsSnapshotLoader.load(
+            modelContainer: ctx.container, period: .thisWeek,
+            includeStreak: false, podcastIDs: nil
+        )
+        XCTAssertFalse(empty.hasRetainedHistory)
+
+        let podcast = makePodcast(ctx, "Delete export fixture")
+        makeSession(ctx, podcast: podcast, seconds: 60, date: .now)
+        try ctx.save()
+        let populated = try await StatsSnapshotLoader.load(
+            modelContainer: ctx.container, period: .thisWeek,
+            includeStreak: false, podcastIDs: nil
+        )
+        XCTAssertTrue(populated.hasRetainedHistory)
+
+        let deletion = try await StatsSnapshotLoader.deleteAllHistory(modelContainer: ctx.container)
+        XCTAssertEqual(deletion.removed, 1)
+        let deleted = try await StatsSnapshotLoader.load(
+            modelContainer: ctx.container, period: .thisWeek,
+            includeStreak: false, podcastIDs: nil
+        )
+        XCTAssertFalse(deleted.hasRetainedHistory)
+    }
+
     func testStreakOnlyComputedWhenIncluded() {
         let ctx = TestStore.freshContext()
         let a = makePodcast(ctx, "Alpha")
