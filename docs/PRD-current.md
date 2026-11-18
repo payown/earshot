@@ -19,6 +19,16 @@ Earshot is an accessible podcast player built for VoiceOver users and other list
 | Listening stats | `StatsScreen`, `StatsPeriod`, `StatsRepository` and `StatsTests` implement weekly/monthly/yearly/all-time listening totals, speed savings, per-podcast breakdown, opt-in streaks and CSV; original PRD §5.9. | A year-in-review product is unverified. The UI shows speed savings; a separate silence-savings statistic is not established. Player discarded-frame accounting warrants investigation before a new stats requirement. |
 | Onboarding and Help | Accessible onboarding and Help exist; original PRD §6 has obsolete telemetry toggles. | Chad passed the offline Inbox/Queue/Downloads guide on build 327. Fresh-install onboarding remains unverified; test with disposable data, never by deleting a real library. |
 
+Selected feedback requests already represented in code remain distinct from
+full physical acceptance:
+
+| Request and Start Testing ID | Implementation and acceptance |
+| --- | --- |
+| Played/Unplayed terminology `9ef14a6a-17b7-4239-b5dd-3fa7b72a5dc2` and older-episode pagination `7ee3a6c1-69b4-4b60-9eac-bbb9ba12e706` | Implemented and merged; Michael accepted the tested wording, older loading, sorting and focus on a long show. Do not infer every screen or sort direction was tested. |
+| Partially Played podcast filter `21cdd796-d1ba-469c-a630-fb9d9f27d1e9` | Implemented in the later integration. Michael approved its unfinished-with-position wording; broad physical sync and focus acceptance is separate. |
+| Selected-episode Mark as Unplayed discoverability `0974d59d-da27-4f37-8248-85a02177e2b4` | The action exists. The approved settings-label and Help clarification is in draft PR #1090, not in public build 327. The whole-podcast request below is separate. |
+| Select all/invert episode selection `4bc62015-6d92-4f59-a1a1-07416880bd45` and per-podcast Skip outro `ac2b2e5d-c538-4471-9c85-0c2a5071726b` | Implemented in earlier merged work; reporter-specific physical acceptance remains unverified. |
+
 ## Version 1.3 testing candidate
 
 This is a **testing goal**, not an App Store release promise. Include only reviewed, regression-tested changes from the single candidate work list on draft PR #1091; that release checklist is branch-specific until integrated. Priorities are cross-device Inbox/catalog/Played state, iPad selection, Watch reliability, data safety and accessibility. An internal candidate must identify its exact source, signed artifact, CI and local results, skips, release notes, and physical checks. Public TestFlight and App Store release need separate decisions. Existing build 327 is a distinct signed baseline; later main changes are not automatically in it.
