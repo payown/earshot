@@ -215,10 +215,12 @@ enum InboxSnapshotLoader {
 final class InboxRepository {
     private let context: ModelContext
     private let settings: AppSettingsStore
+    private let saveContext: (ModelContext) throws -> Void
 
-    init(context: ModelContext) {
+    init(context: ModelContext, saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() }) {
         self.context = context
         self.settings = AppSettingsStore(context: context)
+        self.saveContext = saveContext
     }
 
     /// Removes models that SwiftData invalidated after an event-driven Inbox
@@ -451,7 +453,7 @@ final class InboxRepository {
             PendingCloudPlayedMutation.stage(changedEpisodes, in: context)
         }
         do {
-            try context.save()
+            try saveContext(context)
             // Inbox membership changed (dismiss / clear / caps) — refresh the
             // tab badge without it having to poll on every save (#736).
             NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
