@@ -1524,6 +1524,139 @@ final class DownloadManager {
 /// references.
 @MainActor
 enum DownloadCleanup {
+    /// Capture intent without changing downloads. Call only after the enclosing
+    /// save succeeds. Interruption between saves may retain unwanted audio;
+    /// durable cross-store cleanup retries remain a separate recovery concern.
+    @MainActor
+    struct AfterSave {
+        private struct State: Equatable {
+            let status: DownloadStatus
+            let path: String?
+            let attemptID: String?
+
+            init(_ episode: Episode) {
+                status = episode.downloadStatus
+                path = episode.downloadPath
+                attemptID = episode.downloadAttemptID
+            }
+
+            init(_ row: LocalEpisodeState) {
+                status = row.downloadStatus
+                path = row.downloadPath
+                attemptID = row.downloadAttemptID
+            }
+        }
+
+        private struct Entry {
+            let episode: Episode
+            let key: EpisodeLocalKey?
+            let identityKey: String
+            let runtime: State
+            let durable: State
+            let hadRows: Bool
+        }
+
+        private let entries: [Entry]
+        private let container: ModelContainer
+        private let fetchRows: (EpisodeLocalKey, ModelContext) throws -> [LocalEpisodeState]
+
+        init(
+            _ episodes: [Episode], in context: ModelContext,
+            fetchRows: @escaping (EpisodeLocalKey, ModelContext) throws -> [LocalEpisodeState] =
+                LocalStateStore.episodeRowsThrowing
+        ) {
+            container = context.container
+            self.fetchRows = fetchRows
+            guard DownloadCleanup.deleteAfterPlayedEnabled(context) else { entries = []; return }
+            var captured: [Entry] = []
+            var seen = Set<PersistentIdentifier>()
+            for episode in episodes where seen.insert(episode.persistentModelID).inserted {
+                do {
+                    let key = LocalStateStore.key(for: episode)
+                    // Include local download changes staged in the enclosing
+                    // transaction, not just the previous persisted version.
+                    let rows = try key.map { try fetchRows($0, context) } ?? []
+                    let runtime = State(episode)
+                    let durable = rows.first.map(State.init) ?? runtime
+                    // Ambiguous ownership or a newer runtime attempt is not
+                    // permission to clear a different download.
+                    guard rows.allSatisfy({ State($0) == durable }),
+                          LocalRuntimeState.shared.episode(episode.persistentModelID) == nil
+                            || runtime == durable,
+                          durable.status != .none || durable.path != nil else { continue }
+                    captured.append(Entry(
+                        episode: episode, key: key,
+                        identityKey: DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
+                        runtime: runtime, durable: durable, hadRows: !rows.isEmpty
+                    ))
+                } catch {
+                    AppLog.data.error("Download cleanup capture failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
+                }
+            }
+            entries = captured
+        }
+
+        func perform(
+            saveContext: (ModelContext) throws -> Void = { try $0.save() },
+            cancel: (String, String?) -> Void = { DownloadManager.cancelDownload(identityKey: $0, attemptID: $1) }
+        ) {
+            guard !entries.isEmpty else { return }
+            let cleanup = ModelContext(container)
+            cleanup.autosaveEnabled = false
+            var staged: [Entry] = []
+            do {
+                for entry in entries {
+                    guard State(entry.episode) == entry.runtime else { continue }
+                    let rows = try entry.key.map { try fetchRows($0, cleanup) } ?? []
+                    guard (!rows.isEmpty) == entry.hadRows,
+                          rows.allSatisfy({ State($0) == entry.durable }) else { continue }
+                    for row in rows {
+                        if row.volumeBoostRaw == nil {
+                            cleanup.delete(row)
+                        } else {
+                            row.downloadStatus = .none
+                            row.downloadPath = nil
+                            row.downloadAttemptID = nil
+                        }
+                    }
+                    staged.append(entry)
+                }
+                guard !staged.isEmpty else { return }
+                try saveContext(cleanup)
+            } catch {
+                cleanup.rollback()
+                // Runtime, files, tasks and waiters are unchanged. The outer
+                // membership/played save is already committed and stays so.
+                AppLog.data.error("Post-save download cleanup failed: \(NetworkDiagnostic.reason(error), privacy: .public)")
+                return
+            }
+            for entry in staged {
+                if State(entry.episode) == entry.runtime {
+                    entry.episode.downloadAttemptID = nil
+                    entry.episode.downloadPath = nil
+                    entry.episode.downloadStatus = .none
+                }
+                if entry.durable.status == .downloading {
+                    cancel(entry.identityKey, entry.durable.attemptID)
+                }
+            }
+            // A skipped/newer owner may still reference a shared legacy file.
+            // Recheck persisted references after saving, excluding no owners.
+            let reader = ModelContext(container)
+            reader.autosaveEnabled = false
+            do {
+                let retained = try DownloadPaths.referencedFileNames(excluding: [], in: reader)
+                for entry in staged {
+                    if let name = DownloadPaths.storedFileName(entry.durable.path), !retained.contains(name) {
+                        try DownloadPaths.removeFile(named: name)
+                    }
+                }
+            } catch {
+                AppLog.data.error("Post-save audio cleanup retained files: \(NetworkDiagnostic.reason(error), privacy: .public)")
+            }
+        }
+    }
+
     struct BulkOwnership {
         /// Nil means the ownership fetch failed; keep files to avoid deleting
         /// audio that might still belong to another episode.

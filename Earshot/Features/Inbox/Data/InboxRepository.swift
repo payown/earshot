@@ -370,15 +370,11 @@ final class InboxRepository {
     /// Hides exactly `episodes`, used by a folder-filtered Inbox so "Clear
     /// inbox" never dismisses episodes outside the visible scope (#763).
     func clearInbox(_ episodes: [Episode]) {
-        let shouldDeleteDownloads = DownloadCleanup.deleteAfterPlayedEnabled(context)
-        let ownership = shouldDeleteDownloads ? DownloadCleanup.bulkOwnership(for: episodes, in: context) : nil
+        let cleanup = DownloadCleanup.AfterSave(episodes, in: context)
         for episode in episodes {
             episode.inboxDismissed = true
-            if shouldDeleteDownloads {
-                DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
-            }
         }
-        save(changedEpisodes: episodes, inboxDismissedChangedExplicitly: true)
+        save(changedEpisodes: episodes, inboxDismissedChangedExplicitly: true, cleanup: cleanup)
     }
 
     /// Removes one episode from Inbox without changing played state. This is an
@@ -386,9 +382,9 @@ final class InboxRepository {
     /// and remains independent from played-state synchronization (#824).
     func dismiss(_ episode: Episode) {
         guard !episode.inboxDismissed else { return }
+        let cleanup = DownloadCleanup.AfterSave([episode], in: context)
         episode.inboxDismissed = true
-        DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
-        save(changedEpisodes: [episode], inboxDismissedChangedExplicitly: true)
+        save(changedEpisodes: [episode], inboxDismissedChangedExplicitly: true, cleanup: cleanup)
     }
 
     /// Marks `episode` played and dismisses it from the inbox durably (#546).
@@ -397,14 +393,14 @@ final class InboxRepository {
     /// makes the removal sticky, so later marking it unplayed can't resurface a
     /// finished episode. Idempotent.
     func markPlayed(_ episode: Episode) {
+        let cleanup = DownloadCleanup.AfterSave([episode], in: context)
         episode.isPlayed = true
         episode.inboxDismissed = true
-        // Auto-delete the download once played, when the user opted in (#downloads).
-        DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
         save(
             changedEpisodes: [episode],
             playedChangedExplicitly: true,
-            inboxDismissedChangedExplicitly: true
+            inboxDismissedChangedExplicitly: true,
+            cleanup: cleanup
         )
     }
 
@@ -446,14 +442,19 @@ final class InboxRepository {
     private func save(
         changedEpisodes: [Episode] = [],
         playedChangedExplicitly: Bool = false,
-        inboxDismissedChangedExplicitly: Bool = false
+        inboxDismissedChangedExplicitly: Bool = false,
+        cleanup: DownloadCleanup.AfterSave? = nil
     ) {
-        guard context.hasChanges else { return }
+        guard context.hasChanges else {
+            cleanup?.perform(saveContext: saveContext)
+            return
+        }
         if playedChangedExplicitly {
             PendingCloudPlayedMutation.stage(changedEpisodes, in: context)
         }
         do {
             try saveContext(context)
+            cleanup?.perform(saveContext: saveContext)
             // Inbox membership changed (dismiss / clear / caps) — refresh the
             // tab badge without it having to poll on every save (#736).
             NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
