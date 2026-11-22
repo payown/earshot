@@ -1284,6 +1284,291 @@ final class DownloadManagerTests: XCTestCase {
 
     // MARK: DownloadCleanup — delete downloads after played
 
+    func testQueueCleanupSaveFailurePreservesAudioAndDownloadProjection() throws {
+        for action in ["remove", "clear", "played", "retainedCompletion"] {
+            let context = TestStore.freshContext()
+            AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+            AppSettingsStore(context: context).setBool(true, for: SettingsKey.keepFinishedEpisodesInQueue)
+            let name = "cleanup-save-failure-\(UUID().uuidString).mp3"
+            let file = try plantDownloadFile(named: name)
+            let episode = Episode(guid: UUID().uuidString, title: "Save failure",
+                                  audioURL: "https://downloads.test/audio.mp3",
+                                  downloadStatus: .downloaded, downloadPath: name)
+            try persistLocalDownloadState(for: [episode], in: context)
+            QueueRepository(context: context).add(episode)
+            let queue = QueueRepository(context: context, saveContext: { _ in throw ForcedSaveFailure.injected })
+            switch action {
+            case "remove": XCTAssertFalse(queue.cancelFromQueue(episode))
+            case "clear": XCTAssertFalse(queue.clear())
+            case "played": XCTAssertFalse(queue.markPlayedAndRemove(episode))
+            default: XCTAssertFalse(queue.finishPlayback(episode))
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), action)
+            XCTAssertEqual(episode.downloadPath, name, action)
+            XCTAssertEqual(episode.downloadStatus, .downloaded, action)
+            XCTAssertNotNil(episode.queueItem, action)
+            // SwiftData rollback can leave an already materialized model's
+            // scalar accessors stale; inspect the actual persisted outcome.
+            let verify = ModelContext(context.container)
+            let guid = episode.guid
+            let restored = try XCTUnwrap(verify.fetch(FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.guid == guid }
+            )).first)
+            XCTAssertFalse(restored.isPlayed, action)
+            XCTAssertFalse(restored.inboxDismissed, action)
+            let row = try XCTUnwrap(LocalStateStore.episodeRows(
+                for: try XCTUnwrap(LocalStateStore.key(for: episode)), in: context
+            ).first)
+            XCTAssertEqual(row.downloadPath, name, action)
+        }
+    }
+
+    func testInboxCleanupSaveFailurePreservesAudioAndDownloadProjection() throws {
+        for action in ["dismiss", "clear", "played"] {
+            let context = TestStore.freshContext()
+            AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+            let name = "inbox-save-failure-\(UUID().uuidString).mp3"
+            let file = try plantDownloadFile(named: name)
+            let episode = Episode(guid: UUID().uuidString, title: "Save failure",
+                                  audioURL: "https://downloads.test/audio.mp3",
+                                  downloadStatus: .downloaded, downloadPath: name)
+            try persistLocalDownloadState(for: [episode], in: context)
+            let inbox = InboxRepository(context: context, saveContext: { _ in throw ForcedSaveFailure.injected })
+            switch action {
+            case "dismiss": inbox.dismiss(episode)
+            case "clear": inbox.clearInbox([episode])
+            default: inbox.markPlayed(episode)
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), action)
+            XCTAssertEqual(episode.downloadPath, name, action)
+            XCTAssertEqual(episode.downloadStatus, .downloaded, action)
+            let verify = ModelContext(context.container)
+            let guid = episode.guid
+            let restored = try XCTUnwrap(verify.fetch(FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.guid == guid }
+            )).first)
+            XCTAssertFalse(restored.isPlayed, action)
+            XCTAssertFalse(restored.inboxDismissed, action)
+        }
+    }
+
+    func testCleanupSaveFailureKeepsDownloadsAfterQueueMutationCommitted() throws {
+        for status in [DownloadStatus.downloaded, .pending, .downloading] {
+            let context = TestStore.freshContext()
+            AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+            let name = "cleanup-second-save-\(UUID().uuidString).mp3"
+            let file = try plantDownloadFile(named: name)
+            let episode = Episode(guid: UUID().uuidString, title: "Second save",
+                                  audioURL: "https://downloads.test/audio.mp3",
+                                  downloadStatus: status, downloadPath: name)
+            episode.downloadAttemptID = UUID().uuidString
+            try persistLocalDownloadState(for: [episode], in: context)
+            QueueRepository(context: context).add(episode)
+            let attempt = episode.downloadAttemptID
+            var saves = 0
+            let queue = QueueRepository(context: context, saveContext: {
+                saves += 1
+                if saves == 2 { throw ForcedSaveFailure.injected }
+                try $0.save()
+            })
+            XCTAssertTrue(queue.cancelFromQueue(episode), "Queue removal itself committed")
+            XCTAssertEqual(saves, 2)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+            XCTAssertEqual(episode.downloadStatus, status)
+            XCTAssertEqual(episode.downloadPath, name)
+            XCTAssertEqual(episode.downloadAttemptID, attempt)
+            let verify = ModelContext(context.container)
+            XCTAssertEqual(try verify.fetchCount(FetchDescriptor<QueueItem>()), 0)
+            let row = try XCTUnwrap(verify.fetch(FetchDescriptor<LocalEpisodeState>()).first)
+            XCTAssertEqual(row.downloadStatus, status)
+            XCTAssertEqual(row.downloadPath, name)
+            XCTAssertEqual(row.downloadAttemptID, attempt)
+        }
+    }
+
+    func testCleanupIncludesPendingDownloadStagedInEnclosingSave() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let episode = Episode(guid: UUID().uuidString, title: "Staged pending",
+                              audioURL: "https://downloads.test/audio.mp3")
+        try persistLocalDownloadState(for: [episode], in: context)
+        QueueRepository(context: context).add(episode)
+        ActiveDownload.setDownloadStatus(.pending, on: episode, in: context)
+        XCTAssertTrue(context.hasChanges)
+        XCTAssertTrue(QueueRepository(context: context).clear())
+        XCTAssertEqual(episode.downloadStatus, .none)
+        let verify = ModelContext(context.container)
+        XCTAssertEqual(try verify.fetchCount(FetchDescriptor<LocalEpisodeState>()), 0)
+    }
+
+    func testCleanupBatchKeepsSharedFileWhenAnotherOwnerWasRetried() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let name = "cleanup-shared-retry-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        let episodes = (0..<2).map {
+            Episode(guid: "shared-\($0)", title: "Shared", audioURL: "https://downloads.test/audio.mp3",
+                    downloadStatus: .downloaded, downloadPath: name)
+        }
+        try persistLocalDownloadState(for: episodes, in: context)
+        let plan = DownloadCleanup.AfterSave(episodes, in: context)
+        let retry = try XCTUnwrap(LocalStateStore.key(for: episodes[1]))
+        let writer = ModelContext(context.container)
+        let row = try XCTUnwrap(LocalStateStore.episodeRowsThrowing(for: retry, in: writer).first)
+        row.downloadStatus = .downloading
+        row.downloadAttemptID = "new-attempt"
+        try writer.save()
+        var saves = 0
+        plan.perform(saveContext: { saves += 1; try $0.save() })
+        XCTAssertEqual(saves, 1, "One local save for the eligible batch")
+        XCTAssertEqual(episodes[0].downloadStatus, .none)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        let verify = ModelContext(context.container)
+        let retained = try XCTUnwrap(LocalStateStore.episodeRowsThrowing(for: retry, in: verify).first)
+        XCTAssertEqual(retained.downloadAttemptID, "new-attempt")
+        XCTAssertEqual(retained.downloadPath, name)
+    }
+
+    func testCleanupBatchDeletesSharedFileOnlyAfterAllOwnersClear() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let name = "cleanup-shared-all-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        let episodes = (0..<2).map {
+            Episode(guid: "all-\($0)", title: "Shared", audioURL: "https://downloads.test/audio.mp3",
+                    downloadStatus: .downloaded, downloadPath: name)
+        }
+        try persistLocalDownloadState(for: episodes, in: context)
+        var saves = 0
+        DownloadCleanup.AfterSave(episodes, in: context).perform(saveContext: {
+            saves += 1
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+            try $0.save()
+        })
+        XCTAssertEqual(saves, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(try ModelContext(context.container).fetchCount(FetchDescriptor<LocalEpisodeState>()), 0)
+    }
+
+    func testCleanupReadFailuresNeverDeleteOrCancel() throws {
+        for failedRead in [1, 2] {
+            let context = TestStore.freshContext()
+            AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+            let name = "cleanup-fetch-\(UUID().uuidString).mp3"
+            let file = try plantDownloadFile(named: name)
+            let episode = Episode(guid: UUID().uuidString, title: "Read failure",
+                                  audioURL: "https://downloads.test/audio.mp3",
+                                  downloadStatus: .downloading, downloadPath: name)
+            episode.downloadAttemptID = "retained-attempt"
+            try persistLocalDownloadState(for: [episode], in: context)
+            var reads = 0
+            let plan = DownloadCleanup.AfterSave([episode], in: context, fetchRows: {
+                reads += 1
+                if reads == failedRead { throw ForcedSaveFailure.injected }
+                return try LocalStateStore.episodeRowsThrowing(for: $0, in: $1)
+            })
+            var saves = 0
+            var cancellations = 0
+            plan.perform(saveContext: { _ in saves += 1 }, cancel: { _, _ in cancellations += 1 })
+            XCTAssertEqual(saves, 0)
+            XCTAssertEqual(cancellations, 0)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+            XCTAssertEqual(episode.downloadStatus, .downloading)
+            XCTAssertEqual(episode.downloadAttemptID, "retained-attempt")
+        }
+    }
+
+    func testCleanupDoesNotCancelOrEraseRetryPublishedAfterCleanupSave() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let name = "cleanup-new-owner-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        let episode = Episode(guid: UUID().uuidString, title: "Retry",
+                              audioURL: "https://downloads.test/audio.mp3",
+                              downloadStatus: .downloading, downloadPath: name)
+        episode.downloadAttemptID = "old-attempt"
+        try persistLocalDownloadState(for: [episode], in: context)
+        let key = try XCTUnwrap(LocalStateStore.key(for: episode))
+        let plan = DownloadCleanup.AfterSave([episode], in: context)
+        var cancelledAttempts: [String?] = []
+        plan.perform(saveContext: {
+            try $0.save()
+            let writer = ModelContext(context.container)
+            writer.insert(LocalEpisodeState(
+                podcastFeedURL: key.feedURL, episodeGUID: key.guid,
+                downloadStatus: .downloading, downloadPath: name, downloadAttemptID: "new-attempt"
+            ))
+            try writer.save()
+            episode.downloadAttemptID = "new-attempt"
+        }, cancel: { _, attempt in cancelledAttempts.append(attempt) })
+        XCTAssertEqual(cancelledAttempts, ["old-attempt"])
+        XCTAssertEqual(episode.downloadAttemptID, "new-attempt")
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+        XCTAssertEqual(episode.downloadPath, name)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func testCleanupRefaultedEpisodePreservesVolumeBoost() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let name = "cleanup-refault-\(UUID().uuidString).mp3"
+        let file = try plantDownloadFile(named: name)
+        let episode = Episode(guid: UUID().uuidString, title: "Refault",
+                              audioURL: "https://downloads.test/audio.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        try persistLocalDownloadState(for: [episode], in: context)
+        let key = try XCTUnwrap(LocalStateStore.key(for: episode))
+        let row = try XCTUnwrap(LocalStateStore.episodeRowsThrowing(for: key, in: context).first)
+        row.volumeBoostRaw = "future-boost"
+        try context.save()
+        LocalRuntimeState.shared.clear()
+        let fresh = ModelContext(context.container)
+        let refaulted = try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first)
+        DownloadCleanup.AfterSave([refaulted], in: fresh).perform()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(refaulted.downloadStatus, .none)
+        let verify = ModelContext(context.container)
+        let preserved = try XCTUnwrap(LocalStateStore.episodeRowsThrowing(for: key, in: verify).first)
+        XCTAssertEqual(preserved.volumeBoostRaw, "future-boost")
+        XCTAssertNil(preserved.downloadPath)
+    }
+
+    func testFailedQueueMutationLeavesActiveDownloadWaiterUsable() async throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let episode = Episode(guid: UUID().uuidString, title: "Waiting",
+                              audioURL: "https://downloads.test/audio.mp3")
+        try persistLocalDownloadState(for: [episode], in: context)
+        QueueRepository(context: context).add(episode)
+        var taskKeys: [String] = []
+        let manager = DownloadManager(startTransfer: { _, key in taskKeys.append(key) })
+        manager.configureForTesting(context: context, isOnWifi: true)
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+        var resolved = false
+        let waiter = Task {
+            let result = await manager.downloadAndWait(episode, timeout: 5)
+            resolved = true
+            return result
+        }
+        for _ in 0..<100 where taskKeys.isEmpty { await Task.yield() }
+        let taskKey = try XCTUnwrap(taskKeys.first)
+        let attempt = episode.downloadAttemptID
+        let queue = QueueRepository(context: context, saveContext: { _ in throw ForcedSaveFailure.injected })
+        XCTAssertFalse(queue.clear())
+        await Task.yield()
+        XCTAssertFalse(resolved)
+        XCTAssertEqual(episode.downloadStatus, .downloading)
+        XCTAssertEqual(episode.downloadAttemptID, attempt)
+        let name = "cleanup-waiter-\(UUID().uuidString).mp3"
+        _ = try plantDownloadFile(named: name)
+        XCTAssertTrue(DownloadManager.handle(PendingDownloadTerminalEvent(
+            taskKey: taskKey, outcome: .finished(fileName: name)
+        )))
+        let completed = await waiter.value
+        XCTAssertTrue(completed)
+    }
+
     func test_removeDownloadAfterPlayed_enabled_deletesFileAndResetsState() throws {
         let context = TestStore.freshContext()
         AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)

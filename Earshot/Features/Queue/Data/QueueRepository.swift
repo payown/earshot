@@ -242,6 +242,7 @@ final class QueueRepository {
     static let autoQueueOptInDefaultAgeLimitDays = 7
 
     private let context: ModelContext
+    private let saveContext: (ModelContext) throws -> Void
 
     /// A no-save result used only by ``CatalogEpisodeQueueRepository``. Keeping
     /// this staging surface inside the existing queue owner prevents catalog
@@ -262,8 +263,9 @@ final class QueueRepository {
         let fileURL: URL?
     }
 
-    init(context: ModelContext) {
+    init(context: ModelContext, saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() }) {
         self.context = context
+        self.saveContext = saveContext
     }
 
     // MARK: Catalog transaction staging
@@ -644,11 +646,6 @@ final class QueueRepository {
         remove(episode) {
             if !$0.isPlayed { $0.status = .newEpisode }
             $0.inboxDismissed = true
-            // Reuse the existing opt-in download cleanup rule. A deliberate
-            // queue removal means the listener is done with this episode just
-            // as surely as marking it played, but it still must not count as a
-            // completed listen.
-            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)
         }
     }
 
@@ -676,26 +673,24 @@ final class QueueRepository {
             $0.persistentModelID == episode.persistentModelID
         }
         let episodeToMark = queuedEpisode ?? episode
+        let cleanup = DownloadCleanup.AfterSave([episodeToMark], in: context)
         PendingCloudPlayedMutation.stage([episodeToMark], played: true, in: context)
         let mutate: (Episode) -> Void = {
             $0.isPlayed = true
             $0.inboxDismissed = true
-            // Auto-delete the download once played, when the user opted in. In
-            // the same save as the played flip so the file and state clear atomically.
-            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)
         }
         let saved: Bool
         if queuedEpisode != nil, keepingQueueMembership {
             mutate(episodeToMark)
-            saved = save()
+            saved = save(cleanup: cleanup)
         } else if queuedEpisode != nil {
-            saved = remove(episodeToMark, mutate)
+            saved = remove(episodeToMark, cleanup: cleanup, mutate)
         } else {
             // Restored playback and jump-to-bookmark intentionally do not queue
             // the episode. Marking played is still a valid episode mutation; only
             // queue removal is conditional.
             mutate(episodeToMark)
-            saved = save(notifyQueueChange: false)
+            saved = save(notifyQueueChange: false, cleanup: cleanup)
         }
         guard saved else { return false }
         postEpisodeUserStateChanges([episodeToMark], playedChangedExplicitly: true)
@@ -717,8 +712,7 @@ final class QueueRepository {
     func clear() -> Bool {
         let items = orderedItems()
         let episodes = items.compactMap(\.episode)
-        let shouldDeleteDownloads = DownloadCleanup.deleteAfterPlayedEnabled(context)
-        let ownership = shouldDeleteDownloads ? DownloadCleanup.bulkOwnership(for: episodes, in: context) : nil
+        let cleanup = DownloadCleanup.AfterSave(episodes, in: context)
         var stagedFollowedRemoval = false
         for item in items {
             if let episode = item.episode {
@@ -729,16 +723,13 @@ final class QueueRepository {
                 ) || stagedFollowedRemoval
                 if !episode.isPlayed { episode.isPlayed = false }
                 episode.inboxDismissed = true
-                if shouldDeleteDownloads {
-                    DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
-                }
             }
             context.delete(item)
         }
         if stagedFollowedRemoval {
             PendingCloudQueueMutation.stageOrdering(in: context)
         }
-        guard save() else { return false }
+        guard save(cleanup: cleanup) else { return false }
         postEpisodeUserStateChanges(episodes, playedChangedExplicitly: true)
         return true
     }
@@ -1210,11 +1201,15 @@ final class QueueRepository {
     }
 
     @discardableResult
-    private func remove(_ episode: Episode, _ mutate: (Episode) -> Void) -> Bool {
+    private func remove(
+        _ episode: Episode, cleanup: DownloadCleanup.AfterSave? = nil,
+        _ mutate: (Episode) -> Void
+    ) -> Bool {
         var items = orderedItems()
         guard let item = items.first(where: {
             $0.episode?.persistentModelID == episode.persistentModelID
         }), let canonicalEpisode = item.episode else { return false }
+        let cleanup = cleanup ?? DownloadCleanup.AfterSave([canonicalEpisode], in: context)
         if PendingCloudQueueMutation.stageMembership(
             episode: canonicalEpisode,
             isQueued: false,
@@ -1225,7 +1220,7 @@ final class QueueRepository {
         items.removeAll { $0.persistentModelID == item.persistentModelID }
         context.delete(item)
         mutate(canonicalEpisode)
-        return compact(items)
+        return compact(items, cleanup: cleanup)
     }
 
     /// Applies a ``QueueLogic`` ordering op (keyed on queue-item ids) and
@@ -1284,17 +1279,18 @@ final class QueueRepository {
 
     /// Assigns dense positions `0..<N` over `ordered` and saves.
     @discardableResult
-    private func compact(_ ordered: [QueueItem]) -> Bool {
+    private func compact(_ ordered: [QueueItem], cleanup: DownloadCleanup.AfterSave? = nil) -> Bool {
         for (index, item) in ordered.enumerated() where item.position != index {
             item.position = index
         }
-        return save()
+        return save(cleanup: cleanup)
     }
 
     @discardableResult
-    private func save(notifyQueueChange: Bool = true) -> Bool {
+    private func save(notifyQueueChange: Bool = true, cleanup: DownloadCleanup.AfterSave? = nil) -> Bool {
         do {
-            try context.save()
+            try saveContext(context)
+            cleanup?.perform(saveContext: saveContext)
             if notifyQueueChange {
                 NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)
             }
