@@ -70,6 +70,20 @@ final class PlaybackHandoffTests: XCTestCase {
         )
     }
 
+    /// Handoff assertions need media long enough for the remote 180-second
+    /// position. An unreachable example.com enclosure can now fail terminally
+    /// before those assertions run, as intended by the 331 playback fix.
+    private func playableAudioFile() throws -> URL {
+        let audio = FileManager.default.temporaryDirectory
+            .appending(path: "Handoff-\(UUID().uuidString).wav")
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8000 * 240))
+        buffer.frameLength = buffer.frameCapacity
+        buffer.floatChannelData?[0].initialize(repeating: 0, count: Int(buffer.frameLength))
+        try AVAudioFile(forWriting: audio, settings: format.settings).write(from: buffer)
+        return audio
+    }
+
     func testHandoffRetainsEpisodeFetchedOnlyForPlayback() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         let audio = FileManager.default.temporaryDirectory.appending(path: "Handoff-\(UUID().uuidString).wav")
@@ -204,6 +218,8 @@ final class PlaybackHandoffTests: XCTestCase {
 
     func testResumeAppliesExplicitFetchPositionAndRateBeforePlaying() async throws {
         let context = TestStore.freshContext()
+        let audio = try playableAudioFile()
+        defer { try? FileManager.default.removeItem(at: audio) }
         let remote = PlaybackHandoffSnapshot(
             identity: try identity(),
             positionSeconds: 180,
@@ -215,6 +231,8 @@ final class PlaybackHandoffTests: XCTestCase {
         player.configure(context: context)
         defer { player.stopAndUnload() }
         let episode = makeEpisode(context, position: 20)
+        episode.audioURL = audio.absoluteString
+        try context.save()
         player.load(episode)
 
         player.resume()
@@ -345,6 +363,8 @@ final class PlaybackHandoffTests: XCTestCase {
 
     func testCatalogLoadedResumeNeverFetchesDirectHandoff() async throws {
         let context = TestStore.freshContext()
+        let audio = try playableAudioFile()
+        defer { try? FileManager.default.removeItem(at: audio) }
         let remote = PlaybackHandoffSnapshot(
             identity: try identity(),
             positionSeconds: 180,
@@ -356,6 +376,8 @@ final class PlaybackHandoffTests: XCTestCase {
         player.configure(context: context)
         defer { player.stopAndUnload() }
         let episode = makeEpisode(context, position: 20, followed: false)
+        episode.audioURL = audio.absoluteString
+        try context.save()
         player.load(episode)
 
         player.resume()
@@ -399,6 +421,8 @@ final class PlaybackHandoffTests: XCTestCase {
 
     func testCatalogTransitionDuringStartFetchDoesNotApplyRemoteHandoff() async throws {
         let context = TestStore.freshContext()
+        let audio = try playableAudioFile()
+        defer { try? FileManager.default.removeItem(at: audio) }
         let remote = PlaybackHandoffSnapshot(
             identity: try identity(),
             positionSeconds: 180,
@@ -411,6 +435,8 @@ final class PlaybackHandoffTests: XCTestCase {
         player.configure(context: context)
         defer { player.stopAndUnload() }
         let episode = makeEpisode(context, position: 20)
+        episode.audioURL = audio.absoluteString
+        try context.save()
 
         player.playWithHandoff(episode)
         episode.podcast?.subscriptionStateRaw = PodcastSubscriptionState.catalogOnly.rawValue
