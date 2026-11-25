@@ -848,6 +848,7 @@ enum GroupedQueueDrag {
 private struct QueueRow: View {
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(QuickActionStore.self) private var quickActions
     // Requires SettingsStore in the environment (injected at the app root); every
     // QueueRow renders under QueueScreen, which is under that root. Gates the
     // opt-in season/episode numbering (#452).
@@ -866,6 +867,9 @@ private struct QueueRow: View {
     let actions: [QueueItemAction]
     let supplementalActions: [QuickActionItem]
     let performAction: (QueueItemAction) -> Void
+    @State private var confirmingDefaultAction = false
+    @State private var pendingDefaultAction: QueueItemAction?
+    @State private var pendingDefaultLabel = ""
 
     @ViewBuilder
     var body: some View {
@@ -879,9 +883,17 @@ private struct QueueRow: View {
     private var rowContent: some View {
         let episodeID = episode.persistentModelID
         let presentations = QueueItemAction.presentations(actions, for: episode, moveMode: moveMode)
+        let promoted = voiceOverEnabled ? ConfiguredRowDefault.action(
+            configured: quickActions.queueActions, applicable: actions
+        ) : nil
         let rotorPresentations = voiceOverEnabled && !actions.contains(.playNow)
             ? QueueItemAction.presentations(actions + [.playNow], for: episode, moveMode: moveMode)
             : presentations
+        let remainingActions = ConfiguredRowDefault.remaining(rotorPresentations, promoted: promoted)
+        let detailsAction = promoted == nil ? [] : [QuickActionItem(
+            id: "openEpisodeDetails", label: "Open episode details", isDestructive: false,
+            run: onSelect
+        )]
         // Castro-style "X min left" / total length, the same treatment EpisodeRow
         // gives every other list. The Queue was the original surface this was
         // requested for but #493 only reached the shared row, not this bespoke
@@ -894,7 +906,17 @@ private struct QueueRow: View {
 
         let selectionButton = Button {
             guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
-            onSelect()
+            if let promoted {
+                if defaultNeedsConfirmation(promoted) {
+                    pendingDefaultAction = promoted
+                    pendingDefaultLabel = promoted.label(for: episode)
+                    confirmingDefaultAction = true
+                } else {
+                    performAction(promoted)
+                }
+            } else {
+                onSelect()
+            }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title)
@@ -958,13 +980,24 @@ private struct QueueRow: View {
         // there's something to speak: `.accessibilityValue("")` makes VoiceOver
         // utter a stray pause, so a played/unknown-duration row omits it.
         .accessibilityValueIfPresent(accessibilityValue)
-        .accessibilityHint("Double tap to view episode details")
+        .accessibilityHint(promoted.map { "Double tap to \($0.label(for: episode).lowercased())" }
+            ?? "Double tap to view episode details")
+        .confirmationDialog(pendingDefaultLabel, isPresented: $confirmingDefaultAction) {
+            if let pendingDefaultAction {
+                Button(pendingDefaultLabel, role: .destructive) {
+                    guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                    performAction(pendingDefaultAction)
+                    self.pendingDefaultAction = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingDefaultAction = nil }
+        }
         .modifier(DetailSelectionTrait(selected: isDetailSelected))
         .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572). The
         // selection double-tap and hint above stay independent of those actions.
-        .queueActionsRotor(rotorPresentations, supplementalActions: supplementalActions) { action in
+        .queueActionsRotor(remainingActions, supplementalActions: supplementalActions + detailsAction) { action in
             guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
             performAction(action)
         }
@@ -988,6 +1021,10 @@ private struct QueueRow: View {
             .accessibilityIdentifier("queue.row.play")
             .accessibilityHidden(voiceOverEnabled)
         }
+    }
+
+    private func defaultNeedsConfirmation(_ action: QueueItemAction) -> Bool {
+        action == .removeFromQueue || (action == .download && episode.downloadStatus == .downloaded)
     }
 
     /// True when this row's episode is the one loaded in the player, compared by

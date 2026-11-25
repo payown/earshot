@@ -274,6 +274,187 @@ final class EarshotUITests: XCTestCase {
         )).firstMatch.waitForExistence(timeout: 5), "Play must load the selected episode")
     }
 
+    func testVoiceOverEpisodeFirstActionPlaysAndUnavailableFirstFallsBackToDetails() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        defer { try? voiceOver.disable() }
+        for arguments in [
+            ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"],
+            ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList", "-uiTestEpisodeFirstUnavailable"]
+        ] {
+            let app = XCUIApplication()
+            app.launchArguments = arguments
+            app.launch()
+            let row = app.buttons.matching(NSPredicate(
+                format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+            )).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15))
+            try voiceOver.enable()
+            row.tap()
+            row.doubleTap()
+            if arguments.contains("-uiTestEpisodeFirstUnavailable") {
+                XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+                XCTAssertFalse(app.buttons["Close player"].exists)
+            } else {
+                XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5))
+            }
+            try voiceOver.disable()
+            app.terminate()
+        }
+    }
+
+    func testCompactInboxVoiceOverDefaultFollowsSavedFirstAction() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        defer { try? voiceOver.disable() }
+        for firstMarkPlayed in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+                + (firstMarkPlayed ? ["-uiTestEpisodeFirstMarkPlayed"] : [])
+            app.launch()
+            XCTAssertTrue(app.buttons.matching(NSPredicate(
+                format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+            )).firstMatch.waitForExistence(timeout: 15))
+            app.buttons["Inbox"].firstMatch.tap()
+            let row = app.buttons.matching(NSPredicate(
+                format: "label BEGINSWITH %@", "#169 – Apple's Price Hikes"
+            )).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15))
+            try voiceOver.enable()
+            row.tap()
+            row.doubleTap()
+            if firstMarkPlayed {
+                XCTAssertFalse(row.waitForExistence(timeout: 3),
+                               "Saved Mark as played first must remove the episode from Inbox")
+                XCTAssertFalse(app.buttons["Close player"].exists)
+            } else {
+                XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5),
+                              "Default Play now must start from compact Inbox")
+            }
+            try voiceOver.disable()
+            app.terminate()
+        }
+    }
+
+    func testCompactInboxTouchDetailsAndVoiceOverSelectionStayAvailable() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch.waitForExistence(timeout: 15))
+        app.buttons["Inbox"].firstMatch.tap()
+        let row = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#169 – Apple's Price Hikes"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        row.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5),
+                      "Ordinary touch must still open Episode Details")
+        app.terminate()
+
+        app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch.waitForExistence(timeout: 15))
+        app.buttons["Inbox"].firstMatch.tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        let select = app.buttons["Select"].firstMatch
+        select.tap()
+        if !app.buttons["Done"].firstMatch.waitForExistence(timeout: 2) { select.doubleTap() }
+        XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 5))
+        row.tap()
+        if !row.isSelected { row.doubleTap() }
+        XCTAssertTrue(row.isSelected, "Selection mode must use the checkbox, not Play now")
+        XCTAssertFalse(app.buttons["Close player"].exists)
+    }
+
+    func testVoiceOverQueueFirstRemovalAsksBeforeChangingQueue() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue", "-uiTestQueueFirstRemove"]
+        app.launch()
+        let row = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        defer { try? voiceOver.disable() }
+        try voiceOver.enable()
+        row.tap()
+        row.doubleTap()
+        XCTAssertTrue(app.buttons["Remove from queue"].waitForExistence(timeout: 5))
+        XCTAssertTrue(row.exists, "The queue item must remain until removal is confirmed")
+    }
+
+    func testVoiceOverEpisodeRemoveDownloadDefaultAsksBeforeDeletingAudio() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "episodeList", "-uiTestEpisodeFirstRemoveDownload"
+        ]
+        app.launch()
+        let row = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#170 – Turn the Right Knob"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        XCTAssertTrue(row.label.contains("Downloaded"), "The fixture must exercise local-file removal")
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        row.tap()
+        row.doubleTap()
+        XCTAssertTrue(app.buttons["Remove download"].waitForExistence(timeout: 5))
+        XCTAssertTrue(row.exists, "The downloaded episode must remain until removal is confirmed")
+    }
+
+    func testVoiceOverQueueFirstPlayNowOpensPlayer() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        let row = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        row.tap()
+        row.doubleTap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5))
+    }
+
+    func testVoiceOverPodcastFirstNotificationActionKeepsTouchNavigation() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library", "-uiTestPodcastFirstNotification"]
+        app.launch()
+        let row = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Technically Working"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        defer { try? voiceOver.disable() }
+        try voiceOver.enable()
+        row.tap()
+        row.doubleTap()
+        XCTAssertFalse(app.navigationBars["Technically Working"].exists,
+                       "VoiceOver default must run the configured toggle, not navigate")
+        try voiceOver.disable()
+        row.tap()
+        XCTAssertTrue(app.navigationBars["Technically Working"].waitForExistence(timeout: 5),
+                      "Ordinary touch must still open the podcast")
+        app.buttons["Podcast settings"].firstMatch.tap()
+        // The first two switches are Auto Queue and Inbox, then notifications.
+        // On this iOS build SwiftUI exposes the latter switch without its Text label.
+        XCTAssertEqual(app.switches.element(boundBy: 2).value as? String, "1")
+    }
+
     func testPodcastPartiallyPlayedFilterKeepsOneRowStopAndCanShowAll() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]

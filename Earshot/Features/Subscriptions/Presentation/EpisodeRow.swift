@@ -20,10 +20,10 @@ struct DetailSelectionTrait: ViewModifier {
     }
 }
 
-/// One episode row. A list/detail host makes the row's double tap select the
-/// episode and adds a visible Play button. VoiceOver keeps one stop per row and
-/// offers Play in the Actions rotor. Other hosts retain the configured primary
-/// action. The configured actions remain in the user's order.
+/// One episode row. Touch selects details in a list/detail host. VoiceOver's
+/// default uses the first enabled, applicable Quick Action; details remain in
+/// the Actions rotor. Other hosts retain their native primary action when the
+/// configured first action is unavailable. Configured order is never rewritten.
 ///
 /// Selection mode is NOT handled here anymore: episode multi-select (#758)
 /// swaps this row out for the shared ``SelectableRow`` scaffold (via
@@ -38,6 +38,7 @@ struct EpisodeRow: View {
     // #Preview or detached host must supply `.environment(SettingsStore())` or
     // this row traps at runtime (#452 gate note).
     @Environment(SettingsStore.self) private var settings
+    @Environment(QuickActionStore.self) private var quickActions
     // The now-playing identity is observed, so the row re-renders when the loaded
     // episode changes and this row's badge/label update (Item 2). Same runtime
     // requirement as SettingsStore above: every call site renders under the app
@@ -62,6 +63,9 @@ struct EpisodeRow: View {
     /// single-show lists (a podcast's episode list, the search preview) where
     /// repeating the show on every row is noise.
     var includesPodcastName = false
+    @State private var confirmingDefaultAction = false
+    @State private var pendingDefaultAction: EpisodeAction?
+    @State private var pendingDefaultLabel = ""
 
     /// Defers runnable Quick Action construction until activation. This keeps
     /// large lazy lists cheap to recycle while preserving the configured
@@ -102,6 +106,9 @@ struct EpisodeRow: View {
         } else {
             let episodeID = episode.persistentModelID
             let presentations = EpisodeAction.presentations(actions, for: episode)
+            let promoted = voiceOverEnabled ? ConfiguredRowDefault.action(
+                configured: quickActions.episodeActions, applicable: actions
+            ) : nil
             // VoiceOver moves through the episode list one row at a time. The
             // visible Play button remains touchable, while its equivalent row
             // action is available even if Play now was hidden in Quick Actions.
@@ -109,7 +116,23 @@ struct EpisodeRow: View {
                 ? EpisodeAction.presentations(actions + [.playNow], for: episode)
                 : presentations
             let primary = presentations.first
-            let base = rowButton(primaryLabel: primary?.label) {
+            let remainingActions = ConfiguredRowDefault.remaining(rotorPresentations, promoted: promoted)
+            let detailsAction = onSelect != nil && promoted != nil
+                ? [EpisodeRowSupplementalAction(id: "openEpisodeDetails", label: "Open episode details", isDestructive: false)]
+                : []
+            let base = rowButton(primaryLabel: promoted?.label(for: episode) ?? primary?.label,
+                                 opensDetails: onSelect != nil && promoted == nil) {
+                if let promoted {
+                    guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                    if defaultNeedsConfirmation(promoted) {
+                        pendingDefaultAction = promoted
+                        pendingDefaultLabel = promoted.label(for: episode)
+                        confirmingDefaultAction = true
+                    } else {
+                        performAction(promoted)
+                    }
+                    return
+                }
                 if let onSelect {
                     guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
                     onSelect()
@@ -120,15 +143,16 @@ struct EpisodeRow: View {
                 performAction(primary.action)
             }
             .episodeActionsRotor(
-                rotorPresentations,
-                supplementalActions: supplementalActions,
+                remainingActions,
+                supplementalActions: supplementalActions + detailsAction,
                 perform: { action in
                     guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
                     performAction(action)
                 },
                 performSupplemental: { action in
                     guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
-                    performSupplementalAction(action)
+                    if action.id == "openEpisodeDetails" { onSelect?() }
+                    else { performSupplementalAction(action) }
                 }
             )
             if onSelect != nil {
@@ -182,6 +206,7 @@ struct EpisodeRow: View {
 
     private func rowButton(
         primaryLabel: String?,
+        opensDetails: Bool,
         runPrimary: @escaping () -> Void
     ) -> some View {
         Button {
@@ -214,10 +239,33 @@ struct EpisodeRow: View {
         // description yields an empty value, and `.accessibilityValue("")` makes
         // VoiceOver speak a stray pause (dead air), so we omit it in that case.
         .accessibilityValueIfPresent(accessibilityValue)
-        .accessibilityHint(onSelect == nil
-            ? (primaryLabel.map { "Double tap to \($0.lowercased())" } ?? "")
-            : "Double tap to view episode details")
+        .accessibilityHint(opensDetails
+            ? "Double tap to view episode details"
+            : (primaryLabel.map { "Double tap to \($0.lowercased())" } ?? ""))
+        .confirmationDialog(pendingDefaultLabel, isPresented: $confirmingDefaultAction) {
+            if let pendingDefaultAction {
+                Button(pendingDefaultLabel, role: .destructive) {
+                    guard PersistentModelLifetime.episodeExists(episode.persistentModelID, in: context) else { return }
+                    performAction(pendingDefaultAction)
+                    self.pendingDefaultAction = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingDefaultAction = nil }
+        }
         .modifier(DetailSelectionTrait(selected: isDetailSelected))
+    }
+
+    private func defaultNeedsConfirmation(_ action: EpisodeAction) -> Bool {
+        switch action {
+        case .download:
+            // Removing a local file can be irreversible if the feed disappears.
+            return episode.downloadStatus == .downloaded
+        case .markPlayed:
+            return !episode.isPlayed && episode.downloadStatus == .downloaded
+                && settings.deleteDownloadAfterPlayed
+        default:
+            return false
+        }
     }
 
     private var isNowPlaying: Bool {
