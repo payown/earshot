@@ -561,7 +561,9 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         }
         do {
             let directory = try DownloadPaths.downloadsDirectory()
-            let destination = DownloadPaths.uniqueDestination(inDirectory: directory, sourceURL: sourceURL)
+            let destination = DownloadPaths.uniqueDestination(
+                inDirectory: directory, sourceURL: sourceURL, taskKey: taskKey
+            )
             try FileManager.default.moveItem(at: location, to: destination)
             record(
                 taskKey: taskKey,

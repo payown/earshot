@@ -13,6 +13,7 @@ extension AppRuntime {
             self.bindRootServicesIfNeeded(to: container) {
                 #if DEBUG
                 if ScreenshotHarness.isSeeding { ScreenshotFixtures.seed(into: context) }
+                if JournalRestartProbe.isSeeding { JournalRestartProbe.seed(in: context) }
                 #endif
                 self.player.configure(context: context)
                 self.quickActions.configure(context: context)
@@ -22,9 +23,18 @@ extension AppRuntime {
             try Task.checkCancellation()
             // These repairs keep restoration pointed at the current local file
             // path and were measured at about 2 ms on the large-download fixture.
+            #if DEBUG
+            if !JournalRestartProbe.isSeeding {
+                await self.downloads.reconcileStuckDownloads()
+            }
+            #else
             await self.downloads.reconcileStuckDownloads()
+            #endif
             try Task.checkCancellation()
             await self.downloads.reconcileDownloadPaths()
+            #if DEBUG
+            if JournalRestartProbe.isVerifying { JournalRestartProbe.report(in: context, phase: "relaunch") }
+            #endif
             try Task.checkCancellation()
             self.settings.configure(context: context)
             self.listeningPlaces.configure(context: context)
@@ -98,3 +108,92 @@ extension AppRuntime {
         await player.folderRuns.connect(context: container.mainContext, player: player)
     }
 }
+
+#if DEBUG
+/// DEBUG-only process-boundary fixture for scripts/tests/journal-restart.sh.
+/// It writes only inside the script's disposable simulator container.
+private enum JournalRestartProbe {
+    static var isSeeding: Bool { CommandLine.arguments.contains("-journalRestartProbeSeed") }
+    static var isVerifying: Bool { CommandLine.arguments.contains("-journalRestartProbeVerify") }
+    private static let feed = "https://journal-restart.invalid/feed"
+    private static let source = URL(string: "https://journal-restart.invalid/audio.mp3")!
+    private static let cases: [(guid: String, storedAttempt: String, callbackAttempt: String)] = [
+        ("current", "11111111-1111-4111-8111-111111111111", "11111111-1111-4111-8111-111111111111"),
+        ("superseded", "33333333-3333-4333-8333-333333333333", "22222222-2222-4222-8222-222222222222")
+    ]
+
+    @MainActor static func seed(in context: ModelContext) {
+        do {
+            let podcast = Podcast(feedURL: feed, title: "Journal restart probe")
+            context.insert(podcast)
+            for entry in cases {
+                let episode = Episode(guid: entry.guid, title: entry.guid, audioURL: source.absoluteString)
+                episode.podcast = podcast
+                context.insert(episode)
+                context.insert(LocalEpisodeState(
+                    podcastFeedURL: feed, episodeGUID: entry.guid,
+                    downloadStatus: .downloading, downloadAttemptID: entry.storedAttempt
+                ))
+            }
+            try context.save()
+            let journal = DownloadEventJournal(
+                url: URL.applicationSupportDirectory.appending(path: "pending-download-events.json"),
+                write: { _, _ in throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError) }
+            )
+            let delegate = DownloadSessionDelegate(journal: journal, retryDelays: [])
+            for entry in cases {
+                let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                try Data("probe audio \(entry.guid)".utf8).write(to: temp)
+                let task = URLSession.shared.downloadTask(with: source)
+                task.taskDescription = DownloadTransferKey.key(
+                    identityKey: DownloadTaskKey.key(feedURL: feed, guid: entry.guid),
+                    sourceURL: source, attemptID: entry.callbackAttempt
+                )
+                delegate.urlSession(URLSession.shared, downloadTask: task, didFinishDownloadingTo: temp)
+                task.cancel()
+            }
+            report(in: context, phase: "before-termination")
+        } catch {
+            write(["error": String(describing: error)])
+        }
+    }
+
+    @MainActor static func report(in context: ModelContext, phase: String) {
+        do {
+            let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
+                .filter { $0.podcastFeedURL == feed }
+                .map { ["guid": $0.episodeGUID, "status": $0.downloadStatusRaw,
+                        "path": $0.downloadPath ?? "", "attempt": $0.downloadAttemptID ?? ""] }
+            let files = try FileManager.default.contentsOfDirectory(
+                at: DownloadPaths.downloadsDirectory(), includingPropertiesForKeys: nil
+            ).map(\.lastPathComponent).sorted()
+            let episodes = try context.fetch(FetchDescriptor<Episode>())
+                .filter { $0.podcast?.feedURL == feed }
+                .map { episode -> [String: String] in
+                    let source = URL(string: episode.audioURL).map(SecureURL.preferredMediaHTTPS)
+                    let key = source.map {
+                        DownloadTransferKey.key(
+                            identityKey: DownloadTaskKey.key(feedURL: feed, guid: episode.guid),
+                            sourceURL: $0, attemptID: episode.downloadAttemptID
+                        )
+                    }
+                    return ["guid": episode.guid, "attempt": episode.downloadAttemptID ?? "",
+                            "status": episode.downloadStatus.rawValue,
+                            "source": episode.audioURL,
+                            "taskKey": key ?? "",
+                            "prefix": key.map(DownloadPaths.recoveryPrefix) ?? ""]
+                }
+            write(["phase": phase, "feed": feed, "rows": rows, "files": files, "episodes": episodes])
+        } catch {
+            write(["phase": phase, "error": String(describing: error)])
+        }
+    }
+
+    private static func write(_ value: [String: Any]) {
+        let url = URL.documentsDirectory.appending(path: "journal-restart-probe.json")
+        if let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted]) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+}
+#endif
