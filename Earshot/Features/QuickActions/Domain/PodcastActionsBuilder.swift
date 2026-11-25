@@ -47,7 +47,7 @@ func buildPodcastActions(
             ) {
                 let newValue = !podcast.autoQueue
                 QueueRepository(context: context).setAutoQueue(newValue, for: podcast)
-                savePodcastQuickAction(context, "auto-queue")
+                savePodcastSettingsQuickAction(podcast, in: context, "auto-queue")
                 Announcer.announce(newValue ? "Auto-queue on" : "Auto-queue off")
             }
         case .toggleInboxInclude:
@@ -57,7 +57,7 @@ func buildPodcastActions(
                 isDestructive: false
             ) {
                 podcast.inboxIncluded.toggle()
-                savePodcastQuickAction(context, "inbox-include")
+                savePodcastSettingsQuickAction(podcast, in: context, "inbox-include", inboxChanged: true)
                 Announcer.announce(podcast.inboxIncluded ? "Added to inbox" : "Removed from inbox")
             }
         case .toggleInboxExclude:
@@ -123,6 +123,27 @@ func togglePodcastInboxExclusion(_ podcast: Podcast, in context: ModelContext) {
     } catch {
         AppLog.quickActions.error("Failed to save Inbox exclusion: \(error.localizedDescription, privacy: .public)")
         Announcer.announce("Couldn't change the Inbox setting")
+    }
+}
+
+/// Match the Podcast Settings save boundary: a scalar edit projects only this
+/// show. Inbox membership edits additionally invalidate the Inbox snapshot.
+@MainActor
+@discardableResult
+func savePodcastSettingsQuickAction(
+    _ podcast: Podcast, in context: ModelContext, _ what: String,
+    inboxChanged: Bool = false
+) -> Bool {
+    do {
+        try PodcastSettingsPersistence.save(podcast, in: context)
+        if inboxChanged {
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil,
+                                            userInfo: [PodcastSettingsPersistence.inboxEligibilityOnlyKey: true])
+        }
+        return true
+    } catch {
+        AppLog.quickActions.error("Failed to save \(what, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        return false
     }
 }
 

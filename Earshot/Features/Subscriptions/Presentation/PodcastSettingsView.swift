@@ -774,7 +774,7 @@ struct PodcastSettingsView: View {
 @MainActor
 enum PodcastSettingsPersistence {
     nonisolated static let settingsOnlyKey = "podcastSettingsOnly"
-    private nonisolated static let inboxEligibilityOnlyKey = "podcastInboxEligibilityOnly"
+    nonisolated static let inboxEligibilityOnlyKey = "podcastInboxEligibilityOnly"
 
     /// This event changes candidate eligibility but neither catalog rows nor
     /// played state. A Library recount or Cloud catalog reconcile cannot help.

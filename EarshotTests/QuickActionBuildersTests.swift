@@ -1178,6 +1178,87 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(QueueRepository(context: ctx).queue().map(\.guid), ["latest"])
     }
 
+    func testPodcastPreferenceQuickActionsUseScopedProjectionAndInboxInvalidation() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/scoped.xml", title: "Scoped")
+        ctx.insert(podcast)
+        try ctx.save()
+        var subscriptionNotices: [Notification] = []
+        var inboxNotices: [Notification] = []
+        let center = NotificationCenter.default
+        let subscriptionToken = center.addObserver(forName: .earshotSubscriptionsDidChange, object: nil, queue: nil) {
+            subscriptionNotices.append($0)
+        }
+        let inboxToken = center.addObserver(forName: .earshotInboxDidChange, object: nil, queue: nil) {
+            inboxNotices.append($0)
+        }
+        defer {
+            center.removeObserver(subscriptionToken)
+            center.removeObserver(inboxToken)
+        }
+
+        for action in [PodcastAction.toggleAutoQueue, .toggleInboxExclude, .toggleInboxInclude] {
+            let item = try XCTUnwrap(buildPodcastActions(
+                podcast: podcast, order: [action], context: ctx,
+                onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+            ).first)
+            let beforeInbox = inboxNotices.count
+            item.run()
+            XCTAssertEqual(subscriptionNotices.last?.object as? String, podcast.feedURL)
+            XCTAssertEqual(subscriptionNotices.last?.userInfo?[PodcastSettingsPersistence.settingsOnlyKey] as? Bool, true)
+            XCTAssertEqual(inboxNotices.count - beforeInbox, action == .toggleAutoQueue ? 0 : 1)
+            XCTAssertFalse(ctx.hasChanges)
+        }
+    }
+
+    func testLargeLibraryPodcastActionAndSelectedStatusTimings() async throws {
+        let ctx = TestStore.freshContext()
+        var target: Podcast?
+        for index in 0..<288 {
+            let podcast = Podcast(feedURL: "https://scale.example/\(index).xml", title: "Show \(index)")
+            ctx.insert(podcast)
+            if index == 144 { target = podcast }
+            for episodeIndex in 0..<10 {
+                let episode = Episode(
+                    guid: "\(index)-\(episodeIndex)", title: "Episode \(episodeIndex)",
+                    audioURL: "https://scale.example/audio.mp3",
+                    pubDate: Date().addingTimeInterval(-Double(episodeIndex + 1) * 86_400)
+                )
+                episode.podcast = podcast
+                ctx.insert(episode)
+            }
+        }
+        try ctx.save()
+        let podcast = try XCTUnwrap(target)
+        let podcastID = podcast.persistentModelID
+        let targetIDs = Set(try ctx.fetch(FetchDescriptor<Episode>(predicate: #Predicate {
+            $0.podcast?.persistentModelID == podcastID
+        })).map(\.persistentModelID))
+        let clock = ContinuousClock()
+        for action in [PodcastAction.toggleAutoQueue, .toggleInboxExclude] {
+            let item = try XCTUnwrap(buildPodcastActions(
+                podcast: podcast, order: [action], context: ctx,
+                onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+            ).first)
+            let start = clock.now
+            item.run()
+            print("PERF_288x10 quick_\(action) \(clock.now - start)")
+        }
+        let settingsStart = clock.now
+        podcast.inboxExcluded = false
+        try PodcastSettingsPersistence.save(podcast, in: ctx)
+        print("PERF_288x10 settings_exclude \(clock.now - settingsStart)")
+        let repo = EpisodeRepository(context: ctx)
+        let playedStart = clock.now
+        let playedCount = await repo.markSelectedPlayed(in: podcast, ids: targetIDs)
+        XCTAssertEqual(playedCount, 10)
+        print("PERF_288x10 selected_played \(clock.now - playedStart)")
+        let unplayedStart = clock.now
+        let unplayedCount = await repo.markSelectedUnplayed(in: podcast, ids: targetIDs)
+        XCTAssertEqual(unplayedCount, 10)
+        print("PERF_288x10 selected_unplayed \(clock.now - unplayedStart)")
+    }
+
     // MARK: #668 — opt-in inbox inclusion toggle
 
     func testDefaultPodcastActionsIncludesToggleInboxInclude() {

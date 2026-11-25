@@ -801,7 +801,7 @@ struct SubscriptionsView: View {
     /// exact same effect.
     private func toggleInboxInclude(_ podcast: Podcast) {
         podcast.inboxIncluded.toggle()
-        savePodcastQuickAction(context, "inbox-include")
+        savePodcastSettingsQuickAction(podcast, in: context, "inbox-include", inboxChanged: true)
         Announcer.announce(podcast.inboxIncluded ? "Added to inbox" : "Removed from inbox")
     }
 
