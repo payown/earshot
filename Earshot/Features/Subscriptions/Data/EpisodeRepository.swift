@@ -154,6 +154,13 @@ final class EpisodeRepository {
     private func saveMarkAllBatch(_ candidates: [Episode], deleteAfterPlayed: Bool) -> Int? {
         let unplayed = candidates.filter { !$0.isPlayed }
         guard !unplayed.isEmpty else { return 0 }
+        let queueChanged: Bool
+        do {
+            queueChanged = try QueueRepository(context: context).stageManualPlayedQueuePolicy(for: unplayed)
+        } catch {
+            AppLog.data.error("Episode bulk Queue lookup failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
         let ownership = deleteAfterPlayed ? DownloadCleanup.bulkOwnership(for: unplayed, in: context) : nil
         for episode in unplayed {
             episode.isPlayed = true
@@ -164,7 +171,8 @@ final class EpisodeRepository {
                 DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
             }
         }
-        return save(changedEpisodes: unplayed, notifyInbox: false) ? unplayed.count : nil
+        return save(changedEpisodes: unplayed, notifyInbox: false, notifyQueue: queueChanged)
+            ? unplayed.count : nil
     }
 
     private func finishMarkAll(_ changedCount: Int) -> Int {
@@ -208,6 +216,14 @@ final class EpisodeRepository {
             }
             let ownership = deleteAfterPlayed ? DownloadCleanup.bulkOwnership(for: selected, in: context) : nil
             let priorCompletions = played ? [] : selected.map { ($0, $0.playedAt) }
+            let queueChanged: Bool
+            do {
+                queueChanged = played
+                    ? try QueueRepository(context: context).stageManualPlayedQueuePolicy(for: selected) : false
+            } catch {
+                AppLog.data.error("Selected episode Queue lookup failed: \(error.localizedDescription, privacy: .public)")
+                break
+            }
             for episode in selected {
                 episode.isPlayed = played
                 episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
@@ -217,7 +233,7 @@ final class EpisodeRepository {
                     DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
                 }
             }
-            guard save(changedEpisodes: selected, notifyInbox: false) else { break }
+            guard save(changedEpisodes: selected, notifyInbox: false, notifyQueue: queueChanged) else { break }
             for (episode, completedAt) in priorCompletions {
                 PlayerService.discardStaleLivePositionAfterMarkUnplayed(
                     episode, completedAt: completedAt
@@ -234,12 +250,17 @@ final class EpisodeRepository {
     }
 
     @discardableResult
-    private func save(changedEpisodes: [Episode], notifyInbox: Bool = true) -> Bool {
+    private func save(
+        changedEpisodes: [Episode], notifyInbox: Bool = true, notifyQueue: Bool = false
+    ) -> Bool {
         guard context.hasChanges else { return false }
         PendingCloudPlayedMutation.stage(changedEpisodes, in: context)
         do {
             try context.save()
             onSave?()
+            if notifyQueue {
+                QueueRepository(context: context).postCommittedCatalogQueueChange()
+            }
             if notifyInbox {
                 NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
             }

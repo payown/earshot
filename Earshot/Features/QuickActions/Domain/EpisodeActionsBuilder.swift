@@ -165,9 +165,18 @@ func buildEpisodeActions(
                 let nowPlayed = !played
                 let wasDismissed = episode.inboxDismissed
                 let completedAt = episode.playedAt
-                // Invoked before the flip so the surface can still find this
-                // row's neighbor in its visible list (#579).
+                // Keep the pre-mutation focus handoff before either the Queue
+                // removal or played flip changes the visible row list (#579).
                 onMarkPlayed?(nowPlayed)
+                let queue = QueueRepository(context: context)
+                let queueChanged: Bool
+                do {
+                    queueChanged = nowPlayed
+                        ? try queue.stageManualPlayedQueuePolicy(for: [episode]) : false
+                } catch {
+                    AppLog.quickActions.error("Could not inspect Queue before marking played: \(error.localizedDescription, privacy: .public)")
+                    return
+                }
                 episode.isPlayed = nowPlayed
                 PendingCloudPlayedMutation.stage([episode], in: context)
                 episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
@@ -179,6 +188,7 @@ func buildEpisodeActions(
                     DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
                 }
                 if saveQuickAction(context, "played state") {
+                    if queueChanged { queue.postCommittedCatalogQueueChange() }
                     if !nowPlayed {
                         PlayerService.discardStaleLivePositionAfterMarkUnplayed(
                             episode, completedAt: completedAt

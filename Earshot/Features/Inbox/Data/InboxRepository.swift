@@ -395,15 +395,25 @@ final class InboxRepository {
     /// makes the removal sticky, so later marking it unplayed can't resurface a
     /// finished episode. Idempotent.
     func markPlayed(_ episode: Episode) {
+        let queue = QueueRepository(context: context)
+        let queueChanged: Bool
+        do {
+            queueChanged = try queue.stageManualPlayedQueuePolicy(for: [episode])
+        } catch {
+            AppLog.data.error("Could not inspect Queue before marking played: \(error.localizedDescription, privacy: .public)")
+            return
+        }
         episode.isPlayed = true
         episode.inboxDismissed = true
         // Auto-delete the download once played, when the user opted in (#downloads).
         DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
-        save(
+        if save(
             changedEpisodes: [episode],
             playedChangedExplicitly: true,
             inboxDismissedChangedExplicitly: true
-        )
+        ), queueChanged {
+            queue.postCommittedCatalogQueueChange()
+        }
     }
 
     // MARK: Internals
@@ -441,12 +451,13 @@ final class InboxRepository {
         return InboxLogic.isExcluded(inboxExcluded: podcast.inboxExcluded, inboxIncluded: podcast.inboxIncluded)
     }
 
+    @discardableResult
     private func save(
         changedEpisodes: [Episode] = [],
         playedChangedExplicitly: Bool = false,
         inboxDismissedChangedExplicitly: Bool = false
-    ) {
-        guard context.hasChanges else { return }
+    ) -> Bool {
+        guard context.hasChanges else { return false }
         if playedChangedExplicitly {
             PendingCloudPlayedMutation.stage(changedEpisodes, in: context)
         }
@@ -460,9 +471,11 @@ final class InboxRepository {
                 playedChangedExplicitly: playedChangedExplicitly,
                 inboxDismissedChangedExplicitly: inboxDismissedChangedExplicitly
             )
+            return true
         } catch {
             context.rollback()
             AppLog.data.error("Inbox save failed: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 }

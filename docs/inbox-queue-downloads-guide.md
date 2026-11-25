@@ -18,6 +18,8 @@ Inbox helps you review newly arrived episodes and decide what to listen to. Clea
 
 Queue is your listening order. Adding an episode to Queue can request a download if Auto-download queued episodes is on. An episode can be queued before its download finishes.
 
+In Settings, Playback, Keep finished episodes in Queue also applies when you manually choose Mark as played for a queued episode, including from its podcast or Inbox. On, the played episode stays in Queue; off, it leaves Queue. Automatic playback skips played episodes. Mark as played and next in Queue is a separate action that advances and removes the finished entry. Download deletion follows the separate Downloads setting.
+
 Downloads contains completed audio stored on this device. An episode can be downloaded without being in Inbox or Queue. Inbox and Downloads counts do not need to match.
 
 Recently Expired appears in Downloads for episodes that automatically expired from Queue. You can restore them for seven days before their audio is removed. Downloads filters and folder selection can affect which episodes you see.

@@ -181,7 +181,7 @@ struct PlaybackSettingsView: View {
             Section {
                 Toggle("Keep finished episodes in Queue", isOn: $settings.keepFinishedEpisodesInQueue)
             } footer: {
-                Text("Finished episodes stay in Queue until you remove them. Automatic playback skips them; choose Play to listen again. Download deletion follows your Downloads settings.")
+                Text("On: a queued episode stays in Queue when playback finishes or you mark it played. Off: either action removes its Queue entry. Mark as played and next in Queue still advances and removes it. Automatic playback skips played episodes; choose Play to listen again. Download deletion follows your Downloads settings.")
             }
 
             Section("Queue") {
