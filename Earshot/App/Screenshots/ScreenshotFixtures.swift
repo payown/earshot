@@ -253,6 +253,49 @@ enum ScreenshotFixtures {
         settings.setLaunchScreen(.inbox)
 
         try? context.save()
+
+        // Disposable UI fixtures for configured first-action VoiceOver entry.
+        // They change only the in-memory screenshot store, before the action
+        // store loads it; no listener's saved order is rewritten.
+        let args = CommandLine.arguments
+        let quickActions = QuickActionRepository(context: context)
+        if args.contains("-uiTestEpisodeFirstRemoveDownload") {
+            // Save the one downloaded test row in the device-local projection
+            // after its permanent model ID exists, so launch reconciliation and
+            // UI refaulting see the same downloaded state as the on-disk file.
+            try? LocalStateStore.setTerminalDownloadState(
+                .downloaded, path: "sc-tw-170.mp3", on: e170, in: context
+            )
+            try? context.save()
+        }
+        if args.contains("-uiTestEpisodeFirstUnavailable") {
+            quickActions.setEpisodeConfiguration(QuickActionConfiguration(
+                enabled: [.removeFromInbox] + defaultEpisodeActions.filter { $0 != .removeFromInbox },
+                available: []
+            ))
+        } else if args.contains("-uiTestEpisodeFirstMarkPlayed") {
+            quickActions.setEpisodeConfiguration(QuickActionConfiguration(
+                enabled: [.markPlayed] + defaultEpisodeActions.filter { $0 != .markPlayed },
+                available: []
+            ))
+        } else if args.contains("-uiTestEpisodeFirstRemoveDownload") {
+            quickActions.setEpisodeConfiguration(QuickActionConfiguration(
+                enabled: [.download] + defaultEpisodeActions.filter { $0 != .download },
+                available: []
+            ))
+        }
+        if args.contains("-uiTestPodcastFirstNotification") {
+            quickActions.setPodcastConfiguration(QuickActionConfiguration(
+                enabled: [.toggleNotifications] + defaultPodcastActions.filter { $0 != .toggleNotifications },
+                available: []
+            ))
+        }
+        if args.contains("-uiTestQueueFirstRemove") {
+            quickActions.setQueueConfiguration(QuickActionConfiguration(
+                enabled: [.removeFromQueue] + defaultQueueItemActions.filter { $0 != .removeFromQueue },
+                available: []
+            ))
+        }
     }
 
     // MARK: Builders

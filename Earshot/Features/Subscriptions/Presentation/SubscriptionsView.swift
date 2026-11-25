@@ -546,6 +546,9 @@ struct SubscriptionsView: View {
         // objects are constructed for the single action activated by the user.
         let actions = rotorActions(for: podcast)
         let presentations = PodcastAction.presentations(actions, for: podcast)
+        let promoted = voiceOverEnabled ? ConfiguredRowDefault.action(
+            configured: quickActions.podcastActions, applicable: actions
+        ) : nil
         let descriptionPresentation = PodcastDescriptionPresentation(
             title: podcast.displayName,
             descriptionHTML: podcast.podcastDescription
@@ -567,11 +570,33 @@ struct SubscriptionsView: View {
                 readOnlyIDs: readOnlyIDs,
                 actions: presentations,
                 supplementalActions: supplementalActions,
+                promoted: promoted,
                 descriptionPresentation: descriptionPresentation,
-                performAction: performAction
+                performAction: performAction,
+                openDetail: { selectedPodcast = podcast }
             )
         }
-        if voiceOverEnabled {
+        if voiceOverEnabled, let promoted {
+            // NavigationLink always consumes VoiceOver's default activation,
+            // even with a custom default action attached. Use a Button only
+            // for this promoted case; ordinary touch and fallback rows keep
+            // the native link. The rotor supplies Open podcast detail.
+            Button {
+                performAction(promoted)
+            } label: {
+                row(
+                    for: podcast,
+                    readOnlyIDs: readOnlyIDs,
+                    actions: presentations,
+                    supplementalActions: supplementalActions,
+                    promoted: promoted,
+                    descriptionPresentation: descriptionPresentation,
+                    performAction: performAction,
+                    openDetail: { selectedPodcast = podcast }
+                )
+            }
+            .buttonStyle(.plain)
+        } else if voiceOverEnabled {
             link
         } else {
             // Sighted-only swipe (#597): VoiceOver's rotor Delete action,
@@ -666,8 +691,10 @@ struct SubscriptionsView: View {
         readOnlyIDs: Set<PersistentIdentifier>,
         actions: [DeferredActionPresentation<PodcastAction>],
         supplementalActions: [PodcastRowSupplementalAction],
+        promoted: PodcastAction?,
         descriptionPresentation: PodcastDescriptionPresentation?,
-        performAction: @escaping (PodcastAction) -> Void
+        performAction: @escaping (PodcastAction) -> Void,
+        openDetail: @escaping () -> Void
     ) -> some View {
         let isReadOnly = readOnlyIDs.contains(podcast.persistentModelID)
         // The complete spoken label is supplied here, so resolving and combining
@@ -684,12 +711,14 @@ struct SubscriptionsView: View {
             // Rotor order goes through the shared helper, which compensates for
             // the OS emitting `.accessibilityActions` children in reverse (#572).
             .podcastActionsRotor(
-                actions,
-                supplementalActions: supplementalActions,
+                ConfiguredRowDefault.remaining(actions, promoted: promoted),
+                supplementalActions: supplementalActions + (promoted == nil ? [] : [
+                    PodcastRowSupplementalAction(id: "openPodcastDetail", label: "Open podcast detail")
+                ]),
                 perform: performAction,
-                performSupplemental: { _ in
-                    guard let descriptionPresentation else { return }
-                    fullDescription = descriptionPresentation
+                performSupplemental: { action in
+                    if action.id == "openPodcastDetail" { openDetail() }
+                    else if let descriptionPresentation { fullDescription = descriptionPresentation }
                 }
             )
     }
