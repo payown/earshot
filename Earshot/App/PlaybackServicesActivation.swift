@@ -14,6 +14,7 @@ extension AppRuntime {
                 #if DEBUG
                 if ScreenshotHarness.isSeeding { ScreenshotFixtures.seed(into: context) }
                 if JournalRestartProbe.isSeeding { JournalRestartProbe.seed(in: context) }
+                if RealDownloadRestartProbe.isSeeding { RealDownloadRestartProbe.seed(in: context) }
                 #endif
                 self.player.configure(context: context)
                 self.quickActions.configure(context: context)
@@ -34,6 +35,12 @@ extension AppRuntime {
             await self.downloads.reconcileDownloadPaths()
             #if DEBUG
             if JournalRestartProbe.isVerifying { JournalRestartProbe.report(in: context, phase: "relaunch") }
+            if RealDownloadRestartProbe.isSeeding {
+                await RealDownloadRestartProbe.start(using: self.downloads, context: context)
+            }
+            if RealDownloadRestartProbe.isVerifying {
+                RealDownloadRestartProbe.report(in: context, phase: "relaunch")
+            }
             #endif
             try Task.checkCancellation()
             self.settings.configure(context: context)
@@ -110,6 +117,64 @@ extension AppRuntime {
 }
 
 #if DEBUG
+private enum RealDownloadRestartProbe {
+    static var isSeeding: Bool { CommandLine.arguments.contains("-journalRestartRealSeed") }
+    static var isVerifying: Bool { CommandLine.arguments.contains("-journalRestartRealVerify") }
+    private static let feed = "https://journal-restart-real.invalid/feed"
+    private static let guid = "real-background-transfer"
+    private static var source: String? {
+        guard let index = CommandLine.arguments.firstIndex(of: "-journalRestartRealURL"),
+              CommandLine.arguments.indices.contains(index + 1) else { return nil }
+        return CommandLine.arguments[index + 1]
+    }
+
+    @MainActor static func seed(in context: ModelContext) {
+        guard let source else { report(in: context, phase: "missing-url"); return }
+        let podcast = Podcast(feedURL: feed, title: "Real background transfer probe")
+        let episode = Episode(guid: guid, title: "Real background transfer", audioURL: source)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        do { try context.save() } catch { report(in: context, phase: "seed-save-failed") }
+    }
+
+    @MainActor static func start(using manager: DownloadManager, context: ModelContext) async {
+        guard let episode = try? context.fetch(FetchDescriptor<Episode>()).first(where: {
+            $0.guid == guid && $0.podcast?.feedURL == feed
+        }) else { report(in: context, phase: "missing-episode"); return }
+        await manager.download(episode)
+        report(in: context, phase: "enrolled")
+        for _ in 0..<150 {
+            if let files = try? FileManager.default.contentsOfDirectory(
+                at: DownloadPaths.downloadsDirectory(), includingPropertiesForKeys: nil
+            ), !files.isEmpty {
+                report(in: context, phase: "callback")
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        report(in: context, phase: "callback-timeout")
+    }
+
+    @MainActor static func report(in context: ModelContext, phase: String) {
+        let row = try? context.fetch(FetchDescriptor<LocalEpisodeState>()).first(where: {
+            $0.podcastFeedURL == feed && $0.episodeGUID == guid
+        })
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: DownloadPaths.downloadsDirectory(), includingPropertiesForKeys: nil
+        ).map(\.lastPathComponent)) ?? []
+        let data: [String: Any] = [
+            "phase": phase, "status": row?.downloadStatusRaw ?? "missing",
+            "path": row?.downloadPath ?? "", "attempt": row?.downloadAttemptID ?? "",
+            "files": files
+        ]
+        let url = URL.documentsDirectory.appending(path: "real-download-restart-probe.json")
+        if let encoded = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted]) {
+            try? encoded.write(to: url, options: .atomic)
+        }
+    }
+}
+
 /// DEBUG-only process-boundary fixture for scripts/tests/journal-restart.sh.
 /// It writes only inside the script's disposable simulator container.
 private enum JournalRestartProbe {

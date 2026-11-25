@@ -60,10 +60,17 @@ final class DownloadEventJournal: @unchecked Sendable {
 
     private static let currentVersion = 1
 
-    static let shared = DownloadEventJournal(
-        url: URL.applicationSupportDirectory
-            .appending(path: "pending-download-events.json")
-    )
+    static let shared: DownloadEventJournal = {
+        let url = URL.applicationSupportDirectory.appending(path: "pending-download-events.json")
+        #if DEBUG
+        if CommandLine.arguments.contains("-journalRestartRealSeed") {
+            return DownloadEventJournal(url: url, write: { _, _ in
+                throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)
+            })
+        }
+        #endif
+        return DownloadEventJournal(url: url)
+    }()
 
     private let url: URL
     private let lock = NSLock()
