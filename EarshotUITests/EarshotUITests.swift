@@ -1114,6 +1114,82 @@ final class EarshotUITests: XCTestCase {
         verifyPodcastSettingsUnfollow(largeText: false)
     }
 
+    func testLargeLibraryPodcastActionsAndSettingsRemainReachableDuringHeldRefresh() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "library", "-heldRefreshUITest"
+        ]
+        app.launch()
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Our Perspective"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 20), app.debugDescription)
+        let refresh = app.buttons["Refresh library"].firstMatch
+        XCTAssertTrue(refresh.waitForExistence(timeout: 5), app.debugDescription)
+        refresh.tap()
+        XCTAssertTrue(app.buttons["Refreshing library"].waitForExistence(timeout: 5))
+
+        show.press(forDuration: 1)
+        let autoQueue = app.buttons["Turn on auto-queue"].firstMatch
+        XCTAssertTrue(autoQueue.waitForExistence(timeout: 5), app.debugDescription)
+        autoQueue.tap()
+        show.press(forDuration: 1)
+        let exclude = app.buttons["Exclude from Inbox"].firstMatch
+        XCTAssertTrue(exclude.waitForExistence(timeout: 5), app.debugDescription)
+        exclude.tap()
+        XCTAssertTrue(app.buttons["Refreshing library"].exists,
+                      "Both Quick Actions should finish while refresh is still in flight")
+
+        show.tap()
+        XCTAssertTrue(app.navigationBars["Our Perspective"].waitForExistence(timeout: 5))
+        let settings = app.buttons["Podcast settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(settings.isHittable, "Refresh status must not cover Podcast settings")
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["Podcast Settings"].waitForExistence(timeout: 5),
+                      "Podcast Settings should open before the held refresh completes")
+        app.buttons["Done"].firstMatch.tap()
+        app.navigationBars["Our Perspective"].buttons["BackButton"].tap()
+        XCTAssertTrue(app.buttons["Refresh library"].waitForExistence(timeout: 45),
+                      "The refresh should finish and restore the Library refresh control")
+        show.tap()
+        XCTAssertTrue(app.buttons["Podcast settings"].waitForExistence(timeout: 5))
+        app.buttons["Podcast settings"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Podcast Settings"].waitForExistence(timeout: 5),
+                      "Podcast Settings should remain reachable after refresh")
+    }
+
+    func testPodcastSettingsStaysInVoiceOverOrderDuringHeldRefresh() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("VoiceOver UI automation requires iOS 27")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "library", "-heldRefreshUITest"
+        ]
+        app.launch()
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Our Perspective"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 20))
+        app.buttons["Refresh library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Refreshing library"].waitForExistence(timeout: 5))
+        show.tap()
+        XCTAssertTrue(app.navigationBars["Our Perspective"].waitForExistence(timeout: 5))
+
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        var speech: [String] = []
+        for _ in 0..<18 {
+            let utterance = try voiceOver.moveForward().utterance
+            speech.append(utterance)
+            if utterance.contains("Podcast settings") { break }
+        }
+        XCTAssertTrue(speech.contains(where: { $0.contains("Podcast settings") }),
+                      "Podcast settings must be in VoiceOver focus order during refresh: \(speech)")
+    }
+
     func testPodcastSettingsUnfollowAtLargestText() {
         verifyPodcastSettingsUnfollow(largeText: true)
     }

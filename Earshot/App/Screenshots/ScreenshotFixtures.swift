@@ -67,6 +67,27 @@ enum ScreenshotFixtures {
         context.insert(tw)
         context.insert(op)
 
+        if CommandLine.arguments.contains("-heldRefreshUITest") {
+            // Exercise Library navigation and actions at the reported scale.
+            // This stays in the screenshot harness's in-memory store.
+            for showIndex in 0..<286 {
+                let podcast = Podcast(
+                    feedURL: "https://held-refresh.test/\(showIndex).xml",
+                    title: "ZZ Scale show \(showIndex)"
+                )
+                context.insert(podcast)
+                for episodeIndex in 0..<10 {
+                    let episode = Episode(
+                        guid: "scale-\(showIndex)-\(episodeIndex)",
+                        title: "Scale episode \(episodeIndex)",
+                        audioURL: "https://held-refresh.test/audio.mp3"
+                    )
+                    episode.podcast = podcast
+                    context.insert(episode)
+                }
+            }
+        }
+
         if CommandLine.arguments.contains("-inboxSelectionFolderScopeTest") {
             let folder = PodcastFolder(name: "Scope test folder")
             context.insert(folder)

@@ -208,6 +208,10 @@ struct SubscriptionsView: View {
                 }
             }
             .refreshable { await performRefresh(trigger: .manualPullToRefresh) }
+            .safeAreaInset(edge: .top) {
+                LiveFeedRefreshInlineStatus()
+                    .accessibilityFocused($focusRefreshStatus)
+            }
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -317,10 +321,6 @@ struct SubscriptionsView: View {
         // all swept before the content-area title, so "Library" was announced last;
         // the principal heading is traversed before the trailing items and carries
         // the heading trait. The plain `navigationTitle` keeps back-button identity.
-        .safeAreaInset(edge: .top) {
-            LiveFeedRefreshInlineStatus()
-                .accessibilityFocused($focusRefreshStatus)
-        }
         .onAppear {
             // This screen remains alive while Discovery is shown from Library.
             // Reload when it becomes visible again so
@@ -981,9 +981,16 @@ func makeManualLibraryRefreshRepository(
     downloader: EpisodeDownloading? = nil,
     isEntitled: Bool? = nil
 ) -> SubscriptionRepository {
-    SubscriptionRepository(
+    #if DEBUG
+    let effectiveFeed: FeedFetching = ScreenshotHarness.isSeeding
+        && CommandLine.arguments.contains("-heldRefreshUITest")
+        ? HeldRefreshUITestFeed() : feed
+    #else
+    let effectiveFeed = feed
+    #endif
+    return SubscriptionRepository(
         context: context,
-        feed: feed,
+        feed: effectiveFeed,
         downloader: downloader,
         queue: QueueRepository(context: context),
         isEntitled: isEntitled
