@@ -1190,6 +1190,65 @@ final class EarshotUITests: XCTestCase {
                       "Podcast settings must be in VoiceOver focus order during refresh: \(speech)")
     }
 
+    func testAllPodcastToolbarActionsRemainUsableDuringHeldRefresh() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "library", "-heldRefreshUITest"
+        ]
+        app.launch()
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Our Perspective"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 20), app.debugDescription)
+        app.buttons["Refresh library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Refreshing library"].waitForExistence(timeout: 5))
+        show.tap()
+        XCTAssertTrue(app.navigationBars["Our Perspective"].waitForExistence(timeout: 5))
+
+        let played = app.buttons["Mark all as played"].firstMatch
+        let settings = app.buttons["Podcast settings"].firstMatch
+        let select = app.buttons["Select episodes"].firstMatch
+        for control in [played, settings, select] {
+            XCTAssertTrue(control.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(control.isHittable, "Podcast toolbar action is covered during refresh: \(control.label)")
+        }
+
+        played.tap()
+        XCTAssertTrue(app.buttons["Mark All as Played"].waitForExistence(timeout: 5),
+                      "Mark all as played must open confirmation while refresh is active")
+    }
+
+    func testPodcastSelectAndSettingsRemainUsableDuringHeldRefresh() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "library", "-heldRefreshUITest"
+        ]
+        app.launch()
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Our Perspective"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 20))
+        app.buttons["Refresh library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Refreshing library"].waitForExistence(timeout: 5))
+        show.tap()
+        XCTAssertTrue(app.navigationBars["Our Perspective"].waitForExistence(timeout: 5))
+        let select = app.buttons["Select episodes"].firstMatch
+        let settings = app.buttons["Podcast settings"].firstMatch
+        XCTAssertTrue(select.isHittable)
+        XCTAssertTrue(settings.isHittable)
+        select.tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5),
+                      "Select episodes must enter selection mode while refresh is active")
+        app.buttons["Done"].firstMatch.tap()
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["Podcast Settings"].waitForExistence(timeout: 5),
+                      "Podcast Settings must open while refresh is active")
+        app.buttons["Done"].firstMatch.tap()
+        app.navigationBars["Our Perspective"].buttons["BackButton"].tap()
+        XCTAssertTrue(app.buttons["Refreshing library"].exists,
+                      "All three actions must complete before held refresh ends")
+    }
+
     func testPodcastSettingsUnfollowAtLargestText() {
         verifyPodcastSettingsUnfollow(largeText: true)
     }
