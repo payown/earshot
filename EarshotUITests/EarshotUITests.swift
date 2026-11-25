@@ -290,13 +290,22 @@ final class EarshotUITests: XCTestCase {
             )).firstMatch
             XCTAssertTrue(row.waitForExistence(timeout: 15))
             try voiceOver.enable()
+            // XCTest's tap may activate the focused VoiceOver row. Do not send
+            // a second activation after navigation or playback already began.
             row.tap()
-            row.doubleTap()
             if arguments.contains("-uiTestEpisodeFirstUnavailable") {
-                XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+                let details = app.descendants(matching: .any)["episode.detail"]
+                if !details.waitForExistence(timeout: 2) && !app.buttons["Close player"].exists {
+                    row.doubleTap()
+                }
+                XCTAssertTrue(details.waitForExistence(timeout: 5))
                 XCTAssertFalse(app.buttons["Close player"].exists)
             } else {
-                XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5))
+                let player = app.buttons["Close player"]
+                if !player.waitForExistence(timeout: 2) && !app.descendants(matching: .any)["episode.detail"].exists {
+                    row.doubleTap()
+                }
+                XCTAssertTrue(player.waitForExistence(timeout: 5))
             }
             try voiceOver.disable()
             app.terminate()
@@ -407,9 +416,13 @@ final class EarshotUITests: XCTestCase {
         try voiceOver.enable()
         defer { try? voiceOver.disable() }
         row.tap()
-        row.doubleTap()
-        XCTAssertTrue(app.buttons["Remove download"].waitForExistence(timeout: 5))
+        let confirm = app.buttons["Remove download"]
+        if !confirm.waitForExistence(timeout: 2) && !app.buttons["Close player"].exists {
+            row.doubleTap()
+        }
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         XCTAssertTrue(row.exists, "The downloaded episode must remain until removal is confirmed")
+        XCTAssertTrue(row.label.contains("Downloaded"), "Confirmation must not remove audio before approval")
     }
 
     func testVoiceOverQueueFirstPlayNowOpensPlayer() throws {
