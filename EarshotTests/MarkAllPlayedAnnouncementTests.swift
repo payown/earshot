@@ -29,6 +29,42 @@ final class MarkAllPlayedAnnouncementTests: XCTestCase {
     }
 }
 
+@MainActor
+final class MarkAllPlayedOperationTests: XCTestCase {
+    func testRapidRepeatRunsOnceAndReenablesAfterCompletion() async throws {
+        let operation = MarkAllPlayedOperation()
+        let started = expectation(description: "First bulk mutation started")
+        let (stream, continuation) = AsyncStream<Void>.makeStream()
+        defer { continuation.finish() }
+        var mutations = 0
+        XCTAssertTrue(operation.canRequest(unplayedCount: 8, otherBulkOperationRunning: false))
+        XCTAssertFalse(operation.canRequest(unplayedCount: 8, otherBulkOperationRunning: false, confirming: true))
+        let first = try XCTUnwrap(operation.start(unplayedCount: 8, otherBulkOperationRunning: false) {
+            mutations += 1
+            started.fulfill()
+            for await _ in stream { break }
+        })
+        XCTAssertTrue(operation.isRunning, "Claimed before the task reaches its first await")
+        XCTAssertNil(operation.start(unplayedCount: 8, otherBulkOperationRunning: false) { mutations += 1 })
+        await fulfillment(of: [started], timeout: 1)
+        XCTAssertFalse(operation.canRequest(unplayedCount: 8, otherBulkOperationRunning: false))
+        XCTAssertNil(operation.start(unplayedCount: 8, otherBulkOperationRunning: false) { mutations += 1 })
+        XCTAssertEqual(mutations, 1)
+        continuation.finish()
+        await first.value
+
+        XCTAssertFalse(operation.isRunning)
+        XCTAssertNil(operation.start(unplayedCount: 0, otherBulkOperationRunning: false) { mutations += 1 })
+        XCTAssertNil(operation.start(unplayedCount: 8, otherBulkOperationRunning: true) { mutations += 1 })
+        let second = try XCTUnwrap(operation.start(unplayedCount: 1, otherBulkOperationRunning: false) {
+            mutations += 1
+        })
+        await second.value
+        XCTAssertEqual(mutations, 2)
+        XCTAssertFalse(operation.isRunning)
+    }
+}
+
 /// Unit tests for ``MarkAllPlayedConfirmationCopy``, the confirmation
 /// dialog's title and message wording (#640). SwiftUI's `confirmationDialog`
 /// itself has no unit-test precedent anywhere in this app (Unfollow and

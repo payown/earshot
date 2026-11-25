@@ -1,9 +1,162 @@
 import XCTest
 import SwiftData
+import Observation
+import os
 @testable import Earshot
 
 @MainActor
 final class QuickActionBuildersTests: XCTestCase {
+    private struct InboxRouteEvent: Equatable, Sendable {
+        let name: String
+        let feedURL: String?
+        let eligibilityOnly: Bool
+        let settingsOnly: Bool
+    }
+
+    func testInboxExclusionThroughBothRoutesScopesEventsAndRefreshesLargeInbox() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let ctx = container.mainContext
+        var shows: [Podcast] = []
+        var queuedEpisode: Episode?
+        var inboxEpisodes: [Episode] = []
+        for i in 0..<288 {
+            let show = Podcast(
+                feedURL: "https://fixture.test/\(i)", title: "Show \(i)",
+                inboxExcluded: i == 1, inboxIncluded: i == 1 || i == 2
+            )
+            ctx.insert(show)
+            shows.append(show)
+            for j in 0..<10 {
+                let episode = Episode(
+                    guid: "\(i)-\(j)", title: "Episode \(j)", audioURL: "https://fixture.test/\(i)/\(j).mp3",
+                    pubDate: Date(timeIntervalSince1970: Double(i * 10 + j)), inboxDismissed: j > 0
+                )
+                episode.podcast = show
+                ctx.insert(episode)
+                if j == 0 { inboxEpisodes.append(episode) }
+                if i == 0, j == 1 { queuedEpisode = episode }
+            }
+        }
+        try ctx.save()
+        let matchingEpisodeIDs = inboxEpisodes.map(\.persistentModelID)
+        let target = shows[0]
+        let folderRepo = FolderRepository(context: ctx)
+        let folder = folderRepo.createFolder(name: "Synthetic folder")
+        folderRepo.add(target, to: folder)
+        folderRepo.add(shows[1], to: folder)
+        QueueRepository(context: ctx).add(try XCTUnwrap(queuedEpisode))
+        try ctx.save()
+
+        let originalLibrary = try ctx.fetch(LibraryPodcastSnapshot.descriptor()).map(\.persistentModelID)
+        let originalCounts = try await LibraryUnplayedCounts.load(container: container, podcastIDs: originalLibrary)
+        XCTAssertEqual(originalLibrary.count, 288)
+        XCTAssertEqual(originalCounts.count, 288)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Episode>()), 2_880)
+        let initialQueue = await TabBadgeSnapshotLoader.queueCount(modelContainer: container)
+        XCTAssertEqual(initialQueue.count, 1)
+
+        let names: [Notification.Name] = [.earshotSubscriptionsDidChange, .earshotInboxDidChange, .earshotQueueDidChange]
+        let recorded = OSAllocatedUnfairLock(initialState: [InboxRouteEvent]())
+        let tokens = names.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { notification in
+                recorded.withLock {
+                    $0.append(InboxRouteEvent(
+                        name: notification.name.rawValue, feedURL: notification.object as? String,
+                        eligibilityOnly: PodcastSettingsPersistence.isInboxEligibilityOnly(notification),
+                        settingsOnly: notification.userInfo?[PodcastSettingsPersistence.settingsOnlyKey] as? Bool == true
+                    ))
+                }
+            }
+        }
+        defer { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
+
+        func assertInbox(_ expected: Bool) async throws {
+            let size = expected ? 287 : 288
+            let listing = try await InboxSnapshotLoader.all(modelContainer: container, optInOnly: false)
+            let badge = await TabBadgeSnapshotLoader.inboxCount(modelContainer: container, optInOnly: false)
+            let foldered = try await InboxSnapshotLoader.folder(modelContainer: container, id: folder.persistentModelID, optInOnly: false)
+            let optIn = try await InboxSnapshotLoader.all(modelContainer: container, optInOnly: true)
+            XCTAssertEqual(listing.inspectedCount, size)
+            XCTAssertEqual(listing.ids.count, size)
+            XCTAssertEqual(badge.count, size)
+            XCTAssertEqual(listing.ids.contains(matchingEpisodeIDs[0]), !expected)
+            XCTAssertTrue(listing.ids.contains(matchingEpisodeIDs[1]), "An explicit opt-in still overrides exclusion")
+            XCTAssertEqual(foldered.ids.count, expected ? 1 : 2)
+            XCTAssertEqual(Set(optIn.ids), Set([matchingEpisodeIDs[1], matchingEpisodeIDs[2]]))
+            let fresh = ModelContext(container)
+            let id = target.persistentModelID
+            let saved = try fresh.fetch(FetchDescriptor<Podcast>(predicate: #Predicate { $0.persistentModelID == id })).first
+            XCTAssertEqual(saved?.inboxExcluded, expected)
+            XCTAssertEqual(saved?.inboxIncluded, false)
+        }
+
+        let rowObserved = OSAllocatedUnfairLock(initialState: false)
+        let originalLabel = withObservationTracking {
+            PodcastAction.presentations([.toggleInboxExclude], for: target).first?.label
+        } onChange: { rowObserved.withLock { $0 = true } }
+        XCTAssertEqual(originalLabel, "Exclude from Inbox")
+        func activateRotor() throws {
+            let action = buildPodcastActions(
+                podcast: target, order: [.toggleInboxExclude], context: ctx,
+                onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+            )
+            try XCTUnwrap(action.first).run()
+        }
+
+        try await assertInbox(false)
+        try activateRotor()
+        XCTAssertTrue(rowObserved.withLock { $0 }, "The existing Library model invalidates its action without a Library reload")
+        XCTAssertEqual(PodcastAction.presentations([.toggleInboxExclude], for: target).first?.label, "Include in Inbox")
+        try await assertInbox(true)
+        try activateRotor()
+        try await assertInbox(false)
+        // This is the same synchronous setter invoked by the Settings Toggle.
+        XCTAssertTrue(try PodcastSettingsPersistence.setInboxExcluded(true, for: target, in: ctx))
+        try await assertInbox(true)
+        XCTAssertTrue(try PodcastSettingsPersistence.setInboxExcluded(false, for: target, in: ctx))
+        try await assertInbox(false)
+        XCTAssertFalse(try PodcastSettingsPersistence.setInboxExcluded(false, for: target, in: ctx))
+        let events = recorded.withLock { $0 }
+        XCTAssertEqual(events, Array(repeating: [
+            InboxRouteEvent(name: Notification.Name.earshotSubscriptionsDidChange.rawValue, feedURL: target.feedURL, eligibilityOnly: true, settingsOnly: true),
+            InboxRouteEvent(name: Notification.Name.earshotInboxDidChange.rawValue, feedURL: nil, eligibilityOnly: true, settingsOnly: false)
+        ], count: 4).flatMap { $0 })
+        XCTAssertEqual(try ctx.fetch(LibraryPodcastSnapshot.descriptor()).map(\.persistentModelID), originalLibrary)
+        let finalCounts = try await LibraryUnplayedCounts.load(container: container, podcastIDs: originalLibrary)
+        XCTAssertEqual(finalCounts, originalCounts)
+        let finalQueue = await TabBadgeSnapshotLoader.queueCount(modelContainer: container)
+        XCTAssertEqual(finalQueue, initialQueue)
+
+        let other = buildPodcastActions(podcast: target, order: [.toggleNotifications], context: ctx,
+                                       onOpenDetail: {}, onShare: {}, onUnsubscribe: {})
+        try XCTUnwrap(other.first).run()
+        XCTAssertEqual(recorded.withLock { Array($0.dropFirst(events.count)).map(\.eligibilityOnly) }, [false, false])
+    }
+
+    func testInboxExclusionFailureRestoresOnlyPreferenceAndDoesNotNotify() throws {
+        enum SaveFailure: Error { case fixture }
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://fixture.test/failure", title: "Original")
+        ctx.insert(podcast)
+        try ctx.save()
+        podcast.title = "An unrelated pending title"
+        let center = NotificationCenter()
+        let events = OSAllocatedUnfairLock(initialState: 0)
+        let tokens = [Notification.Name.earshotInboxDidChange, .earshotSubscriptionsDidChange].map { name in
+            center.addObserver(forName: name, object: nil, queue: nil) { _ in events.withLock { $0 += 1 } }
+        }
+        defer { tokens.forEach { center.removeObserver($0) } }
+        XCTAssertThrowsError(try PodcastSettingsPersistence.setInboxExcluded(
+            true, for: podcast, in: ctx, center: center, save: { _ in throw SaveFailure.fixture }
+        ))
+        XCTAssertFalse(podcast.inboxExcluded)
+        XCTAssertEqual(podcast.title, "An unrelated pending title")
+        XCTAssertTrue(ctx.hasChanges)
+        XCTAssertEqual(events.withLock { $0 }, 0)
+        let fresh = ModelContext(ctx.container)
+        XCTAssertEqual(try fresh.fetch(FetchDescriptor<Podcast>()).first?.inboxExcluded, false)
+    }
+
 
     private func makeEpisode(_ ctx: ModelContext, played: Bool = false) -> Episode {
         let p = Podcast(feedURL: "https://x/a.xml", title: "Show")

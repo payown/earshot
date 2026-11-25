@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import os
 @testable import Earshot
 
 /// Covers `EpisodeRepository.markAllPlayed(in:)`, the batched "Mark all as
@@ -26,6 +27,80 @@ final class EpisodeRepositoryTests: XCTestCase {
     }
 
     // MARK: Large-list batching (the issue's explicit ask)
+
+    func testMarkAllSnapshotSurvivesInsertAndDeleteBetweenSaves() async throws {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "Interleaved")
+        let episodes = (0..<205).map { makeEpisode(ctx, String(format: "existing-%03d", $0), podcast: p) }
+        try ctx.save()
+        let deleted = episodes[150].persistentModelID
+        var saves = 0
+        var inserted: [Episode] = []
+        let notices = OSAllocatedUnfairLock(initialState: [String]())
+        let batch = NotificationCenter.default.addObserver(forName: .earshotEpisodeUserStateDidChange, object: nil, queue: nil) { _ in
+            notices.withLock { $0.append("batch") }
+        }
+        let finished = NotificationCenter.default.addObserver(forName: .earshotInboxDidChange, object: nil, queue: nil) { _ in
+            notices.withLock { $0.append("inbox") }
+        }
+        defer {
+            NotificationCenter.default.removeObserver(batch)
+            NotificationCenter.default.removeObserver(finished)
+        }
+        let repo = EpisodeRepository(context: ctx, onSave: {
+            saves += 1
+            guard saves == 1 else { return }
+            inserted = [
+                self.makeEpisode(ctx, "before-first-existing", podcast: p),
+                self.makeEpisode(ctx, "zzz-after-last-existing", podcast: p)
+            ]
+            ctx.delete(episodes[150])
+            do { try ctx.save() } catch { XCTFail("Could not persist concurrent edits: \(error)") }
+        })
+        let count = await repo.markAllPlayed(in: p)
+        XCTAssertEqual(count, 204)
+        XCTAssertEqual(saves, 3)
+        XCTAssertEqual(notices.withLock { $0 }, ["batch", "batch", "batch", "inbox"])
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Episode>(predicate: #Predicate { $0.persistentModelID == deleted })), 0)
+        XCTAssertEqual(inserted.count, 2)
+        XCTAssertTrue(inserted.allSatisfy { !$0.isPlayed })
+        XCTAssertTrue(episodes.enumerated().filter { $0.offset != 150 }.allSatisfy { $0.element.isPlayed })
+    }
+
+    func testMarkAllUsesStatusAndPreservesCleanupCloudAndPlaybackSnapshot() async throws {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "StatusTruth")
+        let queued = makeEpisode(ctx, "queued", podcast: p)
+        queued.status = .inQueue
+        queued.playedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        queued.positionSeconds = 40
+        queued.downloadStatus = .downloaded
+        let alreadyPlayed = makeEpisode(ctx, "already", podcast: p)
+        alreadyPlayed.status = .played
+        XCTAssertNil(alreadyPlayed.playedAt)
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        try ctx.save()
+        let state = OSAllocatedUnfairLock(initialState: [EpisodeUserStateSnapshot]())
+        let token = NotificationCenter.default.addObserver(forName: .earshotEpisodeUserStateDidChange, object: nil, queue: nil) { note in
+            guard let snapshots = note.object as? [EpisodeUserStateSnapshot] else { return }
+            state.withLock { $0.append(contentsOf: snapshots) }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        let count = await EpisodeRepository(context: ctx).markAllPlayed(in: p)
+        XCTAssertEqual(count, 1)
+        XCTAssertTrue(queued.isPlayed && queued.inboxDismissed)
+        XCTAssertNil(alreadyPlayed.playedAt, "Episode.status, not playedAt, determines whether a row is already played")
+        XCTAssertEqual(queued.downloadStatus, .none)
+        XCTAssertEqual(queued.positionSeconds, 40)
+        let entries = try PendingCloudPlayedMutation.records(in: ctx).flatMap(\.entries)
+        XCTAssertEqual(entries.map(\.guid), ["queued"])
+        XCTAssertEqual(entries.first?.isPlayed, true)
+        XCTAssertEqual(entries.first?.positionSeconds, 40)
+        let notified = state.withLock { $0 }
+        XCTAssertEqual(notified.map(\.guid), ["queued"])
+        XCTAssertEqual(notified.first?.playedChangedExplicitly, true)
+        XCTAssertEqual(notified.first?.positionSeconds, 40)
+    }
 
     func testMarkAllPlayedUsesBoundedSavesForLargeList() async throws {
         let ctx = TestStore.freshContext()

@@ -706,22 +706,34 @@ final class SubscriptionRepositoryTests: XCTestCase {
     /// jetsam kill on low-RAM devices that ran on every launch/resume/refresh/import.
     /// It now re-faults ONLY the episodes of the podcasts a refresh actually
     /// touched, passed as `affectedPodcastIDs` (flat +6.6 MB at 1184 feeds). This
-    /// asserts the scoped re-fault still surfaces new episodes on the HELD
-    /// main-context `Podcast` objects across a whole-library `refreshAll()` — the
-    /// exact behavior the old blanket fetch provided, now for multiple affected IDs.
+    /// asserts that held main-context podcasts see their new rows before
+    /// notification delivery, even when a checkpoint resolves an exact saved
+    /// episode rather than re-reading the whole show.
     func testRefreshAllSurfacesNewEpisodesOnHeldPodcastsViaScopedRefault() async throws {
         let ctx = TestStore.freshContext()
         let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
         let repo = SubscriptionRepository(context: ctx, feed: fetcher)
         let one = try await repo.subscribe(feedURL: "https://x/one.xml")
         let two = try await repo.subscribe(feedURL: "https://x/two.xml")
+        one.notificationEnabled = true
+        two.notificationEnabled = true
+        try ctx.save()
         XCTAssertEqual(one.episodes?.count, 1)
         XCTAssertEqual(two.episodes?.count, 1)
 
-        // Both feeds gain a newer episode "b"; refreshAll passes both podcast IDs
-        // to mergeBackgroundWrites as affectedPodcastIDs.
+        // Both feeds gain a newer episode "b"; neither touches old episodes.
         fetcher.feed = feed([episode("a", d1), episode("b", d2)])
-        _ = await repo.refreshAll()
+        var notifiedURLs: Set<String> = []
+        _ = await repo.refreshAllReport(onDurableNotifications: { notifications in
+            for notification in notifications {
+                let held = notification.podcastFeedURL == one.feedURL ? one : two
+                XCTAssertEqual(notification.episodeGUID, "b")
+                XCTAssertEqual(held.episodes?.count, 2)
+                XCTAssertEqual(held.lastSeenPubDate, self.d2)
+                notifiedURLs.insert(notification.podcastFeedURL)
+            }
+        })
+        XCTAssertEqual(notifiedURLs, [one.feedURL, two.feedURL])
 
         // The new episode is visible on the HELD Podcast objects — the scoped
         // per-podcast re-fault worked without materializing the whole Episode table.

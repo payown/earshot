@@ -62,7 +62,7 @@ final class PodcastCapPolicyTests: XCTestCase {
 
     // MARK: readOnlyPodcastIDs
 
-    func testReadOnlyPodcastIDsEmptyWhenEntitled() {
+    func testReadOnlyPodcastIDsEmptyWithoutReadingGrandfatheredCountWhenEntitled() {
         let ctx = TestStore.freshContext()
         var podcasts: [Podcast] = []
         for i in 0..<15 {
@@ -70,8 +70,16 @@ final class PodcastCapPolicyTests: XCTestCase {
         }
         try? ctx.save()
 
-        let readOnly = PodcastCapPolicy.readOnlyPodcastIDs(in: podcasts, isEntitled: true, grandfatheredCount: 0)
+        var reads = 0
+        func readGrandfatheredCount() -> Int {
+            reads += 1
+            return AppSettingsStore(context: ctx).grandfatheredPodcastCount()
+        }
+        let readOnly = PodcastCapPolicy.readOnlyPodcastIDs(
+            in: podcasts, isEntitled: true, grandfatheredCount: readGrandfatheredCount()
+        )
         XCTAssertTrue(readOnly.isEmpty)
+        XCTAssertEqual(reads, 0, "An entitled render must not read the allowance")
     }
 
     func testReadOnlyPodcastIDsEmptyWhenUnderLimit() {
@@ -124,7 +132,17 @@ final class PodcastCapPolicyTests: XCTestCase {
         }
         try? ctx.save()
 
-        let readOnly = PodcastCapPolicy.readOnlyPodcastIDs(in: podcasts, isEntitled: false, grandfatheredCount: 15)
+        let settings = AppSettingsStore(context: ctx)
+        settings.setInt(15, for: SettingsKey.grandfatheredPodcastCount)
+        var reads = 0
+        func readGrandfatheredCount() -> Int {
+            reads += 1
+            return settings.grandfatheredPodcastCount()
+        }
+        let readOnly = PodcastCapPolicy.readOnlyPodcastIDs(
+            in: podcasts, isEntitled: false, grandfatheredCount: readGrandfatheredCount()
+        )
+        XCTAssertEqual(reads, 1, "A free-tier render must use the persisted allowance")
 
         let readOnlyFeedURLs = Set(podcasts.filter { readOnly.contains($0.persistentModelID) }.map(\.feedURL))
         XCTAssertEqual(readOnlyFeedURLs, ["https://x/new0", "https://x/new1", "https://x/new2", "https://x/new3", "https://x/new4"])

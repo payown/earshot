@@ -70,9 +70,7 @@ func buildPodcastActions(
                 label: excluded ? "Include in Inbox" : "Exclude from Inbox",
                 isDestructive: false
             ) {
-                podcast.inboxExcluded.toggle()
-                savePodcastQuickAction(context, "inbox-exclude")
-                Announcer.announce(podcast.inboxExcluded ? "Excluded from inbox" : "Included in inbox")
+                togglePodcastInboxExclusion(podcast, in: context)
             }
         case .changeDownloadCount:
             guard let onChangeDownloadCount else { return nil }
@@ -113,6 +111,18 @@ func buildPodcastActions(
                 onMoveToFolder(podcast)
             }
         }
+    }
+}
+
+@MainActor
+func togglePodcastInboxExclusion(_ podcast: Podcast, in context: ModelContext) {
+    let excluded = !podcast.inboxExcluded
+    do {
+        guard try PodcastSettingsPersistence.setInboxExcluded(excluded, for: podcast, in: context) else { return }
+        Announcer.announce(excluded ? "Excluded from inbox" : "Included in inbox")
+    } catch {
+        AppLog.quickActions.error("Failed to save Inbox exclusion: \(error.localizedDescription, privacy: .public)")
+        Announcer.announce("Couldn't change the Inbox setting")
     }
 }
 

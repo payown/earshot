@@ -24,9 +24,10 @@ final class EpisodeRepository {
 
     /// Marks every currently-unplayed episode of `podcast` as played and returns
     /// how many were actually changed (#640). Large lists (1000+ episodes) must
-    /// not materialize the podcast's complete inverse relationship. The store is
-    /// queried in 100-row podcast-scoped batches and each bounded mutation is
-    /// saved before the next page is fetched.
+    /// not materialize the podcast's complete inverse relationship. Take a
+    /// stable snapshot of the store's identifiers away from the main actor,
+    /// then resolve and save at most 100 current models at a time. New rows
+    /// inserted after the snapshot are not part of this operation.
     ///
     /// Already-played episodes are left untouched so their `playedAt` is never
     /// overwritten with `.now`, which also keeps the returned count meaningful:
@@ -42,6 +43,77 @@ final class EpisodeRepository {
     func markAllPlayed(in podcast: Podcast) async -> Int {
         let podcastID = podcast.persistentModelID
         let deleteAfterPlayed = DownloadCleanup.deleteAfterPlayedEnabled(context)
+        // Temporary IDs can change after the first save. Preserve the existing
+        // pending-edit behavior rather than adding such IDs to the snapshot.
+        if context.hasChanges {
+            return await markAllPlayedFromLivePages(podcastID, deleteAfterPlayed: deleteAfterPlayed)
+        }
+        let identifiers: [PersistentIdentifier]
+        do {
+            identifiers = try await Self.markAllIdentifiers(in: context.container, podcastID: podcastID)
+        } catch {
+            AppLog.data.error("Episode bulk identifier snapshot failed: \(error.localizedDescription, privacy: .public)")
+            return await markAllPlayedFromLivePages(podcastID, deleteAfterPlayed: deleteAfterPlayed)
+        }
+
+        var changedCount = 0
+        for start in stride(from: 0, to: identifiers.count, by: Self.batchSize) {
+            let end = min(start + Self.batchSize, identifiers.count)
+            let ids = Array(identifiers[start..<end])
+            let candidates: [Episode]
+            do {
+                candidates = try markAllBatch(ids, podcastID: podcastID)
+            } catch {
+                AppLog.data.error("Episode bulk fetch failed: \(error.localizedDescription, privacy: .public)")
+                break
+            }
+            // Work on current models rather than trusting an earlier played
+            // bit. Missing or reassigned IDs are not touched.
+            guard let changed = saveMarkAllBatch(candidates, deleteAfterPlayed: deleteAfterPlayed) else { break }
+            changedCount += changed
+            // An entirely played page still used the main actor for a fetch.
+            await Task.yield()
+        }
+        return finishMarkAll(changedCount)
+    }
+
+    private nonisolated static func markAllIdentifiers(
+        in container: ModelContainer, podcastID: PersistentIdentifier
+    ) async throws -> [PersistentIdentifier] {
+        try await Task.detached(priority: .userInitiated) {
+            let readContext = ModelContext(container)
+            var descriptor = FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.podcast?.persistentModelID == podcastID },
+                sortBy: [SortDescriptor(\.guid)]
+            )
+            descriptor.includePendingChanges = false
+            return try readContext.fetchIdentifiers(descriptor)
+        }.value
+    }
+
+    private func markAllBatch(_ ids: [PersistentIdentifier], podcastID: PersistentIdentifier) throws -> [Episode] {
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { ids.contains($0.persistentModelID) && $0.podcast?.persistentModelID == podcastID },
+            sortBy: [SortDescriptor(\.guid)]
+        )
+        do {
+            return try context.fetch(descriptor)
+        } catch {
+            // Preserve progress on SwiftData releases that cannot translate a
+            // list of identifiers. Resolve exact rows; never fault a stale ID.
+            return try ids.compactMap { id in
+                var single = FetchDescriptor<Episode>(predicate: #Predicate {
+                    $0.persistentModelID == id && $0.podcast?.persistentModelID == podcastID
+                })
+                single.fetchLimit = 1
+                return try context.fetch(single).first
+            }
+        }
+    }
+
+    private func markAllPlayedFromLivePages(
+        _ podcastID: PersistentIdentifier, deleteAfterPlayed: Bool
+    ) async -> Int {
         var changedCount = 0
         var offset = 0
 
@@ -63,30 +135,39 @@ final class EpisodeRepository {
             guard !candidates.isEmpty else { break }
             offset += candidates.count
 
-            let unplayed = candidates.filter { !$0.isPlayed }
-            guard !unplayed.isEmpty else {
+            guard let changed = saveMarkAllBatch(candidates, deleteAfterPlayed: deleteAfterPlayed) else { break }
+            if changed == 0 {
                 if candidates.count < Self.batchSize { break }
                 continue
             }
 
-            let ownership = deleteAfterPlayed ? DownloadCleanup.bulkOwnership(for: unplayed, in: context) : nil
-            for episode in unplayed {
-                episode.isPlayed = true
-                episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
-                    nowPlayed: true, wasDismissed: episode.inboxDismissed
-                )
-                if deleteAfterPlayed {
-                    DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
-                }
-            }
-            guard save(changedEpisodes: unplayed, notifyInbox: false) else { break }
-            changedCount += unplayed.count
+            changedCount += changed
             // The repository is main-context-bound, but yielding between small
             // durable batches lets VoiceOver and UI events run during a very
             // large podcast operation instead of monopolizing the main actor.
             await Task.yield()
         }
 
+        return finishMarkAll(changedCount)
+    }
+
+    private func saveMarkAllBatch(_ candidates: [Episode], deleteAfterPlayed: Bool) -> Int? {
+        let unplayed = candidates.filter { !$0.isPlayed }
+        guard !unplayed.isEmpty else { return 0 }
+        let ownership = deleteAfterPlayed ? DownloadCleanup.bulkOwnership(for: unplayed, in: context) : nil
+        for episode in unplayed {
+            episode.isPlayed = true
+            episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
+                nowPlayed: true, wasDismissed: episode.inboxDismissed
+            )
+            if deleteAfterPlayed {
+                DownloadCleanup.removeDownloadFileAndState(episode, in: context, ownership: ownership)
+            }
+        }
+        return save(changedEpisodes: unplayed, notifyInbox: false) ? unplayed.count : nil
+    }
+
+    private func finishMarkAll(_ changedCount: Int) -> Int {
         if changedCount > 0 {
             NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         }

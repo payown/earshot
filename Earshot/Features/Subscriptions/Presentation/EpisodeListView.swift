@@ -1,4 +1,5 @@
 import Combine
+import Observation
 import SwiftUI
 import SwiftData
 
@@ -79,7 +80,18 @@ struct EpisodeListView: View {
     @State private var searchReloadTask: Task<Void, Never>?
     @State private var episodeStateReloadTask: Task<Void, Never>?
     @State private var partialCompletionTask: Task<Void, Never>?
-    @State private var isBulkEpisodeMutation = false
+    @State private var isSelectedBulkEpisodeMutation = false
+    @State private var markAllOperation = MarkAllPlayedOperation()
+    private var isBulkEpisodeMutation: Bool {
+        isSelectedBulkEpisodeMutation || markAllOperation.isRunning
+    }
+    private var canRequestMarkAllPlayed: Bool {
+        markAllOperation.canRequest(
+            unplayedCount: unplayedCount,
+            otherBulkOperationRunning: isSelectedBulkEpisodeMutation,
+            confirming: confirmingMarkAllPlayed
+        )
+    }
     // Moves VoiceOver focus onto the first episode row when entering selection
     // mode, and to the Select/Done button on exit; keyed on the stable
     // PersistentIdentifier so focus rides the row across the select-mode toggle
@@ -202,7 +214,7 @@ struct EpisodeListView: View {
                                     Label("Back to Library shows", systemImage: "chevron.left")
                                 }
                                 .accessibilityIdentifier("library.backToShows")
-                                .markAllPlayedAccessibilityAction(enabled: unplayedCount > 0) {
+                                .markAllPlayedAccessibilityAction(enabled: canRequestMarkAllPlayed) {
                                     requestMarkAllPlayed()
                                 }
                             }
@@ -464,7 +476,7 @@ struct EpisodeListView: View {
                 } label: {
                     Label("Mark all as played", systemImage: "checklist.checked")
                 }
-                .disabled(unplayedCount == 0)
+                .disabled(!canRequestMarkAllPlayed)
                 .accessibilityLabel("Mark all as played")
                 .accessibilityHint(
                     unplayedCount == 0
@@ -843,16 +855,16 @@ struct EpisodeListView: View {
     }
 
     private func setSelectedPlayed(_ played: Bool, ids: Set<PersistentIdentifier>) {
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty, !isBulkEpisodeMutation else { return }
+        isSelectedBulkEpisodeMutation = true
         Task { @MainActor in
-            isBulkEpisodeMutation = true
             let repo = EpisodeRepository(context: context)
             let count = if played {
                 await repo.markSelectedPlayed(in: podcast, ids: ids)
             } else {
                 await repo.markSelectedUnplayed(in: podcast, ids: ids)
             }
-            isBulkEpisodeMutation = false
+            isSelectedBulkEpisodeMutation = false
             reloadEpisodePage()
             Announcer.announce(
                 "Marked \(EpisodeBatchLabel.episodePhrase(count)) as \(played ? "played" : "unplayed")",
@@ -881,6 +893,7 @@ struct EpisodeListView: View {
     /// Shared entry point for both the toolbar button and the rotor action
     /// (#640) — both just open the same confirmation, never mark directly.
     private func requestMarkAllPlayed() {
+        guard canRequestMarkAllPlayed else { return }
         confirmingMarkAllPlayed = true
     }
 
@@ -902,10 +915,11 @@ struct EpisodeListView: View {
     /// user just confirmed a deliberate bulk action and needs to hear it
     /// landed.
     private func markAllPlayed() {
-        Task { @MainActor in
-            isBulkEpisodeMutation = true
+        markAllOperation.start(
+            unplayedCount: unplayedCount,
+            otherBulkOperationRunning: isSelectedBulkEpisodeMutation
+        ) {
             let count = await EpisodeRepository(context: context).markAllPlayed(in: podcast)
-            isBulkEpisodeMutation = false
             reloadEpisodePage()
             Announcer.announce(MarkAllPlayedAnnouncement.text(count: count), assertive: true)
         }
@@ -950,7 +964,7 @@ struct EpisodeListView: View {
                 // attached when there's something to mark, since a rotor
                 // action can't visually gray itself out the way the toolbar
                 // button can.
-                .markAllPlayedAccessibilityAction(enabled: unplayedCount > 0) {
+                .markAllPlayedAccessibilityAction(enabled: canRequestMarkAllPlayed) {
                     requestMarkAllPlayed()
                 }
             if let author = podcast.author, !author.isEmpty {
@@ -1315,18 +1329,42 @@ enum MarkAllPlayedConfirmationCopy {
     }
 }
 
+/// Claims the action before its task can suspend, so stale rotor or toolbar
+/// events cannot create a second mutation or clear the first one's state.
+@MainActor
+@Observable
+final class MarkAllPlayedOperation {
+    private(set) var isRunning = false
+
+    func canRequest(unplayedCount: Int, otherBulkOperationRunning: Bool, confirming: Bool = false) -> Bool {
+        unplayedCount > 0 && !isRunning && !otherBulkOperationRunning && !confirming
+    }
+
+    @discardableResult
+    func start(
+        unplayedCount: Int,
+        otherBulkOperationRunning: Bool,
+        perform: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never>? {
+        guard canRequest(unplayedCount: unplayedCount, otherBulkOperationRunning: otherBulkOperationRunning) else { return nil }
+        isRunning = true
+        return Task { @MainActor in
+            defer { isRunning = false }
+            await perform()
+        }
+    }
+}
+
 private extension View {
     /// Conditionally attaches the "Mark all as played" rotor action (#640).
     /// A rotor action has no way to visually gray itself out the way a
-    /// toolbar button can via `.disabled`, so when there's nothing to mark
-    /// the action is omitted from the accessibility tree entirely rather than
-    /// left attached as a silent no-op.
-    @ViewBuilder
+    /// toolbar button can via `.disabled`, so while unavailable only this
+    /// action is omitted rather than left attached as a silent no-op.
     func markAllPlayedAccessibilityAction(enabled: Bool, action: @escaping () -> Void) -> some View {
-        if enabled {
-            self.accessibilityAction(named: "Mark all as played", action)
-        } else {
-            self
+        self.accessibilityActions {
+            if enabled {
+                Button("Mark all as played", action: action)
+            }
         }
     }
 }

@@ -781,23 +781,36 @@ extension SubscriptionRepository {
                 // Every value in this callback belongs to a successful actor
                 // save. Re-fault only affected podcasts, then start queue and
                 // download side effects while the remaining feeds continue.
-                let affectedIDs = checkpoint
+                let affected = checkpoint
                     .filter {
                         $0.outcome.added > 0 || $0.outcome.filteredCount > 0
                             || $0.outcome.metadataUpdatedCount > 0
                             || !$0.outcome.inboxReentryEpisodeIDs.isEmpty
                             || !$0.outcome.inboxDismissedEpisodeIDs.isEmpty
                     }
-                    .compactMap {
-                        self.podcast(forFeedURL: $0.feedURL)?.persistentModelID
+                    .compactMap { progress -> (PersistentIdentifier, RefreshOutcome)? in
+                        guard let id = self.podcast(forFeedURL: progress.feedURL)?.persistentModelID else { return nil }
+                        return (id, progress.outcome)
                     }
                 // A normal 304/unchanged checkpoint has no Podcast/Episode model
                 // for the main context to re-fault. Before this guard, every ten
                 // unchanged feeds still fetched every followed Podcast on the
                 // main actor. A large cold-launch refresh therefore interrupted
                 // VoiceOver in periodic bursts even while Settings was visible.
-                if !affectedIDs.isEmpty {
-                    self.mergeBackgroundWrites(affectedPodcastIDs: affectedIDs)
+                if !affected.isEmpty {
+                    var fullRefaults: [PersistentIdentifier] = []
+                    var singleInsertions: [(podcastID: PersistentIdentifier, episodeID: PersistentIdentifier)] = []
+                    for (podcastID, outcome) in affected {
+                        if let episodeID = outcome.singleNewEpisodeForRefault {
+                            singleInsertions.append((podcastID, episodeID))
+                        } else {
+                            fullRefaults.append(podcastID)
+                        }
+                    }
+                    self.mergeBackgroundWrites(
+                        affectedPodcastIDs: fullRefaults,
+                        singleInsertions: singleInsertions
+                    )
                 }
                 self.publishInboxReentries(
                     checkpoint.flatMap { $0.outcome.inboxReentryEpisodeIDs + $0.outcome.inboxDismissedEpisodeIDs }
@@ -1075,7 +1088,10 @@ extension SubscriptionRepository {
     /// can stay stale until something re-faults it. An explicit fetch over both
     /// types forces that re-fault deterministically — cheap relative to the
     /// network refresh it follows.
-    private func mergeBackgroundWrites(affectedPodcastIDs: [PersistentIdentifier] = []) {
+    private func mergeBackgroundWrites(
+        affectedPodcastIDs: [PersistentIdentifier] = [],
+        singleInsertions: [(podcastID: PersistentIdentifier, episodeID: PersistentIdentifier)] = []
+    ) {
         // Re-register podcast rows so the Library @Query and any held Podcast
         // reflect the background save. Cheap — a few hundred small rows, no
         // episode graph.
@@ -1091,7 +1107,15 @@ extension SubscriptionRepository {
         // `.episodes` array faulted in before the background save (the single-feed
         // refresh path). The scoped fetch stays flat with library size: +6.6 MB at
         // 1184 feeds, down from ~1.7 GB.
-        for id in affectedPodcastIDs {
+        var fullRefaults = affectedPodcastIDs
+        for insertion in singleInsertions {
+            if episode(forPersistentID: insertion.episodeID) == nil {
+                // Preserve reconciliation for outcomes whose saved identity
+                // cannot be resolved (for example, a concurrent deletion).
+                fullRefaults.append(insertion.podcastID)
+            }
+        }
+        for id in fullRefaults {
             let scoped = FetchDescriptor<Episode>(
                 predicate: #Predicate { $0.podcast?.persistentModelID == id }
             )
@@ -1168,6 +1192,20 @@ extension SubscriptionRepository {
             )
             return []
         }
+    }
+}
+
+private extension RefreshOutcome {
+    /// A checkpoint that simply appends one genuinely new episode can refresh
+    /// that exact row. Any change to already-stored episodes, or an incomplete
+    /// identity list, keeps the original whole-show reconciliation.
+    var singleNewEpisodeForRefault: PersistentIdentifier? {
+        guard added == 1, newEpisodeIDs.count == 1, !wasBackfill,
+              filteredCount == 0, recoveredLocalCount == 0, metadataUpdatedCount == 0,
+              inboxReentryEpisodeIDs.isEmpty, inboxDismissedEpisodeIDs.isEmpty,
+              correctedMedia.isEmpty
+        else { return nil }
+        return newEpisodeIDs.first
     }
 }
 
