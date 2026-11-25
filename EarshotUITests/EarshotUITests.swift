@@ -1395,6 +1395,10 @@ final class EarshotUITests: XCTestCase {
         let separateDetails = app.scrollViews["player.details"].exists
         let scroll = separateDetails ? app.scrollViews["player.details"] : episodeContent
         let extend = scroll.buttons["Extend sleep timer by 5 minutes"]
+        if separateDetails && largeText {
+            XCTAssertGreaterThanOrEqual(scroll.frame.height, 159,
+                                        "The details viewport must remain scrollable at the largest text size")
+        }
         for _ in 0..<20 {
             if extend.exists && extend.isHittable && extend.frame.maxY <= scroll.frame.maxY { break }
             scroll.swipeUp()
