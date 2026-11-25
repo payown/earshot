@@ -133,7 +133,7 @@ struct NowPlayingScreen: View {
                             episodeRegion(expanded: true, separateDetails: separateDetails,
                                           windowWidth: geometry.size.width)
                         } secondary: {
-                            controlsRegion(separateDetails: separateDetails)
+                            controlsRegion(separateDetails: separateDetails, expanded: expanded)
                         }
                         .arrangementViewStyle(.split)
                     } else {
@@ -145,7 +145,7 @@ struct NowPlayingScreen: View {
                         playerLayout {
                             episodeRegion(expanded: expanded, separateDetails: separateDetails,
                                           windowWidth: geometry.size.width)
-                            controlsRegion(separateDetails: separateDetails)
+                            controlsRegion(separateDetails: separateDetails, expanded: expanded)
                         }
                     }
                 }
@@ -222,7 +222,7 @@ struct NowPlayingScreen: View {
         .accessibilityIdentifier("player.episodeContent")
     }
 
-    private func controlsRegion(separateDetails: Bool) -> some View {
+    private func controlsRegion(separateDetails: Bool, expanded: Bool) -> some View {
         VStack(spacing: 0) {
             playbackDock
             if separateDetails {
@@ -232,7 +232,11 @@ struct NowPlayingScreen: View {
                         .padding(.horizontal, Spacing.lg)
                         .padding(.vertical, Spacing.lg)
                 }
-                .frame(maxHeight: .infinity)
+                // The dock grows with accessibility text. Keep the separate
+                // details viewport tall enough to accept scroll gestures in a
+                // compact window, without changing the VoiceOver element order.
+                .frame(minHeight: !expanded && dynamicTypeSize.isAccessibilitySize ? 160 : nil,
+                       maxHeight: .infinity)
                 .accessibilityIdentifier("player.details")
             }
         }
