@@ -683,7 +683,8 @@ actor CloudProjectionCoordinator: ModelActor {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            guard !Self.isProjectionOriginated(notification) else { return }
+            guard !Self.isProjectionOriginated(notification),
+                  !PodcastSettingsPersistence.isInboxEligibilityOnly(notification) else { return }
             Task { await self?.scheduleReconciliationForCatalogChange() }
         }
         queueObserver = center.addObserver(

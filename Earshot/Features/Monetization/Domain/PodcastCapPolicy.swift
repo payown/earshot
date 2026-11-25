@@ -58,10 +58,15 @@ enum PodcastCapPolicy {
     /// The `persistentModelID`s of every podcast that is read-only right now,
     /// given the full podcast list, current entitlement, and grandfathered
     /// count. Used by both auto-download (skip downloading for these) and the
-    /// Library UI (badge these rows).
-    static func readOnlyPodcastIDs(in podcasts: [Podcast], isEntitled: Bool, grandfatheredCount: Int) -> Set<PersistentIdentifier> {
+    /// Library UI (badge these rows). Resolve the allowance only on the
+    /// free tier so an entitled Library render does not query SwiftData.
+    static func readOnlyPodcastIDs(
+        in podcasts: [Podcast],
+        isEntitled: Bool,
+        grandfatheredCount: @autoclosure () -> Int
+    ) -> Set<PersistentIdentifier> {
         guard !isEntitled else { return [] }
-        let limit = effectiveFreeLimit(grandfatheredCount: grandfatheredCount)
+        let limit = effectiveFreeLimit(grandfatheredCount: grandfatheredCount())
         guard podcasts.count > limit else { return [] }
         let orderedIDs = ranked(podcasts).map(\.persistentModelID)
         return Set(orderedIDs.dropFirst(limit))

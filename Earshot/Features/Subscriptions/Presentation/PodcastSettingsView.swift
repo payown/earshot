@@ -729,9 +729,14 @@ struct PodcastSettingsView: View {
     private var inboxExcludedBinding: Binding<Bool> {
         Binding(
             get: { podcast.inboxExcluded },
-            set: {
-                podcast.inboxExcluded = $0
-                persistPodcastProjectionChange()
+            set: { excluded in
+                do {
+                    try PodcastSettingsPersistence.setInboxExcluded(excluded, for: podcast, in: modelContext)
+                } catch {
+                    AppLog.data.error(
+                        "Failed to persist Inbox exclusion: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
             }
         )
     }
@@ -769,6 +774,38 @@ struct PodcastSettingsView: View {
 @MainActor
 enum PodcastSettingsPersistence {
     nonisolated static let settingsOnlyKey = "podcastSettingsOnly"
+    private nonisolated static let inboxEligibilityOnlyKey = "podcastInboxEligibilityOnly"
+
+    /// This event changes candidate eligibility but neither catalog rows nor
+    /// played state. A Library recount or Cloud catalog reconcile cannot help.
+    nonisolated static func isInboxEligibilityOnly(_ notification: Notification) -> Bool {
+        notification.userInfo?[inboxEligibilityOnlyKey] as? Bool == true
+    }
+
+    @discardableResult
+    static func setInboxExcluded(
+        _ excluded: Bool, for podcast: Podcast, in context: ModelContext,
+        center: NotificationCenter = .default,
+        save: (ModelContext) throws -> Void = { try $0.save() }
+    ) throws -> Bool {
+        let previous = podcast.inboxExcluded
+        guard previous != excluded else { return false }
+        podcast.inboxExcluded = excluded
+        do {
+            try save(context)
+        } catch {
+            // Restore only this preference, not unrelated pending user edits.
+            podcast.inboxExcluded = previous
+            throw error
+        }
+        center.post(
+            name: .earshotSubscriptionsDidChange,
+            object: podcast.feedURL,
+            userInfo: [settingsOnlyKey: true, inboxEligibilityOnlyKey: true]
+        )
+        center.post(name: .earshotInboxDidChange, object: nil, userInfo: [inboxEligibilityOnlyKey: true])
+        return true
+    }
 
     static func save(
         _ podcast: Podcast, in context: ModelContext,

@@ -481,6 +481,68 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    func testInboxExclusionRoutesPublishOneFeedWithoutCatalogReconciliation() async throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let center = NotificationCenter.default
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, center: center, deviceID: "phone"
+        )
+        defer { Task { await coordinator.stop() } }
+        try await coordinator.start(performInitialReconciliation: false)
+        let first = Podcast(feedURL: "https://fixture.test/exclusion-first", title: "First")
+        let second = Podcast(feedURL: "https://fixture.test/exclusion-second", title: "Second")
+        app.mainContext.insert(first)
+        app.mainContext.insert(second)
+        try app.mainContext.save()
+        try await coordinator.publishLocalSubscriptionGraphChange(feedURL: nil)
+        let catalogEvents = Mutex(0)
+        let reconciles = Mutex(0)
+        await coordinator.setCatalogNotificationCheckpointForTesting {
+            catalogEvents.withLock { $0 += 1 }
+        }
+        await coordinator.setScheduledReconciliationCheckpointForTesting {
+            reconciles.withLock { $0 += 1 }
+        }
+
+        func waitForExclusion(_ expected: Bool) async throws {
+            let feedURL = first.feedURL
+            for _ in 0..<100 {
+                let read = ModelContext(projection)
+                let row = try read.fetch(FetchDescriptor<CloudPodcastProjection>(
+                    predicate: #Predicate { $0.feedURL == feedURL }
+                )).first
+                if row?.inboxExcluded == expected { return }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTFail("Cloud projection didn't receive saved exclusion \(expected)")
+        }
+
+        // A broad export would leak this unrelated saved scalar change.
+        second.speedOverride = 1.75
+        try app.mainContext.save()
+        let action = buildPodcastActions(
+            podcast: first, order: [.toggleInboxExclude], context: app.mainContext,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+        )
+        try XCTUnwrap(action.first).run()
+        try await waitForExclusion(true)
+        try PodcastSettingsPersistence.setInboxExcluded(false, for: first, in: app.mainContext)
+        try await waitForExclusion(false)
+        let rows = try ModelContext(projection).fetch(FetchDescriptor<CloudPodcastProjection>())
+        XCTAssertNil(rows.first { $0.feedURL == second.feedURL }?.speedOverride)
+        XCTAssertEqual(catalogEvents.withLock { $0 }, 0)
+        XCTAssertEqual(reconciles.withLock { $0 }, 0)
+
+        // Unmarked Inbox notifications still represent actual catalog changes.
+        center.post(name: .earshotInboxDidChange, object: nil)
+        for _ in 0..<100 where catalogEvents.withLock({ $0 }) == 0 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(catalogEvents.withLock { $0 }, 1)
+        await coordinator.stop()
+    }
+
     func testBurstOfRemoteImportNotificationsCoalescesAndStopsCleanly() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()

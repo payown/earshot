@@ -397,7 +397,8 @@ struct SubscriptionsView: View {
             if !sharedRefreshInProgress { loadPodcasts() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .earshotInboxDidChange)
-            .receive(on: DispatchQueue.main)) { _ in
+            .receive(on: DispatchQueue.main)) { notification in
+            guard !PodcastSettingsPersistence.isInboxEligibilityOnly(notification) else { return }
             countRevision += 1
         }
         .onReceive(NotificationCenter.default.publisher(for: .earshotEpisodeUserStateDidChange)
@@ -410,7 +411,8 @@ struct SubscriptionsView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .earshotSubscriptionsDidChange)
-            .receive(on: DispatchQueue.main)) { _ in
+            .receive(on: DispatchQueue.main)) { notification in
+            guard !PodcastSettingsPersistence.isInboxEligibilityOnly(notification) else { return }
             loadPodcasts()
         }
         .task(id: countRevision) {
@@ -505,8 +507,11 @@ struct SubscriptionsView: View {
     /// dropping back under the cap) restores full access immediately with no
     /// stale state to clear.
     private var readOnlyPodcastIDs: Set<PersistentIdentifier> {
-        let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
-        return PodcastCapPolicy.readOnlyPodcastIDs(in: podcasts, isEntitled: entitlements.isEntitled, grandfatheredCount: grandfathered)
+        PodcastCapPolicy.readOnlyPodcastIDs(
+            in: podcasts,
+            isEntitled: entitlements.isEntitled,
+            grandfatheredCount: AppSettingsStore(context: context).grandfatheredPodcastCount()
+        )
     }
 
     /// Whichever row variant applies: a selectable checkmark row while in
@@ -804,9 +809,7 @@ struct SubscriptionsView: View {
     /// (#671). Backs the leading-edge swipe action; the VoiceOver rotor path
     /// runs the equivalent effect through `buildPodcastActions`.
     private func toggleInboxExclude(_ podcast: Podcast) {
-        podcast.inboxExcluded.toggle()
-        savePodcastQuickAction(context, "inbox-exclude")
-        Announcer.announce(podcast.inboxExcluded ? "Excluded from inbox" : "Included in inbox")
+        togglePodcastInboxExclusion(podcast, in: context)
     }
 
     private func unsubscribe(_ podcast: Podcast) {
