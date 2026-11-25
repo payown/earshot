@@ -47,7 +47,7 @@ enum OnboardingContent {
         OnboardingPage(
             id: 3, symbol: "bolt.circle",
             title: "Make actions yours",
-            body: "Open Settings, then Quick Actions, to choose and reorder actions for episodes, podcasts, and the Queue.\n\nWith VoiceOver, use the Actions rotor to access enabled actions in the order you choose. On a podcast's episode list and in Queue, double tap opens details.\n\nThe Download / Remove Download setting covers both jobs. An episode's action offers Download when needed and Remove download when its audio is already downloaded."
+            body: "Open Settings, then Quick Actions, to choose and reorder actions for episodes, podcasts, and the Queue.\n\nWith VoiceOver, double tap runs the first enabled action when it applies to that row. Other actions and Open details are in the Actions rotor. If the first action is unavailable, the row keeps its usual double-tap behavior.\n\nThe Download / Remove Download setting covers both jobs. An episode's action offers Download when needed and Remove download when its audio is already downloaded."
         ),
         OnboardingPage(
             id: 4, symbol: "text.badge.plus",

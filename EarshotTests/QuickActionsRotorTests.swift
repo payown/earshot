@@ -8,6 +8,57 @@ import XCTest
 @MainActor
 final class QuickActionsRotorTests: XCTestCase {
 
+    func testConfiguredRowDefaultUsesOnlyTheFirstEnabledApplicableAction() {
+        XCTAssertEqual(
+            ConfiguredRowDefault.action(
+                configured: [EpisodeAction.playNow, .markPlayed],
+                applicable: [.playNow, .markPlayed]
+            ),
+            .playNow
+        )
+        XCTAssertNil(ConfiguredRowDefault.action(
+            configured: [EpisodeAction.removeFromInbox, .playNow],
+            applicable: [.playNow]
+        ), "A later action must not become the default when the first is inapplicable")
+        XCTAssertNil(ConfiguredRowDefault.action(
+            configured: [EpisodeAction](), applicable: [.playNow]
+        ))
+    }
+
+    func testConfiguredRowDefaultCoversPodcastAndQueueWithoutActionTypeAllowlist() {
+        XCTAssertEqual(ConfiguredRowDefault.action(
+            configured: [PodcastAction.toggleAutoQueue, .share],
+            applicable: [.toggleAutoQueue, .share]
+        ), .toggleAutoQueue)
+        XCTAssertNil(ConfiguredRowDefault.action(
+            configured: [PodcastAction.toggleInboxInclude, .share],
+            applicable: [.share]
+        ))
+        XCTAssertEqual(ConfiguredRowDefault.action(
+            configured: [QueueItemAction.removeFromQueue, .playNow],
+            applicable: [.removeFromQueue, .playNow]
+        ), .removeFromQueue)
+        XCTAssertNil(ConfiguredRowDefault.action(
+            configured: [QueueItemAction.moveUp, .playNow],
+            applicable: [.playNow]
+        ))
+    }
+
+    func testPromotedActionLeavesRemainingRotorInSavedOrderWithoutDuplicate() {
+        let presentations = EpisodeAction.presentations(
+            [.playNow, .markPlayed, .share],
+            for: Episode(guid: "rotor-default", title: "Default test", audioURL: "https://example.com/audio.mp3")
+        )
+        XCTAssertEqual(
+            ConfiguredRowDefault.remaining(presentations, promoted: .playNow).map(\.action),
+            [.markPlayed, .share]
+        )
+        XCTAssertEqual(
+            ConfiguredRowDefault.remaining(presentations, promoted: nil).map(\.action),
+            [.playNow, .markPlayed, .share]
+        )
+    }
+
     private func item(_ label: String) -> QuickActionItem {
         QuickActionItem(label: label, isDestructive: false) {}
     }

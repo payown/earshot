@@ -49,6 +49,26 @@ enum QuickActionsRotor {
     }
 }
 
+/// A row may promote only the first enabled action in Settings. A surface can
+/// omit that action (for example, an Inbox-only action outside Inbox); in that
+/// case its native activation remains the default instead of promoting a later
+/// rotor item. This reads the saved order and never rewrites it.
+enum ConfiguredRowDefault {
+    static func action<Action: Equatable>(
+        configured: [Action], applicable: [Action]
+    ) -> Action? {
+        guard let first = configured.first, applicable.first == first else { return nil }
+        return first
+    }
+
+    static func remaining<Action: Identifiable & Equatable>(
+        _ presentations: [DeferredActionPresentation<Action>], promoted: Action?
+    ) -> [DeferredActionPresentation<Action>] where Action.ID: Hashable {
+        guard let promoted else { return presentations }
+        return presentations.filter { $0.action != promoted }
+    }
+}
+
 /// Context menus do not share the OS rotor's reversed-emission behavior. They
 /// must receive the resolved actions in their original order so the visible
 /// menu exactly matches Settings and the row's default action (#761).

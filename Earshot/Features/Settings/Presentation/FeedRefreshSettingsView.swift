@@ -92,6 +92,7 @@ struct FeedRefreshSettingsView: View {
     @Environment(EntitlementStore.self) private var entitlements
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.modelContext) private var context
 
     @State private var failedPodcasts: [String: Podcast] = [:]
@@ -224,8 +225,14 @@ struct FeedRefreshSettingsView: View {
         if let podcast = failedPodcasts[failure.id] {
             let actions = podcastActions(for: podcast)
             let presentations = PodcastAction.presentations(actions, for: podcast)
+            let promoted = voiceOverEnabled ? ConfiguredRowDefault.action(
+                configured: quickActions.podcastActions, applicable: actions
+            ) : nil
             let performAction = { (action: PodcastAction) in perform(action, for: podcast) }
-            Button { selectedPodcast = podcast } label: {
+            Button {
+                if let promoted { performAction(promoted) }
+                else { selectedPodcast = podcast }
+            } label: {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text(podcast.displayName)
                         .font(.headline)
@@ -235,7 +242,14 @@ struct FeedRefreshSettingsView: View {
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(podcast.displayName). Refresh failed. \(failure.reason)")
-                .podcastActionsRotor(presentations, perform: performAction)
+                .podcastActionsRotor(
+                    ConfiguredRowDefault.remaining(presentations, promoted: promoted),
+                    supplementalActions: promoted == nil ? [] : [
+                        PodcastRowSupplementalAction(id: "openPodcastDetail", label: "Open podcast detail")
+                    ],
+                    perform: performAction,
+                    performSupplemental: { _ in selectedPodcast = podcast }
+                )
             }
             .podcastActionsContextMenu(presentations, perform: performAction)
         } else {
