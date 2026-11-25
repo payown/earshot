@@ -3795,12 +3795,11 @@ final class PlayerService {
                 $0.errorStatusCode == 404 || $0.errorStatusCode == 410
             } == true
             folderRuns.playbackFailed(episode, unavailable: unavailable)
-            // A normal remote stream can fail transiently while the player is
-            // still resolving or buffering it. Only surface a remote failure
-            // when it is the retry from a known-bad downloaded copy.
-            if mediaRecoveryAttemptedEpisodeID == episodeID {
-                surfacePlaybackFailure()
-            }
+            // This handler is entered only after AVPlayerItem has failed or
+            // reported failure to play to the end. Buffering and stalls have
+            // separate handlers. Surface terminal server/media failures even
+            // on the first remote attempt; they need no downloaded-copy retry.
+            surfacePlaybackFailure()
             return
         }
         guard mediaRecoveryAttemptedEpisodeID != episodeID else {

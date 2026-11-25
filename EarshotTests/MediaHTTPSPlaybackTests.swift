@@ -176,6 +176,30 @@ final class MediaHTTPSPlaybackTests: XCTestCase {
         XCTAssertEqual(player.currentMediaURLForTesting, secureURL)
         XCTAssertNil(player.pendingCleartextPlaybackWarning)
     }
+
+    func testTerminalRemoteConnectionFailureIsReported() async throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://feed.example/rss", title: "Show")
+        let episode = Episode(
+            guid: "denied", title: "Unavailable audio",
+            audioURL: "https://127.0.0.1:1/unavailable.mp3"
+        )
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try context.save()
+        let player = PlayerService()
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+
+        player.play(episode)
+        for _ in 0..<100 where player.playbackFailureMessage == nil {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNotNil(player.playbackFailureMessage)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertFalse(episode.isPlayed)
+    }
 }
 
 final class MediaHTTPSProbeTests: XCTestCase {
