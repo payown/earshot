@@ -373,6 +373,37 @@ final class QueueRepository {
         center.post(name: .earshotQueueDidChange, object: nil)
     }
 
+    /// Stage Queue removals for an explicit Mark as Played action in the caller's
+    /// transaction. Natural playback and Mark as Played and Next have their own
+    /// completion paths. A failed fetch throws before any membership is removed.
+    /// The caller saves its played edits and posts the Queue change only on success.
+    @discardableResult
+    func stageManualPlayedQueuePolicy(for episodes: [Episode]) throws -> Bool {
+        guard !episodes.isEmpty,
+              !AppSettingsStore(context: context).bool(
+                  SettingsKey.keepFinishedEpisodesInQueue, default: false
+              ) else { return false }
+        let ids = Set(episodes.map(\.persistentModelID))
+        let fetched = try catalogOrderedItems()
+        let removed = fetched.items.filter {
+            $0.episode.map { ids.contains($0.persistentModelID) } == true
+        }
+        guard !removed.isEmpty else { return fetched.removedOrphans }
+
+        var stagedMembership = false
+        for item in removed {
+            guard let episode = item.episode else { continue }
+            stagedMembership = PendingCloudQueueMutation.stageMembership(
+                episode: episode, isQueued: false, in: context
+            ) || stagedMembership
+            context.delete(item)
+        }
+        if stagedMembership { PendingCloudQueueMutation.stageOrdering(in: context) }
+        let removedIDs = Set(removed.map(\.persistentModelID))
+        _ = stageDensePositions(fetched.items.filter { !removedIDs.contains($0.persistentModelID) })
+        return true
+    }
+
     // MARK: Reads
 
     /// The queue in play order.

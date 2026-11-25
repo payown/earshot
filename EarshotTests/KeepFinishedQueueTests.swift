@@ -5,6 +5,76 @@ import AVFoundation
 
 @MainActor
 final class KeepFinishedQueueTests: XCTestCase {
+    func testMarkPlayedQuickActionFollowsRetentionWithoutChangingOtherQueueRows() throws {
+        for keep in [false, true] {
+            let (context, episodes) = fixture()
+            AppSettingsStore(context: context).setBool(keep, for: SettingsKey.keepFinishedEpisodesInQueue)
+            let target = episodes[1]
+            target.positionSeconds = 47
+            try context.save()
+            let otherID = episodes[2].queueItem?.persistentModelID
+            var focusSawQueuedUnplayedRow = false
+            let actions = buildEpisodeActions(
+                episode: target, order: [.markPlayed], player: PlayerService(),
+                downloads: DownloadManager(), context: context,
+                onShowNotes: {}, onShare: {}, onBookmarks: {},
+                onMarkPlayed: { nowPlayed in
+                    focusSawQueuedUnplayedRow = nowPlayed && !target.isPlayed
+                        && QueueRepository(context: context).queue().contains {
+                            $0.persistentModelID == target.persistentModelID
+                        }
+                }
+            )
+            XCTAssertEqual(actions.map(\.label), ["Mark as played"])
+            actions[0].run()
+            XCTAssertTrue(focusSawQueuedUnplayedRow)
+            XCTAssertTrue(target.isPlayed)
+            XCTAssertTrue(target.inboxDismissed)
+            XCTAssertEqual(target.positionSeconds, 47)
+            XCTAssertEqual(QueueRepository(context: context).queue().map(\.guid),
+                           keep ? ["0", "1", "2"] : ["0", "2"])
+            XCTAssertEqual(episodes[2].queueItem?.persistentModelID, otherID)
+            XCTAssertFalse(episodes[0].isPlayed)
+            XCTAssertFalse(context.hasChanges)
+            if !keep {
+                XCTAssertTrue(try PendingCloudQueueMutation.memberships(in: context)
+                    .contains { $0.guid == "1" && !$0.isQueued })
+            }
+        }
+    }
+
+    func testInboxMarkPlayedFollowsRetentionForQueuedEpisode() {
+        for keep in [false, true] {
+            let (context, episodes) = fixture()
+            AppSettingsStore(context: context).setBool(keep, for: SettingsKey.keepFinishedEpisodesInQueue)
+            InboxRepository(context: context).markPlayed(episodes[1])
+            XCTAssertTrue(episodes[1].isPlayed)
+            XCTAssertEqual(QueueRepository(context: context).queue().map(\.guid),
+                           keep ? ["0", "1", "2"] : ["0", "2"])
+        }
+    }
+
+    func testSelectedAndWholePodcastMarkPlayedFollowRetention() async {
+        for keep in [false, true] {
+            let (context, episodes) = fixture()
+            AppSettingsStore(context: context).setBool(keep, for: SettingsKey.keepFinishedEpisodesInQueue)
+            guard let podcast = episodes[0].podcast else { XCTFail("missing podcast"); return }
+            let repo = EpisodeRepository(context: context)
+            let selectedCount = await repo.markSelectedPlayed(
+                in: podcast, ids: [episodes[1].persistentModelID]
+            )
+            XCTAssertEqual(selectedCount, 1)
+            XCTAssertEqual(QueueRepository(context: context).queue().map(\.guid),
+                           keep ? ["0", "1", "2"] : ["0", "2"])
+            let remainingCount = await repo.markAllPlayed(in: podcast)
+            XCTAssertEqual(remainingCount, 2)
+            XCTAssertTrue(episodes.allSatisfy(\.isPlayed))
+            XCTAssertEqual(QueueRepository(context: context).queue().map(\.guid),
+                           keep ? ["0", "1", "2"] : [])
+            XCTAssertFalse(context.hasChanges)
+        }
+    }
+
     func testPreferenceDefaultsOffPersistsAndMirrors() {
         let context = TestStore.freshContext()
         let settings = SettingsStore()

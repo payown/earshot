@@ -711,11 +711,39 @@ final class EarshotUITests: XCTestCase {
         let toggle = app.switches["Keep finished episodes in Queue"].firstMatch
         for _ in 0..<6 where !toggle.isHittable { app.swipeUp() }
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(
+            format: "label CONTAINS %@", "On: a queued episode stays in Queue"
+        )).firstMatch.exists)
         XCTAssertEqual(toggle.value as? String, "0")
         toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         XCTAssertEqual(toggle.value as? String, "1")
         toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         XCTAssertEqual(toggle.value as? String, "0")
+    }
+
+    func testMarkAllPlayedFromPodcastRemovesQueuedEpisodesWhenRetentionIsOff() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launch()
+        let action = app.buttons["Mark all as played"].firstMatch
+        XCTAssertTrue(action.waitForExistence(timeout: 15), app.debugDescription)
+        action.tap()
+        let confirm = app.buttons["Mark All as Played"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        confirm.tap()
+
+        let queueTab = app.tabBars.buttons["Queue"].firstMatch
+        XCTAssertTrue(queueTab.waitForExistence(timeout: 5), app.debugDescription)
+        queueTab.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "Welcome to Our Perspective"
+        )).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "#166 – If You Used a Passkey"
+        )).firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "#165 – No Excuses Left"
+        )).firstMatch.exists)
     }
 
     func testPlaybackPositionAdjustmentSetting() {
