@@ -210,6 +210,18 @@ struct FolderRunUITestFeed: FeedFetching {
         })
     }
 }
+
+/// Keeps the actual manual refresh task active while a UI test navigates and
+/// invokes podcast actions. No network request or persistent store is involved.
+actor HeldRefreshUITestFeed: FeedFetching {
+    private var attempts = 0
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        attempts += 1
+        if attempts == 1 { try await Task.sleep(for: .seconds(35)) }
+        return ParsedFeed(title: "Held refresh", episodes: [])
+    }
+}
 /// The first retry fails and the next returns the already-known episode.
 /// Exercises the real retry controller, repository and persistence without a network.
 actor FeedRetryScreenshotFeed: FeedFetching {
