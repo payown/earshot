@@ -735,10 +735,57 @@ final class DownloadManager {
             liveTaskKeys: liveKeys
         )
         guard !orphaned.isEmpty else { return }
+        // A completed URLSession task can disappear from the live task list
+        // after its callback moved the audio but the event journal refused a
+        // write. Scan once off the main actor; failure to read the directory
+        // must not turn potentially recoverable audio into a failed row.
+        let recoveryNames: [String]
+        do {
+            recoveryNames = try await Task.detached(priority: .utility) {
+                let directory = try DownloadPaths.downloadsDirectory()
+                return try FileManager.default.contentsOfDirectory(
+                    at: directory, includingPropertiesForKeys: [.isRegularFileKey]
+                ).filter {
+                    (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                }.map(\.lastPathComponent)
+            }.value
+        } catch {
+            AppLog.networking.error("Could not inspect recoverable downloads: \(NetworkDiagnostic.reason(error), privacy: .public)")
+            return
+        }
+        guard !Task.isCancelled, self.context === context,
+              !RecoveryDownloadRemoval.isPending else { return }
         var failed = 0
         for index in orphaned {
             guard !markedDownloading[index].isDeleted,
                   markedDownloading[index].downloadStatus == .downloading else { continue }
+            let episode = markedDownloading[index]
+            if let attemptID = episode.downloadAttemptID,
+               let source = URL(string: episode.audioURL).map(SecureURL.preferredMediaHTTPS) {
+                let taskKey = DownloadTransferKey.key(
+                    identityKey: identities[index].composite,
+                    sourceURL: source, attemptID: attemptID
+                )
+                let candidates = DownloadPaths.recoverableFileNames(
+                    for: taskKey, among: recoveryNames
+                )
+                if candidates.count == 1 {
+                    do {
+                        try Self.complete(
+                            taskKey: taskKey, fileName: candidates[0], episode: episode,
+                            context: context, fetchLocalRows: LocalStateStore.episodeRowsThrowing,
+                            persist: { try $0.save() }
+                        )
+                        continue
+                    } catch {
+                        AppLog.networking.error("Download recovery will retry: \(NetworkDiagnostic.reason(error), privacy: .public)")
+                        continue
+                    }
+                }
+                // Multiple matching files have ambiguous ownership. Leave
+                // both the row and audio untouched for a later investigation.
+                if candidates.count > 1 { continue }
+            }
             // Also drops the ActiveDownload row: .failed is terminal, so the work
             // is over and reconciliation must not see it again.
             ActiveDownload.setDownloadStatus(.failed, on: markedDownloading[index], in: context)

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import CryptoKit
 
 /// Composite episode identifier `"feedURL|guid"` used wherever an episode must
 /// be re-found from a persisted string: a background download task's
@@ -160,12 +161,38 @@ enum DownloadPaths {
     /// Each completed transfer owns a distinct file. Existing stored names are
     /// still resolved normally, but new transfers never overwrite another
     /// episode or a newer attempt that happens to share its GUID.
-    static func uniqueDestination(inDirectory directory: URL, sourceURL: URL, id: UUID = UUID()) -> URL {
+    static func uniqueDestination(
+        inDirectory directory: URL, sourceURL: URL, taskKey: String? = nil, id: UUID = UUID()
+    ) -> URL {
         let candidate = sourceURL.pathExtension.lowercased()
         let safeExtension = !candidate.isEmpty && candidate.utf8.count <= 12
             && candidate.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) }
             ? candidate : "mp3"
-        return directory.appendingPathComponent(id.uuidString).appendingPathExtension(safeExtension)
+        // The journal can refuse a write after the temporary download has been
+        // moved. A digest of the exact transfer key lets a later process find
+        // that file without exposing the feed URL or claiming a newer attempt.
+        let name = taskKey.map { recoveryPrefix(for: $0) + id.uuidString } ?? id.uuidString
+        return directory.appendingPathComponent(name).appendingPathExtension(safeExtension)
+    }
+
+    static func recoveryPrefix(for taskKey: String) -> String {
+        // JSONEncoder's field order can differ between processes. Derive the
+        // fingerprint from decoded transfer fields, including the attempt,
+        // so relaunch computes the same name without trusting raw JSON bytes.
+        let identity: String
+        if let parsed = DownloadTransferKey.parse(taskKey) {
+            let parts = [parsed.identityKey, parsed.sourceURL, parsed.attemptID ?? ""]
+            identity = parts.map { "\($0.utf8.count):\($0)" }.joined()
+        } else {
+            identity = taskKey
+        }
+        let digest = SHA256.hash(data: Data(identity.utf8))
+        return "pending-" + digest.map { String(format: "%02x", $0) }.joined() + "-"
+    }
+
+    static func recoverableFileNames(for taskKey: String, among fileNames: [String]) -> [String] {
+        let prefix = recoveryPrefix(for: taskKey)
+        return fileNames.filter { $0.hasPrefix(prefix) }
     }
 
     /// Older releases could assign the same file to episodes from different

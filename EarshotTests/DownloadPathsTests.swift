@@ -21,6 +21,35 @@ final class DownloadPathsTests: XCTestCase {
         XCTAssertEqual(result.pathExtension, "mp3")
     }
 
+    func testRecoveryFileNameMatchesOnlyItsExactTransferAttempt() throws {
+        let source = try XCTUnwrap(URL(string: "https://h/audio.mp3"))
+        let current = DownloadTransferKey.key(
+            identityKey: "https://h/feed|episode", sourceURL: source, attemptID: "current-attempt"
+        )
+        let superseded = DownloadTransferKey.key(
+            identityKey: "https://h/feed|episode", sourceURL: source, attemptID: "older-attempt"
+        )
+        let file = DownloadPaths.uniqueDestination(
+            inDirectory: dir, sourceURL: source, taskKey: current,
+            id: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        ).lastPathComponent
+        XCTAssertTrue(file.hasPrefix("pending-"))
+        XCTAssertFalse(file.contains("audio"), "File names must not expose enclosure URLs")
+        XCTAssertEqual(DownloadPaths.recoverableFileNames(
+            for: current, among: [file, "legacy.mp3"]
+        ), [file])
+        XCTAssertTrue(DownloadPaths.recoverableFileNames(
+            for: superseded, among: [file]
+        ).isEmpty)
+
+        let reorderedJSON = """
+        {"attemptID":"current-attempt","sourceURL":"https://h/audio.mp3","identityKey":"https://h/feed|episode"}
+        """
+        let reordered = "earshot-download-v3:" + Data(reorderedJSON.utf8).base64EncodedString()
+        XCTAssertEqual(DownloadPaths.recoveryPrefix(for: current),
+                       DownloadPaths.recoveryPrefix(for: reordered))
+    }
+
     func testMalformedFileNamesCannotDeleteDownloadsDirectory() throws {
         let downloads = try DownloadPaths.downloadsDirectory()
         for name in ["/", ".", "..", "../outside"] {
