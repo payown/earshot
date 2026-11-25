@@ -15,6 +15,7 @@
 ## Worktrees, reviews, and protected scope
 
 - Target PRs to `main` (the SwiftUI trunk). Work only on feature branches in linked worktrees; never develop directly in `~/code/earshot`, which may contain Michael's uncommitted documentation.
+- Michael authorizes ordinary, non-force pushes of Earshot work branches to the verified `https://github.com/payown/earshot.git` origin for backup and review without asking before each push. Inspect the diff and destination for secrets, artifacts, and unrelated work first. If a remote branch is ahead or diverged, preserve it and use a distinct backup branch or reconcile without rewriting history. This standing permission does not authorize force pushes, direct pushes to `main` or another protected branch, merges, releases, or distribution changes; seek separate approval for those actions.
 - Assign PRs to `@payown`. Keep commits small and screen-reader-reviewable. Keep non-generated PR changes within 1,500 lines.
 - Do not touch issue #395 areas, `SettingsReset`, accessibility semantics, signing, entitlements, capabilities, or purchase UI without explicit sign-off.
 - For device signing, use command-line overrides only: `-allowProvisioningUpdates`, `DEVELOPMENT_TEAM=72PH974742`, and automatic signing. Never edit project signing settings.
