@@ -67,6 +67,16 @@ enum WatchFolderResolution {
     }
 }
 
+enum WatchSettingResolution {
+    static func boolean(_ raw: String) -> Bool? {
+        switch raw.lowercased() {
+        case "true", "1": true
+        case "false", "0": false
+        default: nil
+        }
+    }
+}
+
 /// Uses Earshot's existing compact projection schema in a separate watch store.
 /// The phone and watch never open one another's application store. Local watch
 /// edits remain in WatchPendingSyncEvent until projection storage accepts them.
@@ -483,11 +493,21 @@ final class WatchCloudSync {
         let rows = try context.fetch(FetchDescriptor<CloudSettingProjection>())
             .filter { $0.deletedAt == nil }
         for (key, contributions) in Dictionary(grouping: rows, by: \.key) {
-            guard let winner = contributions.max(by: { $0.modifiedAt < $1.modifiedAt }),
-                  let value = Int(winner.value) else { continue }
+            guard let winner = contributions.sorted(by: {
+                if $0.modifiedAt != $1.modifiedAt { return $0.modifiedAt > $1.modifiedAt }
+                if $0.sourceDeviceID != $1.sourceDeviceID { return $0.sourceDeviceID < $1.sourceDeviceID }
+                return $0.value < $1.value
+            }).first else { continue }
             switch key {
-            case "skip_back_seconds" where (5...60).contains(value): library.skipBackward = value
-            case "skip_forward_seconds" where (5...120).contains(value): library.skipForward = value
+            case "skip_back_seconds":
+                if let value = Int(winner.value), (5...60).contains(value) { library.skipBackward = value }
+            case "skip_forward_seconds":
+                if let value = Int(winner.value), (5...120).contains(value) { library.skipForward = value }
+            case "keep_finished_episodes_in_queue":
+                if let value = WatchSettingResolution.boolean(winner.value) {
+                    library.applyKeepFinishedQueueSetting(value, modifiedAt: winner.modifiedAt,
+                                                          sourceDeviceID: winner.sourceDeviceID)
+                }
             default: break
             }
         }
@@ -517,6 +537,11 @@ final class WatchCloudSync {
     }
 
     func insertForTesting(_ row: CloudEpisodeStateProjection) throws {
+        context.insert(row)
+        try context.save()
+    }
+
+    func insertForTesting(_ row: CloudSettingProjection) throws {
         context.insert(row)
         try context.save()
     }

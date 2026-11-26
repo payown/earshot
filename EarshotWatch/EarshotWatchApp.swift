@@ -592,7 +592,7 @@ struct WatchPlayableEpisodeRow: View {
             else { runtime.downloads.delete(episode); afterRemoval?() }
         case "markPlayed":
             runtime.library.markPlayed(episode, played: !episode.isPlayed)
-            if context == .inbox { afterRemoval?() }
+            if context == .inbox || (context == .queue && episode.queuePosition == nil) { afterRemoval?() }
         case "removeFromInbox":
             runtime.library.dismissFromInbox(episode)
             afterRemoval?()

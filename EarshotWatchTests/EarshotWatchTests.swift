@@ -4,6 +4,25 @@ import WatchConnectivity
 @testable import EarshotWatch
 
 final class EarshotWatchTests: XCTestCase {
+    func testAutoAdvanceSkipsRetainedPlayedRowsAndNeverRestartsCurrent() {
+        func item(_ guid: String, played: Bool) -> WatchEpisode {
+            let episode = WatchEpisode(feedURL: "https://example.com/feed", guid: guid,
+                title: guid, podcastTitle: "Show", audioURL: "https://example.com/\(guid).mp3")
+            episode.isPlayed = played
+            return episode
+        }
+        let earlierPlayed = item("earlier", played: true)
+        let current = item("current", played: false)
+        let laterPlayed = item("later-played", played: true)
+        let next = item("next", played: false)
+        XCTAssertEqual(WatchQueueAutoAdvance.next(in: [earlierPlayed, current, laterPlayed, next],
+                                                   after: current.identity)?.identity, next.identity)
+        XCTAssertNil(WatchQueueAutoAdvance.next(in: [earlierPlayed, current, laterPlayed],
+                                                after: current.identity))
+        // Explicitly requeued Played rows remain visible; they are not automatic candidates.
+        XCTAssertNil(WatchQueueAutoAdvance.next(in: [current, laterPlayed], after: current.identity))
+    }
+
     func testHomePhoneSummaryDistinguishesLiveSavedAndUnreachablePositions() {
         XCTAssertEqual(WatchHomePlaybackSummary.phoneValue(position: 0, playing: false,
             usesSavedCheckpoint: true, isLive: false),

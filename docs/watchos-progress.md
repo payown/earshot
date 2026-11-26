@@ -1,5 +1,31 @@
 # Earshot Watch implementation progress
 
+## Watch-local Queue parity candidate, 2026-11-26
+
+Earshot 1.3.1 (333) is the current signed TestFlight baseline for Internal
+Testing and Public Testers, source `c786aa17`. The separate
+`fix/watch-local-keep-finished-20261126` branch builds on that exact source;
+its Watch Queue change is **not in build 333** and has not been uploaded or
+submitted for App Store review. Earlier dated build notes below are historical.
+
+The watch now imports the phone's mirrored Boolean “Keep finished episodes in
+Queue” value by revision and keeps the last known value for offline use; absent
+setting defaults to off. Watch-local manual Played and natural completion stage
+Played and any Queue removal together. With retention on, the Queue entry stays;
+automatic advancement skips retained Played entries and the current episode.
+Existing queue membership clocks let a later explicit phone requeue or removal
+win after reconnect. The deliberately disabled immediate paired Queue snapshot
+path remains disabled.
+
+Disposable simulator checks: full Watch scheme 62 unit + 8 UI passed; iPhone
+Queue/paired-projection regressions 85 passed; a newly paired iPhone/Watch
+simulator passed Watch home and Queue navigation smoke checks. These checks do
+not establish physical CloudKit delivery, offline reconnect timing, playback
+audio, or VoiceOver focus after the Up Next row disappears. Michael should test
+both setting values on a paired iPhone and Watch, including an offline Watch
+completion, later phone requeue, and focus after a Queue row is removed. No
+library reset is needed.
+
 Build **1.2.6 (316)** is now available to the authorized Internal Testing
 Group with Chapter 121 notes. See [the distribution record](testflight/build-316-internal.md)
 for signed IPA, CI, group and remaining device-acceptance evidence. The dated
