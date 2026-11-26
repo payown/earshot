@@ -60,6 +60,14 @@ enum ScreenshotHarness {
         case .queue:
             selectTab(.queue)
         case .library:
+            if CommandLine.arguments.contains("-personalAudioRowTest") {
+                context.insert(PersonalAudioItem(
+                    title: "Field recording", originalFilename: "field.caf",
+                    mediaFilename: "missing-test-media.caf", typeIdentifier: "public.audio",
+                    byteSize: 1, contentHash: "personal-audio-row-test"
+                ))
+                try? context.save()
+            }
             if isFolderRunTest {
                 let folder = FolderRepository(context: context).createFolder(name: "Backlog test")
                 let podcast = Podcast(feedURL: "https://folder.test/feed", title: "Folder test show")

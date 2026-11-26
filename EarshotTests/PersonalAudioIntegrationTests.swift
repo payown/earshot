@@ -162,6 +162,73 @@ final class PersonalAudioIntegrationTests: XCTestCase {
         XCTAssertEqual(QuickActionsRotor.declarationOrder(played).map(\.id), ["delete", "markUnplayed", "playNow"])
     }
 
+    func testSelectedAudioFilesImportInOrderAndOneFailureKeepsSuccessfulFiles() async throws {
+        let first = try makePlayableAudioFile(name: "first.caf", durationSeconds: 1)
+        let broken = sourceDirectory.appending(path: "broken.caf")
+        try Data("not audio".utf8).write(to: broken)
+        let last = try makePlayableAudioFile(name: "last.caf", durationSeconds: 2)
+        let container = try ModelContainerFactory.makeInMemory()
+        let storage = PersonalAudioStorage(rootURL: root.appending(path: "PersonalAudio"))
+        let importer = PersonalAudioImporter(storage: storage)
+        var batch = PersonalAudioImportBatch(urls: [first, broken, last])
+
+        while let url = batch.nextURL() {
+            switch await importer.addToEarshot(fileURL: url, container: container) {
+            case .added(let id): batch.recordAdded(id)
+            case .failed(let failure):
+                XCTAssertEqual(url, broken)
+                XCTAssertNotEqual(failure, .cancelled)
+                batch.recordFailure(filename: url.lastPathComponent, message: "Couldn’t add audio")
+            case .duplicateNeedsConfirmation:
+                XCTFail("Distinct test files must not prompt as duplicates")
+            }
+        }
+
+        XCTAssertEqual(batch.currentNumber, 3)
+        XCTAssertEqual(batch.addedIDs.count, 2)
+        XCTAssertEqual(batch.failures.map(\.filename), ["broken.caf"])
+        XCTAssertTrue(batch.failureSummary?.contains("Added 2 of 3 audio files") == true)
+        let items = try ModelContext(container).fetch(FetchDescriptor<PersonalAudioItem>())
+        XCTAssertEqual(Set(items.map(\.title)), ["first", "last"])
+        for item in items {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: storage.resolve(item.mediaFilename)!.path))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: broken.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: last.path))
+    }
+
+    func testBatchSingleSelectionAndSkippedDuplicatePreserveCursor() {
+        let one = sourceDirectory.appending(path: "one.caf")
+        let duplicate = sourceDirectory.appending(path: "duplicate.caf")
+        let last = sourceDirectory.appending(path: "last.caf")
+        var single = PersonalAudioImportBatch(urls: [one])
+        XCTAssertEqual(single.nextURL(), one)
+        single.recordAdded("one")
+        XCTAssertNil(single.nextURL())
+        XCTAssertNil(single.failureSummary)
+
+        var batch = PersonalAudioImportBatch(urls: [one, duplicate, last])
+        XCTAssertEqual(batch.nextURL(), one)
+        batch.recordAdded("one")
+        XCTAssertEqual(batch.nextURL(), duplicate)
+        batch.recordSkipped()
+        XCTAssertEqual(batch.nextURL(), last)
+        batch.recordAdded("last")
+        XCTAssertNil(batch.nextURL())
+        XCTAssertEqual(batch.addedIDs, ["one", "last"])
+        XCTAssertEqual(batch.skippedCount, 1)
+
+        var cancelled = PersonalAudioImportBatch(urls: [one, duplicate, last])
+        XCTAssertEqual(cancelled.nextURL(), one)
+        cancelled.recordAdded("one")
+        XCTAssertEqual(cancelled.nextURL(), duplicate)
+        cancelled.cancel()
+        cancelled.recordSkipped()
+        XCTAssertNil(cancelled.nextURL(), "Cancel Import must leave prior additions but stop the remaining selection")
+        XCTAssertEqual(cancelled.addedIDs, ["one"])
+    }
+
     func testPersonalAudioChapterServiceReadsMP3AndM4AEmbeddedChapters() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         let storage = PersonalAudioStorage(rootURL: root.appending(path: "PersonalAudio"))
