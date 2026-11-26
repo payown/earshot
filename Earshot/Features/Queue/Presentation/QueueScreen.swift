@@ -78,6 +78,7 @@ struct QueueScreen: View {
     @State private var exportTranscriptEpisode: Episode?
     @State private var folderPickRequest: FolderPickRequest?
     @State private var pendingUnfollow: Podcast?
+    @State private var unfollowFeedbackState = UnfollowFeedbackState()
     @State private var selectedDetailEpisode: Episode?
     @State private var compactDetailEpisode: Episode?
     @State private var isWide = false
@@ -270,17 +271,42 @@ struct QueueScreen: View {
                 ), titleVisibility: .visible, presenting: pendingUnfollow
             ) { podcast in
                 Button("Unfollow", role: .destructive) {
+                    guard unfollowFeedbackState.begin(podcast) else { return }
+                    let targetID = podcast.persistentModelID
+                    let focusedWasRemoved = items.contains {
+                        $0.episode?.persistentModelID == focusedEpisode
+                            && $0.episode?.podcast?.persistentModelID == targetID
+                    }
+                    let originallyFocusedID = focusedEpisode
                     Task {
+                        await UnfollowFeedbackState.holdForUITestIfRequested()
                         let title = podcast.displayName
                         let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(podcast)
                         pendingUnfollow = nil
-                        if removed { Announcer.announce("Unfollowed \(title)") }
+                        unfollowFeedbackState.finish(succeeded: removed)
+                        if removed {
+                            if focusedWasRemoved {
+                                DispatchQueue.main.async {
+                                    // Do not take focus back from a surviving row
+                                    // the listener reached during removal.
+                                    guard focusedEpisode == originallyFocusedID
+                                        || focusedEpisode == nil else { return }
+                                    let survivingID = items.compactMap(\.episode).first {
+                                        $0.podcast?.persistentModelID != targetID
+                                    }?.persistentModelID
+                                    if let survivingID { focusedEpisode = survivingID }
+                                    else { focusLaunchHeading = true }
+                                }
+                            }
+                            Announcer.announce("Unfollowed \(title)")
+                        }
                     }
                 }
                 Button("Cancel", role: .cancel) { pendingUnfollow = nil }
             } message: { podcast in
                 Text("This removes \(podcast.displayName) and its episodes from your library. This can't be undone.")
             }
+            .unfollowFeedback($unfollowFeedbackState)
             .episodeDetailSheet($compactDetailEpisode)
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
             .receive(on: DispatchQueue.main)) { note in

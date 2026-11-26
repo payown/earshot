@@ -48,6 +48,7 @@ struct EpisodeListView: View {
     // still confirms, and the screen pops after the delete since its podcast is
     // gone. Wording matches InboxScreen / SubscriptionsView.
     @State private var pendingUnfollow: Podcast?
+    @State private var unfollowFeedbackState = UnfollowFeedbackState()
     // "Mark all as played" confirmation gate (#640). Shared by the toolbar
     // button and the screen-level rotor action so both entry points drive the
     // exact same confirm-then-execute flow instead of duplicating it.
@@ -567,6 +568,7 @@ struct EpisodeListView: View {
         } message: { podcast in
             Text("This removes \(podcast.displayName) and its episodes from your library. This can't be undone.")
         }
+        .unfollowFeedback($unfollowFeedbackState)
         // Confirmation for the bulk "Mark all as played" action (#640),
         // reached from either the toolbar button or the rotor action above.
         // Destructive role + plain-text buttons (no icon) match the
@@ -880,10 +882,13 @@ struct EpisodeListView: View {
     /// announce and pop only on `true`; this screen's subject no longer exists,
     /// so it dismisses back to the list it was pushed from.
     private func unfollow(_ podcast: Podcast) {
+        guard unfollowFeedbackState.begin(podcast) else { return }
         Task {
+            await UnfollowFeedbackState.holdForUITestIfRequested()
             let title = podcast.displayName
             let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(podcast)
             pendingUnfollow = nil
+            unfollowFeedbackState.finish(succeeded: removed)
             guard removed else { return }
             Announcer.announce("Unfollowed \(title)")
             dismiss()

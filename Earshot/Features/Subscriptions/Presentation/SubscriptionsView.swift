@@ -95,6 +95,7 @@ struct SubscriptionsView: View {
     @State private var sharingPodcast: Podcast?
     @State private var fullDescription: PodcastDescriptionPresentation?
     @State private var pendingUnsubscribe: Podcast?
+    @State private var unfollowFeedbackState = UnfollowFeedbackState()
     @State private var quickActionEditor: PodcastQuickActionEditor?
     // The pending "Add to folder" / "Move to folder" podcast Quick Action target
     // (#756). Non-nil presents the shared `FolderPickerView` for the single podcast.
@@ -387,6 +388,7 @@ struct SubscriptionsView: View {
         } message: { podcast in
             Text("This removes \(podcast.displayName) and its episodes. This can't be undone.")
         }
+        .unfollowFeedback($unfollowFeedbackState)
         .task {
             sharedRefreshInProgress = BackgroundFeedRefresher.isRefreshInProgress
         }
@@ -842,14 +844,29 @@ struct SubscriptionsView: View {
     }
 
     private func unsubscribe(_ podcast: Podcast) {
+        guard unfollowFeedbackState.begin(podcast) else { return }
+        let previousIDs = visiblePodcasts.map(\.persistentModelID)
+        let wasFocused = focusedRowID == podcast.persistentModelID
         Task {
+            await UnfollowFeedbackState.holdForUITestIfRequested()
             let title = podcast.displayName
             let id = podcast.persistentModelID
             // Centralized unsubscribe (removeFromAllFolders + delete + save). The repo
             // logs failures; announce only on a successful delete (#499/#500).
-            if await SubscriptionRepository(context: context).unsubscribeInBackground(podcast) {
+            let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(podcast)
+            unfollowFeedbackState.finish(succeeded: removed)
+            if removed {
                 podcasts.removeAll { $0.persistentModelID == id }
                 if selectedPodcast?.persistentModelID == id { selectedPodcast = nil }
+                // Leave a surviving row alone if VoiceOver moved there while
+                // the background removal was pending.
+                if wasFocused && (focusedRowID == id || focusedRowID == nil) {
+                    let remaining = visiblePodcasts.map(\.persistentModelID)
+                    focusedRowID = LibraryPodcastFilter.replacementFocus(
+                        removed: id, previous: previousIDs, remaining: remaining
+                    )
+                    if remaining.isEmpty { focusLaunchHeading = true }
+                }
                 Announcer.announce("Unfollowed \(title)")
             }
         }

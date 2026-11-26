@@ -83,6 +83,7 @@ struct InboxScreen: View {
     // Mirrors the Library unfollow flow (`SubscriptionsView.pendingUnsubscribe`)
     // so the UX is identical.
     @State private var pendingUnfollow: Podcast?
+    @State private var unfollowFeedbackState = UnfollowFeedbackState()
     @State private var pendingUnfollowEpisodeID: PersistentIdentifier?
     @State private var unfollowedEpisodeIDs: Set<PersistentIdentifier> = []
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
@@ -553,6 +554,7 @@ struct InboxScreen: View {
         } message: { podcast in
             Text("This removes \(podcast.displayName) and its episodes from your library. This can't be undone.")
         }
+        .unfollowFeedback($unfollowFeedbackState)
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .episodeDetailSheet($compactDetailEpisode)
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
@@ -862,6 +864,7 @@ struct InboxScreen: View {
     /// if that empties the inbox the focused row is gone, so
     /// move VoiceOver focus to the empty state (mirrors `clearInbox`).
     private func unfollow(_ podcast: Podcast) {
+        guard unfollowFeedbackState.begin(podcast) else { return }
         let title = podcast.displayName
         let snapshot = currentCandidateSnapshot
         let candidateIDs = Set(snapshot.map(\.persistentModelID))
@@ -869,6 +872,7 @@ struct InboxScreen: View {
             .map(\.persistentModelID)
         let anchor = focusedEpisode ?? pendingUnfollowEpisodeID
         Task {
+            await UnfollowFeedbackState.holdForUITestIfRequested()
             var removedIDs: Set<PersistentIdentifier> = []
             let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(
                 podcast,
@@ -897,6 +901,7 @@ struct InboxScreen: View {
             }
             pendingUnfollow = nil
             pendingUnfollowEpisodeID = nil
+            unfollowFeedbackState.finish(succeeded: removed)
             guard removed else {
                 unfollowedEpisodeIDs.subtract(removedIDs)
                 currentCandidateSnapshot = snapshot

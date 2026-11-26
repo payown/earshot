@@ -30,7 +30,7 @@ struct PodcastSettingsView: View {
     @State private var confirmingUnfollow = false
     @State private var unfollowName = ""
     @State private var didUnfollow = false
-    @State private var unfollowFailed = false
+    @State private var unfollowFeedbackState = UnfollowFeedbackState()
     @State private var nameFeedback: String?
     @AccessibilityFocusState private var nameButtonFocused: Bool
     @State private var authRequestToken = 0
@@ -186,11 +186,7 @@ struct PodcastSettingsView: View {
             } message: {
                 Text("This removes \(unfollowName) and its episodes from your library. This can't be undone.")
             }
-            .alert("Couldn't unfollow podcast", isPresented: $unfollowFailed) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Your changes couldn't be saved. Please try again.")
-            }
+            .unfollowFeedback($unfollowFeedbackState)
             .navigationTitle("Podcast Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -221,16 +217,20 @@ struct PodcastSettingsView: View {
     }
 
     private func unfollow() {
+        guard unfollowFeedbackState.begin(podcast) else { return }
         Task {
+            await UnfollowFeedbackState.holdForUITestIfRequested()
             guard !podcast.isDeleted else {
+                unfollowFeedbackState.finish(succeeded: true)
                 didUnfollow = true
                 dismiss()
                 return
             }
             didUnfollow = true
-            guard await SubscriptionRepository(context: modelContext).unsubscribeInBackground(podcast) else {
+            let removed = await SubscriptionRepository(context: modelContext).unsubscribeInBackground(podcast)
+            unfollowFeedbackState.finish(succeeded: removed)
+            guard removed else {
                 didUnfollow = false
-                unfollowFailed = true
                 return
             }
             // Stop reading the deleted model while the sheet dismisses. The

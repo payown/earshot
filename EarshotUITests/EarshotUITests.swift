@@ -1387,6 +1387,29 @@ final class EarshotUITests: XCTestCase {
         verifyPodcastSettingsUnfollow(largeText: false)
     }
 
+    func testLibraryUnfollowShowsPendingFeedbackAndRemovesConfirmedShow() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library",
+                               "-uiTestHoldUnfollowFeedback"]
+        app.launch()
+        let show = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Our Perspective"
+        )).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 15), app.debugDescription)
+        show.swipeLeft()
+        let unfollow = app.buttons["Unfollow"].firstMatch
+        XCTAssertTrue(unfollow.waitForExistence(timeout: 5), app.debugDescription)
+        unfollow.tap()
+        XCTAssertTrue(app.staticTexts["Unfollow Our Perspective?"].waitForExistence(timeout: 5))
+        app.buttons["Unfollow"].firstMatch.tap()
+        let pending = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Unfollowing Our Perspective"
+        )).firstMatch
+        XCTAssertTrue(pending.waitForExistence(timeout: 2),
+                      "Confirmed Unfollow needs visible progress before its durable save")
+        XCTAssertTrue(show.waitForNonExistence(timeout: 10))
+    }
+
     func testLargeLibraryPodcastActionsAndSettingsRemainReachableDuringHeldRefresh() {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -1528,7 +1551,8 @@ final class EarshotUITests: XCTestCase {
 
     private func verifyPodcastSettingsUnfollow(largeText: Bool) {
         let app = XCUIApplication()
-        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList"]
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "episodeList",
+                               "-uiTestHoldUnfollowFeedback"]
         if largeText {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         }
@@ -1555,6 +1579,10 @@ final class EarshotUITests: XCTestCase {
         unfollow.tap()
         XCTAssertTrue(cancel.waitForExistence(timeout: 5))
         app.alerts.buttons["Unfollow"].firstMatch.tap()
+        let pending = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Unfollowing "
+        )).firstMatch
+        XCTAssertTrue(pending.waitForExistence(timeout: 2))
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
         // Library may be exposed underneath the dismissing sheet before its
         // transition completes. Wait for both outgoing surfaces to disappear.
