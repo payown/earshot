@@ -177,6 +177,9 @@ final class WatchLibrary {
     private(set) var isPlus = false
     private var entitlementTask: Task<Void, Never>?
     private(set) var episodeActionOrder = ["playNow", "addToQueueBottom", "addToQueueTop", "download", "markPlayed"]
+    private(set) var keepFinishedEpisodesInQueue = false
+    private var keepFinishedQueueSettingDate = Date.distantPast
+    private var keepFinishedQueueSettingSource = ""
     var isApplyingCloud = false
     var onLocalChange: (() -> Void)?
     var onQueueChange: (() -> Void)?
@@ -215,6 +218,9 @@ final class WatchLibrary {
         let savedForward = UserDefaults.standard.integer(forKey: "watchSkipForward")
         if savedBack >= 5 { skipBackward = savedBack }
         if savedForward >= 5 { skipForward = savedForward }
+        keepFinishedEpisodesInQueue = UserDefaults.standard.bool(forKey: "watchKeepFinishedEpisodesInQueue")
+        keepFinishedQueueSettingDate = UserDefaults.standard.object(forKey: "watchKeepFinishedQueueSettingDate") as? Date ?? .distantPast
+        keepFinishedQueueSettingSource = UserDefaults.standard.string(forKey: "watchKeepFinishedQueueSettingSource") ?? ""
         if let order = UserDefaults.standard.stringArray(forKey: "watchEpisodeActionOrder"), !order.isEmpty {
             episodeActionOrder = order
         }
@@ -447,8 +453,47 @@ final class WatchLibrary {
         episode.playedUpdatedAt = episode.updatedAt
         episode.inboxDismissedUpdatedAt = episode.updatedAt
         stageEpisode(episode)
+        let removedFromQueue = played && episode.queuePosition != nil && !keepFinishedEpisodesInQueue
+        if removedFromQueue { stageQueueRemoval(episode, at: episode.updatedAt) }
         persist()
+        if removedFromQueue { onQueueChange?() }
         announceAfterCollapse(played ? "Marked \(episode.title) played" : "Marked \(episode.title) unplayed")
+    }
+
+    /// Natural completion keeps the final position and stages Played plus any
+    /// Queue removal in the same durable local save for offline reconciliation.
+    func finishPlayback(_ episode: WatchEpisode, at position: Double) {
+        let now = Date.now
+        episode.positionSeconds = max(0, position)
+        episode.positionUpdatedAt = now
+        episode.isPlayed = true
+        episode.inboxDismissed = true
+        episode.updatedAt = now
+        episode.playedUpdatedAt = now
+        episode.inboxDismissedUpdatedAt = now
+        stageEpisode(episode)
+        let removedFromQueue = episode.queuePosition != nil && !keepFinishedEpisodesInQueue
+        if removedFromQueue { stageQueueRemoval(episode, at: now) }
+        persist()
+        if removedFromQueue { onQueueChange?() }
+    }
+
+    /// Only the phone exposes this setting. A cached winning revision remains
+    /// usable while the watch is offline; older deliveries cannot undo it.
+    func applyKeepFinishedQueueSetting(_ value: Bool, modifiedAt: Date, sourceDeviceID: String) {
+        let newer = modifiedAt > keepFinishedQueueSettingDate
+            || (modifiedAt == keepFinishedQueueSettingDate
+                && (keepFinishedQueueSettingSource.isEmpty
+                    || sourceDeviceID < keepFinishedQueueSettingSource
+                    || (sourceDeviceID == keepFinishedQueueSettingSource
+                        && !value && keepFinishedEpisodesInQueue)))
+        guard newer else { return }
+        keepFinishedEpisodesInQueue = value
+        keepFinishedQueueSettingDate = modifiedAt
+        keepFinishedQueueSettingSource = sourceDeviceID
+        UserDefaults.standard.set(value, forKey: "watchKeepFinishedEpisodesInQueue")
+        UserDefaults.standard.set(modifiedAt, forKey: "watchKeepFinishedQueueSettingDate")
+        UserDefaults.standard.set(sourceDeviceID, forKey: "watchKeepFinishedQueueSettingSource")
     }
 
     func dismissFromInbox(_ episode: WatchEpisode) {
@@ -474,17 +519,21 @@ final class WatchLibrary {
     }
 
     func removeFromQueue(_ episode: WatchEpisode, announce: Bool = true) {
-        episode.queuePosition = nil
-        episode.queueMembershipUpdatedAt = .now
-        stageQueue(episode)
-        for (index, item) in queue.enumerated() {
-            item.queuePosition = index
-            item.queueOrderUpdatedAt = .now
-            stageQueue(item)
-        }
+        stageQueueRemoval(episode, at: .now)
         persist()
         onQueueChange?()
         if announce { announceAfterCollapse("Removed \(episode.title) from Queue") }
+    }
+
+    private func stageQueueRemoval(_ episode: WatchEpisode, at now: Date) {
+        episode.queuePosition = nil
+        episode.queueMembershipUpdatedAt = now
+        stageQueue(episode)
+        for (index, item) in queue.enumerated() {
+            item.queuePosition = index
+            item.queueOrderUpdatedAt = now
+            stageQueue(item)
+        }
     }
 
     func moveQueue(_ episode: WatchEpisode, offset: Int) {

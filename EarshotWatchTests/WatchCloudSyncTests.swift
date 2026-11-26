@@ -4,6 +4,182 @@ import SwiftData
 
 @MainActor
 final class WatchCloudSyncTests: XCTestCase {
+    private let queueSettingDefaults = [
+        "watchKeepFinishedEpisodesInQueue",
+        "watchKeepFinishedQueueSettingDate",
+        "watchKeepFinishedQueueSettingSource"
+    ]
+
+    private func withCleanQueueSetting(_ body: () throws -> Void) rethrows {
+        let defaults = UserDefaults.standard
+        let previous = queueSettingDefaults.map { defaults.object(forKey: $0) }
+        queueSettingDefaults.forEach(defaults.removeObject(forKey:))
+        defer {
+            for (key, value) in zip(queueSettingDefaults, previous) {
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        try body()
+    }
+
+    func testKeepFinishedQueueBooleanImportsAndKeepsNewestOfflineValue() throws {
+        try withCleanQueueSetting {
+            let library = try WatchLibrary(inMemory: true)
+            XCTAssertFalse(library.keepFinishedEpisodesInQueue)
+            let cloud = try WatchCloudSync(library: library, inMemory: true)
+            let enabled = CloudSettingProjection()
+            enabled.key = "keep_finished_episodes_in_queue"
+            enabled.value = "true"
+            enabled.sourceDeviceID = "phone-A"
+            enabled.modifiedAt = Date(timeIntervalSince1970: 200)
+            try cloud.insertForTesting(enabled)
+            cloud.reconcile()
+            XCTAssertTrue(library.keepFinishedEpisodesInQueue)
+            XCTAssertTrue(try WatchLibrary(inMemory: true).keepFinishedEpisodesInQueue,
+                          "The last synced phone value must survive offline relaunch")
+
+            let delayed = CloudSettingProjection()
+            delayed.key = enabled.key
+            delayed.value = "false"
+            delayed.sourceDeviceID = "phone-B"
+            delayed.modifiedAt = Date(timeIntervalSince1970: 100)
+            try cloud.insertForTesting(delayed)
+            cloud.reconcile()
+            XCTAssertTrue(library.keepFinishedEpisodesInQueue)
+
+            enabled.value = "false"
+            enabled.modifiedAt = Date(timeIntervalSince1970: 300)
+            cloud.reconcile()
+            XCTAssertFalse(library.keepFinishedEpisodesInQueue)
+            XCTAssertFalse(try WatchLibrary(inMemory: true).keepFinishedEpisodesInQueue)
+        }
+    }
+
+    func testBooleanParserRejectsUnknownSettingsWithoutChangingOtherPreferences() {
+        XCTAssertEqual(WatchSettingResolution.boolean("true"), true)
+        XCTAssertEqual(WatchSettingResolution.boolean("false"), false)
+        XCTAssertEqual(WatchSettingResolution.boolean("1"), true)
+        XCTAssertEqual(WatchSettingResolution.boolean("0"), false)
+        XCTAssertNil(WatchSettingResolution.boolean("maybe"))
+    }
+
+    func testManualPlayedQueueRetentionStagesPlayedAndMembershipTogether() throws {
+        try withCleanQueueSetting {
+            let library = try WatchLibrary(inMemory: true)
+            let episode = makeEpisode()
+            library.context.insert(episode)
+            library.persist()
+            library.enqueue(episode, next: false)
+            library.markPlayed(episode, played: true)
+            XCTAssertTrue(episode.isPlayed)
+            XCTAssertNil(episode.queuePosition)
+            let events = try library.context.fetch(FetchDescriptor<WatchPendingSyncEvent>())
+            XCTAssertTrue(events.contains { $0.kind == "episode" })
+            let removal = try XCTUnwrap(events.first { $0.kind == "queue" })
+            XCTAssertFalse(try JSONDecoder().decode(WatchSyncPayload.self, from: removal.payload).isQueued)
+
+            library.markPlayed(episode, played: false)
+            XCTAssertFalse(episode.isPlayed)
+            XCTAssertNil(episode.queuePosition, "Mark Unplayed must not silently requeue")
+
+            library.applyKeepFinishedQueueSetting(true, modifiedAt: .now, sourceDeviceID: "phone")
+            library.enqueue(episode, next: false)
+            library.markPlayed(episode, played: true)
+            XCTAssertTrue(episode.isPlayed)
+            XCTAssertEqual(episode.queuePosition, 0)
+            let retained = try library.context.fetch(FetchDescriptor<WatchPendingSyncEvent>())
+            XCTAssertTrue(try JSONDecoder().decode(WatchSyncPayload.self,
+                from: XCTUnwrap(retained.first { $0.kind == "queue" }).payload).isQueued)
+        }
+    }
+
+    func testNaturalCompletionUsesLastKnownPreferenceAndKeepsFinalPosition() throws {
+        try withCleanQueueSetting {
+            let library = try WatchLibrary(inMemory: true)
+            let episode = makeEpisode()
+            library.context.insert(episode)
+            library.persist()
+            library.enqueue(episode, next: false)
+            library.finishPlayback(episode, at: 125)
+            XCTAssertTrue(episode.isPlayed)
+            XCTAssertEqual(episode.positionSeconds, 125)
+            XCTAssertNil(episode.queuePosition)
+
+            library.markPlayed(episode, played: false)
+            library.applyKeepFinishedQueueSetting(true, modifiedAt: .now, sourceDeviceID: "phone")
+            library.enqueue(episode, next: false)
+            library.finishPlayback(episode, at: 180)
+            XCTAssertTrue(episode.isPlayed)
+            XCTAssertEqual(episode.positionSeconds, 180)
+            XCTAssertEqual(episode.queuePosition, 0)
+        }
+    }
+
+    func testOfflinePlayedRemovalCannotOutvoteLaterPhoneRequeueOrRemoval() throws {
+        try withCleanQueueSetting {
+            let library = try WatchLibrary(inMemory: true)
+            let episode = makeEpisode()
+            library.context.insert(episode)
+            library.persist()
+            library.enqueue(episode, next: false)
+            library.markPlayed(episode, played: true)
+            XCTAssertNil(episode.queuePosition)
+
+            let cloud = try WatchCloudSync(library: library, inMemory: true)
+            cloud.reconcile() // flush the durable offline removal first
+            XCTAssertNil(episode.queuePosition)
+
+            let newerPhone = CloudQueueItemProjection()
+            newerPhone.feedURL = episode.feedURL
+            newerPhone.episodeGUID = episode.guid
+            newerPhone.sourceDeviceID = "phone"
+            newerPhone.isQueued = true
+            newerPhone.position = 0
+            newerPhone.membershipUpdatedAt = Date.now.addingTimeInterval(60)
+            newerPhone.modifiedAt = newerPhone.membershipUpdatedAt
+            try cloud.insertForTesting(newerPhone)
+            cloud.reconcile()
+            XCTAssertEqual(library.queue.map(\.identity), [episode.identity],
+                           "A later explicit phone requeue must win without clearing Played")
+            XCTAssertTrue(episode.isPlayed)
+            cloud.reconcile()
+            XCTAssertEqual(library.queue.count, 1, "Repeated import must not duplicate the entry")
+
+            newerPhone.isQueued = false
+            newerPhone.membershipUpdatedAt = newerPhone.membershipUpdatedAt.addingTimeInterval(60)
+            newerPhone.modifiedAt = newerPhone.membershipUpdatedAt
+            cloud.reconcile()
+            XCTAssertTrue(library.queue.isEmpty, "A still newer phone removal must win")
+            XCTAssertTrue(episode.isPlayed)
+        }
+    }
+
+    func testOfflinePlayedRemovalAndOutboxSurviveWatchRelaunch() throws {
+        try withCleanQueueSetting {
+            let directory = FileManager.default.temporaryDirectory
+                .appending(path: "watch-played-queue-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = directory.appending(path: "WatchLocal.store")
+            do {
+                let library = try WatchLibrary(storeURL: store)
+                let episode = makeEpisode()
+                library.context.insert(episode)
+                library.persist()
+                library.enqueue(episode, next: false)
+                library.markPlayed(episode, played: true)
+                XCTAssertTrue(library.queue.isEmpty)
+            }
+            let reopened = try WatchLibrary(storeURL: store)
+            let episode = try XCTUnwrap(reopened.episodes.first)
+            XCTAssertTrue(episode.isPlayed)
+            XCTAssertNil(episode.queuePosition)
+            let events = try reopened.context.fetch(FetchDescriptor<WatchPendingSyncEvent>())
+            XCTAssertEqual(Set(events.map(\.kind)), ["episode", "queue"])
+        }
+    }
+
     func testDelayedResetDiscardsCachedPreResetMaximum() {
         let old = CloudEpisodeStateProjection()
         old.positionSeconds = 100

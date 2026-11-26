@@ -50,6 +50,12 @@ enum WatchResumeEpisode {
     }
 }
 
+enum WatchQueueAutoAdvance {
+    static func next(in queue: [WatchEpisode], after identity: String) -> WatchEpisode? {
+        queue.first { $0.identity != identity && !$0.isPlayed }
+    }
+}
+
 enum WatchPlaybackSource {
     static func choose(local: URL?, remoteAddress: String) -> URL? {
         if let local, FileManager.default.fileExists(atPath: local.path) { return local }
@@ -395,22 +401,17 @@ final class WatchPlayer {
             playbackRequests.invalidate()
             let completionRequest = playbackRequests.current
             isPlaying = false
-            episode?.isPlayed = true
-            episode?.inboxDismissed = true
-            episode?.playedUpdatedAt = .now
-            episode?.inboxDismissedUpdatedAt = .now
-            savePosition()
+            // Select before the completion mutation; retained Played rows are
+            // visible in Queue but are never automatic playback candidates.
+            let next = episode.flatMap { WatchQueueAutoAdvance.next(in: library.queue, after: $0.identity) }
+            if let episode { library.finishPlayback(episode, at: seconds) }
             status = "Episode finished"
             publishNowPlaying()
             WatchWidgetSnapshot.save(title: episode?.title, playing: false)
-            if let episode {
-                let next = library.queue.first { $0.identity != episode.identity }
-                if episode.queuePosition != nil { library.removeFromQueue(episode, announce: false) }
-                if let next {
-                    Task { @MainActor [weak self] in
-                        guard let self, self.playbackRequests.owns(completionRequest) else { return }
-                        await self.play(next)
-                    }
+            if let next {
+                Task { @MainActor [weak self] in
+                    guard let self, self.playbackRequests.owns(completionRequest) else { return }
+                    await self.play(next)
                 }
             }
         }
