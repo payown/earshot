@@ -1889,6 +1889,42 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(add.exists)
     }
 
+    func testPersonalAudioItemSpeaksItsTitleWithoutARepeatedSectionName() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed", "-screenshotScreen", "library", "-personalAudioRowTest",
+        ]
+        app.launch()
+
+        let personalAudio = app.buttons["Personal Audio"].firstMatch
+        XCTAssertTrue(personalAudio.waitForExistence(timeout: 10))
+        personalAudio.tap()
+
+        let item = app.buttons["Field recording"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(item.label, "Field recording")
+        XCTAssertTrue(app.buttons["Add to Earshot"].firstMatch.exists)
+    }
+
+    func testPersonalAudioAddOpensFilesPicker() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+
+        let personalAudio = app.buttons["Personal Audio"].firstMatch
+        XCTAssertTrue(personalAudio.waitForExistence(timeout: 10))
+        personalAudio.tap()
+        let add = app.buttons["Add to Earshot"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        add.tap()
+
+        let browse = app.buttons["Browse"].firstMatch
+        XCTAssertTrue(browse.waitForExistence(timeout: 5), app.debugDescription)
+        browse.tap()
+        XCTAssertTrue(app.staticTexts["On My iPhone"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["Cancel"].firstMatch.exists)
+    }
+
     func testAddPodcastSearchAndCategoryLandingOrder() {
         let app = XCUIApplication()
         app.launchArguments = [

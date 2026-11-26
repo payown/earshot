@@ -23,6 +23,45 @@ enum PersonalAudioLibraryPresentation {
     }
 }
 
+/// One Files selection is imported sequentially so each file keeps the existing
+/// staging, duplicate-confirmation, and rollback behavior.
+struct PersonalAudioImportBatch {
+    let urls: [URL]
+    private(set) var nextIndex = 0
+    private(set) var addedIDs: [String] = []
+    private(set) var failures: [(filename: String, message: String)] = []
+    private(set) var skippedCount = 0
+    private(set) var isCancelled = false
+
+    var totalCount: Int { urls.count }
+    var currentNumber: Int { nextIndex }
+
+    mutating func nextURL() -> URL? {
+        guard !isCancelled, nextIndex < urls.count else { return nil }
+        defer { nextIndex += 1 }
+        return urls[nextIndex]
+    }
+
+    mutating func recordAdded(_ id: String) { addedIDs.append(id) }
+
+    mutating func recordFailure(filename: String, message: String) {
+        failures.append((filename, message))
+    }
+
+    mutating func recordSkipped() { skippedCount += 1 }
+
+    mutating func cancel() { isCancelled = true }
+
+    var failureSummary: String? {
+        guard !failures.isEmpty else { return nil }
+        if totalCount == 1 { return failures[0].message }
+        let details = failures.prefix(3).map { "\($0.filename): \($0.message)" }.joined(separator: "\n")
+        let remaining = failures.count - min(3, failures.count)
+        let more = remaining > 0 ? "\n\(remaining) more files couldn’t be added." : ""
+        return "Added \(addedIDs.count) of \(totalCount) audio files.\n\(details)\(more)"
+    }
+}
+
 private enum PersonalAudioAlert: Identifiable {
     case duplicate(PreparedPersonalAudioImport)
     case failure(String)
@@ -52,6 +91,9 @@ struct PersonalAudioLibraryScreen: View {
     @State private var progress: Double?
     @State private var importStageText: String?
     @State private var alert: PersonalAudioAlert?
+    @State private var importBatch: PersonalAudioImportBatch?
+    @State private var currentImportURL: URL?
+    @State private var currentImportToken: UUID?
     @AccessibilityFocusState private var focusedItemID: String?
     @AccessibilityFocusState private var addButtonFocused: Bool
     private let importer = PersonalAudioImporter()
@@ -86,7 +128,13 @@ struct PersonalAudioLibraryScreen: View {
                         .accessibilityLabel("Adding audio to Personal Audio")
                         .accessibilityValue(progress.map { "\(Int($0 * 100)) percent" } ?? "In progress")
                         if canCancelImport {
-                            Button("Cancel Import", role: .cancel) { importerTask?.cancel() }
+                            Button("Cancel Import", role: .cancel) {
+                                if var batch = importBatch {
+                                    batch.cancel()
+                                    importBatch = batch
+                                }
+                                importerTask?.cancel()
+                            }
                         }
                     }
                     ForEach(items) { item in
@@ -126,7 +174,7 @@ struct PersonalAudioLibraryScreen: View {
         .fileImporter(
             isPresented: $showingPicker,
             allowedContentTypes: [.audio],
-            allowsMultipleSelection: false,
+            allowsMultipleSelection: true,
             onCompletion: handlePickerResult
         )
         .alert(item: $alert) { value in
@@ -138,7 +186,7 @@ struct PersonalAudioLibraryScreen: View {
                     primaryButton: .default(Text("Add Anyway")) { finish(importer.addAnyway(prepared, in: context.container)) },
                     secondaryButton: .cancel(Text("Cancel")) {
                         importer.cancel(prepared)
-                        addButtonFocused = true
+                        skipCurrentImport()
                     }
                 )
             case .failure(let message):
@@ -170,52 +218,119 @@ struct PersonalAudioLibraryScreen: View {
                 alert = .failure("Choose a readable audio file from Files, then try again.")
             }
         case .success(let urls):
-            guard let url = urls.first else {
+            guard !urls.isEmpty else {
                 DispatchQueue.main.async { addButtonFocused = true }
                 return
             }
             isImporting = true
-            canCancelImport = true
-            progress = nil
-            importStageText = "Preparing audio"
-            let container = context.container
-            importerTask = Task {
-                let outcome = await importer.addToEarshot(fileURL: url, container: container) { stage in
-                    Task { @MainActor in
-                        switch stage {
-                        case .inspecting:
-                            canCancelImport = false
-                            importStageText = "Checking audio"
-                            progress = nil
-                        case .copying(let update):
-                            importStageText = "Copying audio"
-                            if let total = update.totalBytes, total > 0 {
-                                progress = min(1, Double(update.copiedBytes) / Double(total))
-                            }
+            importBatch = PersonalAudioImportBatch(urls: urls)
+            startNextImport()
+        }
+    }
+
+    private func startNextImport() {
+        guard var batch = importBatch, let url = batch.nextURL() else {
+            completeImportBatch()
+            return
+        }
+        importBatch = batch
+        currentImportURL = url
+        let token = UUID()
+        currentImportToken = token
+        canCancelImport = true
+        progress = nil
+        let suffix = batch.totalCount > 1 ? " \(batch.currentNumber) of \(batch.totalCount)" : ""
+        importStageText = "Preparing audio\(suffix)"
+        let container = context.container
+        importerTask = Task {
+            let outcome = await importer.addToEarshot(fileURL: url, container: container) { stage in
+                Task { @MainActor in
+                    guard currentImportToken == token else { return }
+                    switch stage {
+                    case .inspecting:
+                        canCancelImport = false
+                        importStageText = "Checking audio\(suffix)"
+                        progress = nil
+                    case .copying(let update):
+                        importStageText = "Copying audio\(suffix)"
+                        if let total = update.totalBytes, total > 0 {
+                            progress = min(1, Double(update.copiedBytes) / Double(total))
                         }
                     }
                 }
-                finish(outcome)
             }
+            finish(outcome)
         }
     }
 
     private func finish(_ outcome: PersonalAudioImportOutcome) {
-        isImporting = false
-        canCancelImport = false
+        guard var batch = importBatch, let url = currentImportURL else { return }
+        if case .duplicateNeedsConfirmation(let prepared) = outcome {
+            canCancelImport = false
+            alert = .duplicate(prepared)
+            return
+        }
+        currentImportURL = nil
+        currentImportToken = nil
         importerTask = nil
-        progress = nil
-        importStageText = nil
         switch outcome {
         case .added(let id):
-            let title = items.first(where: { $0.id == id })?.title ?? "audio"
-            Announcer.announce("Added \(title) to Personal Audio")
+            batch.recordAdded(id)
             NotificationCenter.default.post(name: .earshotPersonalAudioDidChange, object: nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { focusedItemID = id }
-        case .duplicateNeedsConfirmation(let prepared): alert = .duplicate(prepared)
+        case .duplicateNeedsConfirmation:
+            return
         case .failed(.cancelled):
+            batch.recordSkipped()
+        case .failed(let failure):
+            batch.recordFailure(filename: url.lastPathComponent, message: Self.message(for: failure))
+        }
+        importBatch = batch
+        if batch.isCancelled {
+            completeImportBatch()
+        } else {
+            startNextImport()
+        }
+    }
+
+    private func skipCurrentImport() {
+        guard var batch = importBatch else { return }
+        batch.recordSkipped()
+        importBatch = batch
+        currentImportURL = nil
+        currentImportToken = nil
+        if batch.isCancelled { completeImportBatch() }
+        else { startNextImport() }
+    }
+
+    private func completeImportBatch() {
+        let batch = importBatch
+        importBatch = nil
+        currentImportURL = nil
+        currentImportToken = nil
+        importerTask = nil
+        isImporting = false
+        canCancelImport = false
+        progress = nil
+        importStageText = nil
+        guard let batch else { return }
+        if let id = batch.addedIDs.last {
+            if batch.totalCount == 1 {
+                let title = items.first(where: { $0.id == id })?.title ?? "audio"
+                Announcer.announce("Added \(title) to Personal Audio")
+            } else {
+                let count = batch.addedIDs.count
+                Announcer.announce(count == 1
+                    ? "Added 1 audio file to Personal Audio"
+                    : "Added \(count) audio files to Personal Audio")
+            }
+            if batch.failures.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { focusedItemID = id }
+            }
+        }
+        if let summary = batch.failureSummary {
+            alert = .failure(summary)
+        } else if batch.addedIDs.isEmpty {
             addButtonFocused = true
-        case .failed(let failure): alert = .failure(Self.message(for: failure))
         }
     }
 
@@ -335,7 +450,7 @@ private struct PersonalAudioRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Personal Audio, \(item.title)")
+            .accessibilityLabel(item.title)
             .accessibilityHint("Double-tap to play or resume")
             .accessibilityValue([
                 item.artist,
