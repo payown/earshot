@@ -4,6 +4,12 @@
 **Date:** 2026-09-27  
 **Terminology:** “Personal Audio” is the working feature name. User actions should say “Add to Earshot.”
 
+### November 26, 2026 follow-up (isolated branch, not in TestFlight build 332)
+
+Michael requested that rows **inside Personal Audio** speak only the file’s real title, without a repeated “Personal Audio” prefix. The section title supplies that context; the artist, progress, played state, controls, and source distinctions outside this screen remain. This supersedes the V1 row-label context requirement below for this screen only.
+
+The in-app Files picker in build 332 is single-select and its handler imports only the first returned URL. The follow-up branch enables multiple selection and imports each selected URL sequentially through the existing validated importer. A failed or skipped file does not roll back files already added; duplicate confirmation pauses the batch; Cancel Import stops remaining files while retaining completed additions. Focused disposable tests passed 24 unit and 3 UI cases. The UI test reached the system Files picker, but its simulator Files location was empty, so physical selection of several real files and VoiceOver focus after batch completion remain acceptance checks. No merge or TestFlight build includes this follow-up yet.
+
 ## Executive Summary
 
 Personal Audio lets listeners add individual audio files through the standard Files picker and play them through Earshot’s existing player. V1 copies each selection into durable app-managed storage, extracts available metadata and embedded chapters, and stores state in a separate `PersonalAudioItem`. Library presents one **Personal Audio** destination before subscribed podcasts; that screen lists all imported items and owns **Add to Earshot**. Playback, resume, played state, completion, chapters, lock-screen controls, and safe deletion use the existing player. Mixed Queue integration, folders, Share Sheet, direct open, URL import, and Earshot CloudKit synchronization are deferred.
@@ -232,7 +238,7 @@ Duration should be loaded asynchronously and stored as optional; avoid blocking 
 ## Future Enhancements
 
 - Inbound share extension or app URL open for audio files (both route through the same importer service).
-- Multiple selection/batch import after single-file progress, cancellation, and storage behavior are proven.
+- Multiple selection/batch import: implemented on an isolated November 26 follow-up branch, pending physical Files/VoiceOver acceptance and later integration; not included in build 332.
 - Add from HTTPS URL, with secure transport, redirect and resource limits.
 - Optional iCloud metadata/media synchronization with explicit quota, conflicts, device restoration, and eviction behavior.
 - Rename display title, edit artist/album, custom artwork, richer sort/filter.
