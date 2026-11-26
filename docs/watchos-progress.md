@@ -1,5 +1,9 @@
 # Earshot Watch implementation progress
 
+The later [1.3.1 Queue Quick Actions candidate](releases/1.3.1-queue-actions-2026-11-26.md)
+builds on the Watch-local Queue fix below. Both remain outside signed build 333.
+
+
 ## Watch-local Queue parity candidate, 2026-11-26
 
 Earshot 1.3.1 (333) is the current signed TestFlight baseline for Internal
