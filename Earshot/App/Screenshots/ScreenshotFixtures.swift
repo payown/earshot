@@ -295,6 +295,17 @@ enum ScreenshotFixtures {
                 enabled: [.removeFromQueue] + defaultQueueItemActions.filter { $0 != .removeFromQueue },
                 available: []
             ))
+        } else if args.contains("-uiTestQueueFirstMarkPlayed") {
+            settings.setBool(args.contains("-uiTestQueueKeepFinished"), for: SettingsKey.keepFinishedEpisodesInQueue)
+            quickActions.setQueueConfiguration(QuickActionConfiguration(
+                enabled: [.markPlayed] + defaultQueueItemActions,
+                available: []
+            ))
+        } else if args.contains("-uiTestQueueFirstUnavailable") {
+            quickActions.setQueueConfiguration(QuickActionConfiguration(
+                enabled: [.exportTranscript] + defaultQueueItemActions,
+                available: []
+            ))
         }
     }
 

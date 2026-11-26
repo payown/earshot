@@ -72,6 +72,12 @@ struct QueueScreen: View {
 
     @State private var confirmingClearQueue = false
     @State private var showNotesEpisode: Episode?
+    @State private var sharingEpisode: Episode?
+    @State private var bookmarksEpisode: Episode?
+    @State private var exportEpisode: Episode?
+    @State private var exportTranscriptEpisode: Episode?
+    @State private var folderPickRequest: FolderPickRequest?
+    @State private var pendingUnfollow: Podcast?
     @State private var selectedDetailEpisode: Episode?
     @State private var compactDetailEpisode: Episode?
     @State private var isWide = false
@@ -249,6 +255,32 @@ struct QueueScreen: View {
                 }
             }
             .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+            .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
+            .sheet(item: $sharingEpisode) { episode in
+                ShareSheet(items: EpisodeShareItems.make(title: episode.title, audioURL: episode.audioURL))
+            }
+            .episodeAudioExport($exportEpisode)
+            .episodeTranscriptExport($exportTranscriptEpisode)
+            .folderPicker($folderPickRequest)
+            .confirmationDialog(
+                "Unfollow \(pendingUnfollow?.title ?? "this podcast")?",
+                isPresented: Binding(
+                    get: { pendingUnfollow != nil },
+                    set: { if !$0 { pendingUnfollow = nil } }
+                ), titleVisibility: .visible, presenting: pendingUnfollow
+            ) { podcast in
+                Button("Unfollow", role: .destructive) {
+                    Task {
+                        let title = podcast.displayName
+                        let removed = await SubscriptionRepository(context: context).unsubscribeInBackground(podcast)
+                        pendingUnfollow = nil
+                        if removed { Announcer.announce("Unfollowed \(title)") }
+                    }
+                }
+                Button("Cancel", role: .cancel) { pendingUnfollow = nil }
+            } message: { podcast in
+                Text("This removes \(podcast.displayName) and its episodes from your library. This can't be undone.")
+            }
             .episodeDetailSheet($compactDetailEpisode)
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
             .receive(on: DispatchQueue.main)) { note in
@@ -576,7 +608,7 @@ struct QueueScreen: View {
             total: total,
             moveMode: moveMode,
             focusedEpisode: $focusedEpisode,
-            actions: availableQueueActions(order: quickActions.queueActions, moveMode: moveMode),
+            actions: availableQueueActions(order: quickActions.queueActions, moveMode: moveMode, episode: episode),
             supplementalActions: episodeMoveActions(episode, moveMode: moveMode, groupKind: groupKind),
             performAction: { action in
                 buildQueueActions(
@@ -588,6 +620,13 @@ struct QueueScreen: View {
                     context: context,
                     onShowNotes: { showNotesEpisode = episode },
                     onFocus: { focusedEpisode = $0 },
+                    onShare: { sharingEpisode = episode },
+                    onBookmarks: { bookmarksEpisode = episode },
+                    onExport: { exportEpisode = episode },
+                    onExportTranscript: { exportTranscriptEpisode = episode },
+                    onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
+                    onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) },
+                    onUnfollow: { pendingUnfollow = episode.podcast },
                     // Resolve the displayed order only when removal is activated,
                     // never while SwiftUI is recycling queue rows.
                     visibleQueue: {
@@ -1024,7 +1063,8 @@ private struct QueueRow: View {
     }
 
     private func defaultNeedsConfirmation(_ action: QueueItemAction) -> Bool {
-        action == .removeFromQueue || (action == .download && episode.downloadStatus == .downloaded)
+        // Unfollow's shared runner opens the podcast confirmation itself.
+        action != .unfollow && action.isDestructive(for: episode)
     }
 
     /// True when this row's episode is the one loaded in the player, compared by

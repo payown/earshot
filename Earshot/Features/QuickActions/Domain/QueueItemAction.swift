@@ -1,8 +1,8 @@
 import Foundation
 
-/// A configurable queue-item action (the queue-row VoiceOver rotor + default
-/// tap). The full PRD 5.4 queue-item set is wireable today via
-/// ``QueueRepository``.
+/// A configurable Queue-row action (VoiceOver rotor + default tap). Shared
+/// Episode actions retain Queue-specific saved IDs, while their metadata and
+/// runners come from the Episode catalog. Move/remove remain Queue-only.
 enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
     case playNow
     case removeFromQueue
@@ -12,39 +12,70 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
     case moveDown
     case openShowNotes
     case download
+    // Shared Episode actions are opt-in for existing Queue configurations.
+    // Queue-only movement/removal keeps its existing identity and order.
+    case markPlayed
+    case viewBookmarks
+    case share
+    case exportTranscript
+    case exportAudio
+    case refreshAudio
+    case addToFolder
+    case moveToFolder
+    case unfollow
 
     var id: String { rawValue }
 
     /// The settings row describes both outcomes; the Queue action itself still
     /// uses the episode's current download state.
     var settingsLabel: String {
-        self == .download ? "Download / Remove Download" : label
+        episodeAction?.settingsLabel ?? label
+    }
+
+    /// The one Episode catalog owns labels, roles, eligibility and runners
+    /// wherever the action has the same meaning in Queue.
+    var episodeAction: EpisodeAction? {
+        switch self {
+        case .playNow: .playNow
+        case .openShowNotes: .openShowNotes
+        case .download: .download
+        case .markPlayed: .markPlayed
+        case .viewBookmarks: .viewBookmarks
+        case .share: .share
+        case .exportTranscript: .exportTranscript
+        case .exportAudio: .exportAudio
+        case .refreshAudio: .refreshAudio
+        case .addToFolder: .addToFolder
+        case .moveToFolder: .moveToFolder
+        case .unfollow: .unfollow
+        case .removeFromQueue, .moveToTop, .moveToBottom, .moveUp, .moveDown: nil
+        }
     }
 
     var label: String {
         switch self {
-        case .playNow: return "Play now"
+        case .playNow: return EpisodeAction.playNow.label
         case .removeFromQueue: return "Remove from queue"
         case .moveToTop: return "Move to top"
         case .moveToBottom: return "Move to bottom"
         case .moveUp: return "Move up"
         case .moveDown: return "Move down"
-        case .openShowNotes: return "Open show notes"
+        case .openShowNotes: return EpisodeAction.openShowNotes.label
         // The row's runtime label flips to "Remove download" when downloaded;
         // this is the static Settings-list name (see buildQueueActions).
-        case .download: return "Download"
+        case .download: return EpisodeAction.download.label
+        case .markPlayed, .viewBookmarks, .share, .exportTranscript,
+             .exportAudio, .refreshAudio, .addToFolder, .moveToFolder, .unfollow:
+            return episodeAction!.label
         }
     }
 
     func label(for episode: Episode) -> String {
-        if self == .download, episode.downloadStatus == .downloaded {
-            return "Remove download"
-        }
-        return label
+        episodeAction?.label(for: episode) ?? label
     }
 
     func isDestructive(for episode: Episode) -> Bool {
-        self == .removeFromQueue || (self == .download && episode.downloadStatus == .downloaded)
+        self == .removeFromQueue || (episodeAction?.isDestructive(for: episode) ?? false)
     }
 }
 
