@@ -26,7 +26,10 @@ final class QuickActionRepository {
     }
 
     func queueConfiguration() -> QuickActionConfiguration<QueueItemAction> {
-        resolve(.queueItem, all: QueueItemAction.allCases, fallback: defaultQueueItemActions)
+        resolve(
+            .queueItem, all: QueueItemAction.allCases, fallback: defaultQueueItemActions,
+            legacyKnownKeys: Set(defaultQueueItemActions.map(\.rawValue))
+        )
     }
 
     func transportConfiguration() -> QuickActionConfiguration<TransportAction> {
@@ -92,7 +95,8 @@ final class QuickActionRepository {
         _ type: QuickActionContentType,
         all: [A],
         fallback: [A],
-        allowsEmptyEnabled: Bool = false
+        allowsEmptyEnabled: Bool = false,
+        legacyKnownKeys: Set<String>? = nil
     ) -> QuickActionConfiguration<A> where A.RawValue == String {
         let storedKeys = configs(for: type).map(\.actionKey)
         guard !storedKeys.isEmpty else {
@@ -115,8 +119,18 @@ final class QuickActionRepository {
         guard hasStateEncoding else {
             var enabled = unique(storedKeys.compactMap { byRaw[$0] })
             let present = Set(enabled.map(\.rawValue))
-            enabled += all.filter { !present.contains($0.rawValue) }
-            return QuickActionConfiguration(enabled: enabled, available: [])
+            let appended = all.filter { !present.contains($0.rawValue) }
+            guard let legacyKnownKeys else {
+                enabled += appended
+                return QuickActionConfiguration(enabled: enabled, available: [])
+            }
+            // Queue's old bare rows predate this expansion. Preserve all old
+            // choices as enabled; new Episode actions must remain opt-in.
+            enabled += appended.filter { legacyKnownKeys.contains($0.rawValue) }
+            return QuickActionConfiguration(
+                enabled: enabled,
+                available: appended.filter { !legacyKnownKeys.contains($0.rawValue) }
+            )
         }
 
         var enabled = unique(storedKeys.compactMap {
@@ -143,9 +157,26 @@ final class QuickActionRepository {
         allowsEmptyEnabled: Bool = false
     ) {
         guard allowsEmptyEnabled || !enabled.isEmpty else { return }
+        // Preserve future Queue IDs that this build does not understand when a
+        // user reorders known actions. They stay inert here and can be restored
+        // by a later build; no migration rewrites existing user choices.
+        let unknownQueueKeys: [String]
+        if type == .queueItem {
+            let known = Set(QueueItemAction.allCases.map(\.rawValue))
+            unknownQueueKeys = configs(for: type).map(\.actionKey).filter { key in
+                let raw = Self.rawKey(key, prefix: Self.enabledPrefix)
+                    ?? Self.rawKey(key, prefix: Self.availablePrefix) ?? key
+                return !known.contains(raw)
+            }
+        } else {
+            unknownQueueKeys = []
+        }
         configs(for: type).forEach(context.delete)
+        var seenUnknown = Set<String>()
+        let preservedUnknown = unknownQueueKeys.filter { seenUnknown.insert($0).inserted }
         let keys = enabled.map { Self.enabledPrefix + $0 }
             + available.map { Self.availablePrefix + $0 }
+            + preservedUnknown
         for (index, key) in keys.enumerated() {
             context.insert(QuickActionConfig(contentType: type, actionKey: key, sortOrder: index))
         }

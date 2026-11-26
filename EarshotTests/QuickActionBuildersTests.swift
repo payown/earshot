@@ -464,6 +464,90 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertTrue(QueueItemAction.removeFromQueue.isDestructive(for: episode))
     }
 
+    func testQueueCatalogSharesEpisodePresentationAndOmitsInapplicableActions() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let configured: [QueueItemAction] = [
+            .markPlayed, .viewBookmarks, .share, .exportTranscript, .exportAudio,
+            .refreshAudio, .addToFolder, .moveToFolder, .unfollow, .removeFromQueue
+        ]
+        XCTAssertEqual(availableQueueActions(order: configured, moveMode: .flat, episode: episode),
+                       configured.filter { $0 != .exportTranscript })
+        XCTAssertEqual(QueueItemAction.markPlayed.settingsLabel, EpisodeAction.markPlayed.settingsLabel)
+        XCTAssertEqual(QueueItemAction.markPlayed.label(for: episode), "Mark as played")
+        episode.isPlayed = true
+        XCTAssertEqual(QueueItemAction.markPlayed.label(for: episode), "Mark as unplayed")
+        XCTAssertTrue(QueueItemAction.unfollow.isDestructive(for: episode))
+        episode.transcriptURL = "https://fixture.test/transcript.vtt"
+        XCTAssertEqual(availableQueueActions(order: configured, moveMode: .flat, episode: episode), configured)
+        episode.audioURL = ""
+        XCTAssertFalse(availableQueueActions(order: configured, moveMode: .flat, episode: episode).contains(.exportAudio))
+        XCTAssertNil(ConfiguredRowDefault.action(
+            configured: [.exportAudio, .markPlayed],
+            applicable: availableQueueActions(order: [.exportAudio, .markPlayed], moveMode: .flat, episode: episode)
+        ), "An inapplicable first choice must retain native row activation")
+    }
+
+    func testSharedQueueRunnersReachExistingEpisodePresenters() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        episode.transcriptURL = "https://fixture.test/transcript.vtt"
+        var called: [String] = []
+        for action in [QueueItemAction.viewBookmarks, .share, .exportTranscript,
+                       .exportAudio, .addToFolder, .moveToFolder, .unfollow, .openShowNotes] {
+            let item = buildQueueActions(
+                episode: episode, order: [action], moveMode: .flat,
+                player: PlayerService(), downloads: DownloadManager(), context: ctx,
+                onShowNotes: { called.append("notes") }, onFocus: { _ in },
+                onShare: { called.append("share") }, onBookmarks: { called.append("bookmarks") },
+                onExport: { called.append("audio") },
+                onExportTranscript: { called.append("transcript") },
+                onAddToFolder: { _ in called.append("add folder") },
+                onMoveToFolder: { _ in called.append("move folder") },
+                onUnfollow: { called.append("unfollow") }
+            ).first
+            XCTAssertNotNil(item, "\(action)")
+            item?.run()
+        }
+        XCTAssertEqual(called, ["bookmarks", "share", "transcript", "audio",
+                                "add folder", "move folder", "unfollow", "notes"])
+    }
+
+    func testQueuePlainMarkPlayedFollowsSettingWithoutPlayingNext() throws {
+        for keep in [false, true] {
+            let ctx = TestStore.freshContext()
+            let first = makeEpisode(ctx)
+            let second = Episode(guid: "second", title: "Second", audioURL: "https://x/second.mp3")
+            second.podcast = first.podcast
+            ctx.insert(second)
+            try ctx.save()
+            let repo = QueueRepository(context: ctx)
+            repo.add(first)
+            repo.add(second)
+            AppSettingsStore(context: ctx).setBool(keep, for: SettingsKey.keepFinishedEpisodesInQueue)
+            let player = PlayerService()
+            let item = buildQueueActions(
+                episode: first, order: [.markPlayed], moveMode: .flat,
+                player: player, downloads: DownloadManager(), context: ctx,
+                onShowNotes: {}, onFocus: { _ in }
+            ).first
+            XCTAssertEqual(item?.label, "Mark as played")
+            item?.run()
+            XCTAssertTrue(first.isPlayed)
+            XCTAssertEqual(repo.queue().map(\.guid), keep ? ["g", "second"] : ["second"])
+            XCTAssertNil(player.nowPlayingEpisodeID, "Plain Mark as played does not start the next item")
+            let unplayed = buildQueueActions(
+                episode: first, order: [.markPlayed], moveMode: .flat,
+                player: player, downloads: DownloadManager(), context: ctx,
+                onShowNotes: {}, onFocus: { _ in }
+            ).first
+            XCTAssertEqual(unplayed?.label, "Mark as unplayed")
+            unplayed?.run()
+            XCTAssertFalse(first.isPlayed)
+            XCTAssertEqual(repo.queue().map(\.guid), keep ? ["g", "second"] : ["second"])
+        }
+    }
+
     // MARK: #572 — configurable Unfollow on episode rows
 
     func testUnfollowOmittedWhenSurfaceCannotUnfollow() {

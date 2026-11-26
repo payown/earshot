@@ -14,7 +14,8 @@ final class QuickActionRepositoryTests: XCTestCase {
             enabled: defaultPodcastActions, available: []
         ))
         XCTAssertEqual(repo.queueConfiguration(), QuickActionConfiguration(
-            enabled: defaultQueueItemActions, available: []
+            enabled: defaultQueueItemActions,
+            available: QueueItemAction.allCases.filter { !defaultQueueItemActions.contains($0) }
         ))
         XCTAssertEqual(
             repo.playerButtonConfiguration(for: .rewind).enabled,
@@ -57,6 +58,46 @@ final class QuickActionRepositoryTests: XCTestCase {
         XCTAssertEqual(Array(value.enabled.prefix(2)), [.share, .playNow])
         XCTAssertEqual(Set(value.enabled), Set(EpisodeAction.allCases))
         XCTAssertTrue(value.available.isEmpty)
+    }
+
+    func testLegacyQueueRowsKeepOldActionsButNewEpisodeActionsStayAvailable() throws {
+        let context = TestStore.freshContext()
+        context.insert(QuickActionConfig(contentType: .queueItem, actionKey: "download", sortOrder: 0))
+        context.insert(QuickActionConfig(contentType: .queueItem, actionKey: "playNow", sortOrder: 1))
+        try context.save()
+
+        let value = QuickActionRepository(context: context).queueConfiguration()
+        XCTAssertEqual(Array(value.enabled.prefix(2)), [.download, .playNow])
+        XCTAssertEqual(Set(value.enabled), Set(defaultQueueItemActions))
+        XCTAssertEqual(Set(value.available), Set(QueueItemAction.allCases).subtracting(defaultQueueItemActions))
+    }
+
+    func testExistingQueueSelectionDoesNotAcquireNewActionsUntilEnabled() {
+        let context = TestStore.freshContext()
+        let repo = QuickActionRepository(context: context)
+        repo.setQueueConfiguration(.init(enabled: [.moveUp, .download], available: [.playNow]))
+        var value = repo.queueConfiguration()
+        XCTAssertEqual(value.enabled, [.moveUp, .download])
+        XCTAssertTrue(value.available.contains(.markPlayed))
+
+        let store = QuickActionStore()
+        store.configure(context: context)
+        store.addQueueAction(.markPlayed)
+        value = QuickActionRepository(context: context).queueConfiguration()
+        XCTAssertEqual(value.enabled, [.moveUp, .download, .markPlayed])
+        XCTAssertFalse(value.available.contains(.markPlayed))
+    }
+
+    func testQueueReorderPreservesUnknownFutureActionRows() throws {
+        let context = TestStore.freshContext()
+        context.insert(QuickActionConfig(contentType: .queueItem, actionKey: "enabled:playNow", sortOrder: 0))
+        context.insert(QuickActionConfig(contentType: .queueItem, actionKey: "available:futureQueueAction", sortOrder: 1))
+        try context.save()
+        let repo = QuickActionRepository(context: context)
+        let current = repo.queueConfiguration()
+        repo.setQueueConfiguration(.init(enabled: current.enabled, available: current.available))
+        let rows = try context.fetch(FetchDescriptor<QuickActionConfig>())
+        XCTAssertTrue(rows.contains { $0.contentType == .queueItem && $0.actionKey == "available:futureQueueAction" })
     }
 
     func testNewActionsJoinAvailableAfterUserHasCustomizedList() {

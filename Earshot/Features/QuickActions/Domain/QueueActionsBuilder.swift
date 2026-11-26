@@ -27,8 +27,17 @@ enum QueueMoveMode: Equatable {
 
 /// Filters the configured order to the actions meaningful in the current queue
 /// presentation without constructing runnable UUID/closure objects per row.
-func availableQueueActions(order: [QueueItemAction], moveMode: QueueMoveMode) -> [QueueItemAction] {
+func availableQueueActions(
+    order: [QueueItemAction], moveMode: QueueMoveMode, episode: Episode? = nil
+) -> [QueueItemAction] {
     order.filter { action in
+        if let episode, let shared = action.episodeAction {
+            guard availableEpisodeActions(
+                episode: episode, order: [shared], supportsUnfollow: true,
+                supportsExport: true, supportsTranscriptExport: true,
+                supportsAddToFolder: true, supportsMoveToFolder: true
+            ).contains(shared) else { return false }
+        }
         switch action {
         case .moveToTop, .moveToBottom:
             return moveMode != .none
@@ -63,6 +72,13 @@ func buildQueueActions(
     context: ModelContext,
     onShowNotes: @escaping () -> Void,
     onFocus: @escaping (PersistentIdentifier?) -> Void,
+    onShare: @escaping () -> Void = {},
+    onBookmarks: @escaping () -> Void = {},
+    onExport: @escaping () -> Void = {},
+    onExportTranscript: @escaping () -> Void = {},
+    onAddToFolder: @escaping (Episode) -> Void = { _ in },
+    onMoveToFolder: @escaping (Episode) -> Void = { _ in },
+    onUnfollow: @escaping () -> Void = {},
     visibleQueue: (() -> [Episode])? = nil
 ) -> [QuickActionItem] {
     let repo = QueueRepository(context: context)
@@ -80,12 +96,32 @@ func buildQueueActions(
     }
 
     return order.compactMap { action -> QuickActionItem? in
+        if let shared = action.episodeAction {
+            guard availableQueueActions(order: [action], moveMode: moveMode, episode: episode).contains(action)
+            else { return nil }
+            return buildEpisodeActions(
+                episode: episode, order: [shared], player: player, downloads: downloads,
+                context: context, onShowNotes: onShowNotes, onShare: onShare,
+                onBookmarks: onBookmarks, onUnfollow: onUnfollow,
+                onMarkPlayed: { nowPlayed in
+                    guard nowPlayed else { return }
+                    // Keep-finished policy is checked by the shared mutation.
+                    // Only move focus if that mutation removes this Queue row.
+                    let keep = AppSettingsStore(context: context).bool(
+                        SettingsKey.keepFinishedEpisodesInQueue, default: false
+                    )
+                    guard !keep else { return }
+                    let neighbor = neighborID(of: episode, in: visibleQueue?() ?? repo.queue())
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        guard !repo.queue().contains(where: { $0.persistentModelID == id }) else { return }
+                        onFocus(neighbor)
+                    }
+                },
+                onExport: onExport, onExportTranscript: onExportTranscript,
+                onAddToFolder: onAddToFolder, onMoveToFolder: onMoveToFolder
+            ).first
+        }
         switch action {
-        case .playNow:
-            // Route through playFromEpisodeList so Queue "Play now" honors the
-            // #562 open-player-on-play setting, matching Inbox (Item 1). The plain
-            // player.play never raised the full player, so Queue silently opted out.
-            return QuickActionItem(label: "Play now", isDestructive: false) { player.playFromEpisodeList(episode) }
         case .removeFromQueue:
             return QuickActionItem(label: "Remove from queue", isDestructive: true) {
                 let neighbor = neighborID(of: episode, in: visibleQueue?() ?? repo.queue())
@@ -98,25 +134,10 @@ func buildQueueActions(
                 player.removeFromQueue(episode, context: context)
                 onFocus(neighbor)
             }
-        case .openShowNotes:
-            return QuickActionItem(label: "Open show notes", isDestructive: false) { onShowNotes() }
-        case .download:
-            // Mirrors EpisodeActionsBuilder's download closure: dynamic label and
-            // destructive flip based on the current download status.
-            let downloaded = episode.downloadStatus == .downloaded
-            return QuickActionItem(
-                label: downloaded ? "Remove download" : "Download",
-                isDestructive: downloaded
-            ) {
-                if downloaded {
-                    downloads.removeDownload(episode)
-                } else {
-                    Task { @MainActor in
-                        guard PersistentModelLifetime.episodeExists(id, in: context) else { return }
-                        await downloads.download(episode)
-                    }
-                }
-            }
+        case .playNow, .openShowNotes, .download, .markPlayed, .viewBookmarks,
+             .share, .exportTranscript, .exportAudio, .refreshAudio, .addToFolder,
+             .moveToFolder, .unfollow:
+            return nil // Routed through the shared Episode builder above.
         case .moveToTop:
             switch moveMode {
             case .flat:
