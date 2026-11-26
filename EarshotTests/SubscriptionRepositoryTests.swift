@@ -1243,6 +1243,26 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertTrue(try PendingCloudUnfollowIntent.feedURLs(in: fresh).contains("https://example.test/target"))
     }
 
+    func testUnfollowFeedbackDistinguishesPendingFailureAndRetry() {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.test/feedback", title: "Feedback")
+        context.insert(podcast)
+        var feedback = UnfollowFeedbackState()
+
+        XCTAssertTrue(feedback.begin(podcast))
+        XCTAssertTrue(feedback.isPending)
+        XCTAssertFalse(feedback.begin(podcast), "A second confirmed activation must not start another delete")
+        feedback.finish(succeeded: false)
+        XCTAssertFalse(feedback.isPending)
+        XCTAssertTrue(feedback.showsFailure)
+
+        XCTAssertTrue(feedback.begin(podcast), "A failed save must permit a safe retry")
+        XCTAssertFalse(feedback.showsFailure)
+        feedback.finish(succeeded: true)
+        XCTAssertFalse(feedback.isPending)
+        XCTAssertFalse(feedback.showsFailure)
+    }
+
     func testBackgroundUnfollowInvalidatesInboxAfterDurableRemoval() async throws {
         let ctx = TestStore.freshContext()
         let removedPodcast = Podcast(feedURL: "https://example.test/remove", title: "Remove")
