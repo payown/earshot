@@ -380,7 +380,14 @@ mirrored model lists reference the live `PodcastFolder`. The drift test passed
 field would rewrite shipped versioned schemas. The isolated experiment does
 not modify this branch or a real library; it does not prove a safe V15
 migration. A correct implementation must freeze the old mirrored relationship
-graph, create a new versioned model, and migrate a copy of this disposable
+graph: `PodcastFolder.parent`/`children` refer to itself, both
+`FolderMembership.folder` and `EpisodeFolderMembership.folder` refer to the
+live folder, and the podcast/episode models refer back to those memberships.
+Simply substituting one nested V14 folder type would therefore leave the
+old versioned graph with incompatible relationship destinations. This is the
+specific source/schema comparison blocking a trustworthy isolated V15
+migration experiment; a complete frozen relationship graph is required first.
+Then create a new versioned model and migrate a copy of this disposable
 fixture with identity, membership, restart and rollback assertions before it
 can be considered for production. No folder receiver activation or build 336
 is justified by the current evidence.
@@ -401,3 +408,50 @@ test's two-episode fixture (`EarshotLPJournalPeerRoundtrip20261127.xcresult`).
 The lookup now selects the target GUID explicitly; the corrected full
 event-journal suite passed 17/17, zero skips or failures
 (`EarshotLPJournalPeerRoundtripFixed20261127.xcresult`).
+
+### Disposable coordinated episode receiver
+
+The Debug-only coordinator now has a separate, explicitly staged episode
+import marker in addition to its existing runner gate. It can be exercised
+without turning on subscription sharing. Normal app code has no
+caller. It reads bounded peer files through the coordinated transport, parses
+episode rows, resolves them to actual SwiftData episodes, and applies a peer
+event and its original clock in one save. It defers unknown legacy local
+clocks, missing or ambiguous local IDs, private/device-only/unapproved feeds,
+expired episodes, loaded rows, fractional positions that the current integer
+Episode model cannot represent, stale peer files, and conflicting same-time
+rows. Before saving it rechecks loaded identity, episode identity and sharing
+eligibility; a changed condition rolls back the transaction. It does not
+call PlayerService or create rows. Existing Queue membership, Inbox dismissal,
+and unrelated episode state remain untouched.
+
+The pinned QUILL file served as the peer file base in a disposable coordinator
+test with synthetic episode rows. It covered loaded deferral, backward and
+forward seek, Played then Unplayed, a missing row, two passes, reopened store,
+idempotence, unchanged peer bytes and no peer episode echoed into Earshot's
+owned file. Additional tests cover ambiguous ID, private and unknown legacy
+state, stale/conflicting records, and rollback when a row becomes loaded at
+the save boundary. The affected subscription/receiver suite passed 14/14,
+zero skips or failures (`EarshotLPEpisodeReceiverBoundary20261127.xcresult`).
+These are simulator/test-coordinator results, not physical playback acceptance.
+The direct Episode-writer inventory alarm caught this new receiver in the
+first adjacent run (`EarshotLPReceiverAdjacent20261127.xcresult`). Its three
+assignments were reviewed and explicitly registered in that guard; no
+production writer was silently excluded.
+The final adjacent Listening Places suites passed 109/109, zero failures or
+skips, on disposable iOS 26.5 Simulator
+(`EarshotLPReceiverAdjacentFinal20261127.xcresult`).
+The final code review added rollback for any staging failure and a clean-
+context precondition before peer processing; episode import was made
+independent of subscription sharing. The same adjacent suites passed again
+109/109 with zero failures/skips on that exact local source
+(`EarshotLPReceiverReviewed20261127.xcresult`).
+
+Release still blocks: the ordinary `ListeningPlacesSnapshotLoader.addRecord`
+uses snapshot time and prior in-memory signatures rather than the durable
+journal. A later normal export could restamp or echo an imported peer place.
+The gated test coordinator instead composes from its observed owned file,
+which is why its no-echo assertion passes. The real exporter must be
+reconciled with journal source/time and tested across restart before this
+receiver can become user-accessible. The folder migration and off-URL
+credential-classification gates above also remain.
