@@ -9,7 +9,10 @@ it is not a claim that two-way sync or subscriptions are available in 335.
 
 - Earshot's public episode ID trims the GUID (or enclosure URL) and hashes it;
   the existing two device fixtures and six ID vectors match QUILL's merged
-  interop tests. QUILL PR #2095 merged on November 27. Its current code and
+  interop tests. QUILL PR #2095 merged on November 27. A disposable clone pinned
+  at `64651e5884b779b7cf75e3c5cc4125b77a983e82` passed 27 interop and 21
+  conformance/subscription tests. This is local format evidence, not a real
+  provider, Windows, or NVDA result. Its current code and
   fixtures are the useful comparison; its `listening-places-spec.md` prose is
   behind the implementation on subscription support, GUID trimming, and plain
   feed URLs in opt-in subscription records.
