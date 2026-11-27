@@ -76,8 +76,15 @@ enum ListeningPlacesEventJournal {
     ) throws {
         let changed = context.changedModelsArray.compactMap { $0 as? Episode }
         guard !changed.isEmpty else { return }
+        // SwiftData can report a newly inserted Episode as changed before its
+        // first save. Its temporary identifier cannot be resolved in another
+        // context; such catalog/import state has no committed event to compare.
+        let insertedIDs = Set(context.insertedModelsArray.compactMap {
+            ($0 as? Episode)?.persistentModelID
+        })
         let committed = ModelContext(context.container)
         for episode in changed {
+            guard !insertedIDs.contains(episode.persistentModelID) else { continue }
             guard let previous = committed.model(for: episode.persistentModelID) as? Episode,
                   previous.positionSeconds != episode.positionSeconds
                     || previous.isPlayed != episode.isPlayed else { continue }

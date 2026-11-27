@@ -135,6 +135,30 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
         XCTAssertEqual(changed.positionSeconds, 20)
     }
 
+    func testPreSaveBoundaryLeavesTemporaryEpisodeUnknownUntilFirstCommit() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = ModelContext(container)
+        let (podcast, episode) = makeEpisode(position: 0)
+        context.insert(podcast)
+        context.insert(episode)
+        episode.positionSeconds = 10
+        XCTAssertTrue(context.insertedModelsArray.contains {
+            ($0 as? Episode)?.persistentModelID == episode.persistentModelID
+        })
+
+        // A newly inserted row has no committed event to compare and its
+        // temporary identifier is not resolvable by a second ModelContext.
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: context, localDeviceID: "phone"
+        )
+        try context.save()
+        let fresh = ModelContext(container)
+        let saved = try storedEpisode(in: fresh)
+        XCTAssertEqual(saved.positionSeconds, 10)
+        XCTAssertEqual(try ListeningPlacesEventJournal.read(for: saved, in: fresh),
+                       .unknownLegacy)
+    }
+
     func testSaveBoundaryAdvancesClockAfterOneUnstagedBackwardAndForwardChange() throws {
         let container = try ModelContainerFactory.makeInMemory()
         let writer = ModelContext(container)
