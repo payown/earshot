@@ -105,6 +105,7 @@ actor ListeningPlacesSnapshotLoader {
         previousUpdatedAtByID: [String: Date],
         deviceID: String,
         appVersion: String,
+        requirePublicApproval: Bool = false,
         verifyLegacyRecordAttribution: Bool = true,
         now: Date = .now
     ) throws -> ListeningPlacesPreparedSnapshot {
@@ -112,7 +113,7 @@ actor ListeningPlacesSnapshotLoader {
         var updatedAtByID = previousUpdatedAtByID
         var recordsByID: [String: ListeningPlaceRecord] = [:]
         let journalValues = try ListeningPlacesEventJournal.snapshotRawValues(in: modelContext)
-        let excludedPodcastIDs = try excludedPodcasts()
+        let excludedPodcastIDs = try excludedPodcasts(requirePublicApproval: requirePublicApproval)
         // Old owned files carry hashed episode IDs without feed provenance.
         // Retain a historical row only when the current catalog positively
         // attributes it to a shareable show. Unknown rows cannot safely be
@@ -246,15 +247,20 @@ actor ListeningPlacesSnapshotLoader {
         )
     }
 
-    private func excludedPodcasts() throws -> Set<PersistentIdentifier> {
+    private func excludedPodcasts(requirePublicApproval: Bool) throws -> Set<PersistentIdentifier> {
         let podcasts = try modelContext.fetch(FetchDescriptor<Podcast>())
         let deviceOnlyKeys = try ListeningPlacesFeedPrivacy.deviceOnlyKeys(in: modelContext)
+        let approved = requirePublicApproval
+            ? try ListeningPlacesPublicFeedApproval.approvedKeys(in: modelContext) : nil
         var excluded = Set<PersistentIdentifier>()
         for podcast in podcasts {
             try Task.checkCancellation()
+            let approvedForStaging = approved?.contains(
+                ListeningPlacesPublicFeedApproval.key(podcast.feedURL)
+            ) ?? true
             if !ListeningPlacesFeedPrivacy.mayShare(
                 feedURL: podcast.feedURL, deviceOnlyKeys: deviceOnlyKeys
-            ) {
+            ) || !approvedForStaging {
                 excluded.insert(podcast.persistentModelID)
             }
         }
@@ -459,6 +465,16 @@ final class ListeningPlacesService {
     // A switch-off is not acknowledged until the already-started owned-file
     // replacement returns. No new snapshot may start while this is true.
     @ObservationIgnored private var sharingStopPending = false
+    #if DEBUG
+    private static let disposableStopPendingKey = "listening_places_disposable_stop_pending_v1"
+    @ObservationIgnored private var disposablePlaybackDemoOverride = false
+    private var usesDisposablePlaybackDemo: Bool {
+        disposablePlaybackDemoOverride || ScreenshotHarness.isListeningPlacesPlaybackDemo
+    }
+    func useDisposablePlaybackDemoForTesting() {
+        disposablePlaybackDemoOverride = true
+    }
+    #endif
     @ObservationIgnored private var context: ModelContext?
     @ObservationIgnored private var store: AppSettingsStore?
     @ObservationIgnored private var bookmarkData: Data?
@@ -541,6 +557,13 @@ final class ListeningPlacesService {
         let store = AppSettingsStore(context: context)
         self.store = store
         enabled = store.bool(SettingsKey.listeningPlacesEnabled, default: false)
+        #if DEBUG
+        if usesDisposablePlaybackDemo,
+           LocalAppSettingIdentity.value(for: Self.disposableStopPendingKey, in: context) == "true" {
+            sharingStopPending = true
+            enabled = false
+        }
+        #endif
         includeLabels = store.bool(SettingsKey.listeningPlacesIncludeLabels, default: false)
         if let savedFolderName = store.rawValue(SettingsKey.listeningPlacesFolderName),
            !savedFolderName.isEmpty {
@@ -556,6 +579,11 @@ final class ListeningPlacesService {
         deviceID = Self.isValidDeviceID(savedDeviceID) ? savedDeviceID : Self.makeDeviceID()
         store.setRawValue(deviceID, for: SettingsKey.listeningPlacesDeviceID)
         status = bookmarkData == nil ? .notConfigured : (enabled ? .ready : .off)
+        #if DEBUG
+        if usesDisposablePlaybackDemo, sharingStopPending {
+            status = .failed("Disposable owned-file cleanup is pending after relaunch.")
+        }
+        #endif
 
         observer = NotificationCenter.default.addObserver(
             forName: .earshotEpisodeUserStateDidChange,
@@ -603,6 +631,12 @@ final class ListeningPlacesService {
 
     func chooseFolder(_ url: URL) async {
         pendingOlderFileConfirmation = nil
+        #if DEBUG
+        if usesDisposablePlaybackDemo, sharingStopPending {
+            status = .failed("Finish disposable owned-file cleanup before choosing another folder.")
+            return
+        }
+        #endif
         if sharingStopPending {
             await waitForInFlightFileWrites()
             if sharingStopPending {
@@ -668,6 +702,12 @@ final class ListeningPlacesService {
             status = .notConfigured
             return
         }
+        #if DEBUG
+        if value, usesDisposablePlaybackDemo, sharingStopPending {
+            status = .failed("Finish disposable owned-file cleanup before sharing again.")
+            return
+        }
+        #endif
         // Both directions supersede a pending snapshot. Keep the visible switch
         // on while a prior coordinated write is still in flight; its completion
         // linearizes before turning sharing off. This await does not block UI.
@@ -675,6 +715,9 @@ final class ListeningPlacesService {
         let generation = writeGeneration
         if !value {
             sharingStopPending = true
+            #if DEBUG
+            if usesDisposablePlaybackDemo { status = .writing }
+            #endif
             pendingWriteTask?.cancel()
             pendingWriteTask = nil
             // Persist the stop intent before waiting on a slow provider. A
@@ -689,6 +732,13 @@ final class ListeningPlacesService {
                 try LocalAppSettingIdentity.setValue(
                     "false", for: SettingsKey.listeningPlacesEnabled, in: context
                 )
+                #if DEBUG
+                if usesDisposablePlaybackDemo {
+                    try LocalAppSettingIdentity.setValue(
+                        "true", for: Self.disposableStopPendingKey, in: context
+                    )
+                }
+                #endif
                 try context.save()
             } catch {
                 fail(error)
@@ -696,12 +746,60 @@ final class ListeningPlacesService {
             }
             await waitForInFlightFileWrites()
             guard generation == writeGeneration, sharingStopPending else { return }
+            #if DEBUG
+            if usesDisposablePlaybackDemo, let bookmarkData {
+                do {
+                    _ = try await transport.setDisposablePlaybackScopeAndScrub(
+                        bookmarkData: bookmarkData, deviceID: deviceID,
+                        episodes: false
+                    )
+                    guard generation == writeGeneration, sharingStopPending else { return }
+                    // The disposable actor changed the owned file outside the
+                    // normal snapshot cache. Re-read it on the next enable.
+                    hasRestoredExisting = false
+                    hasObservedDeviceFile = false
+                    observedDeviceFile = nil
+                    lastWrittenRecords = nil
+                    hasVerifiedPriorRecordAttribution = false
+                } catch {
+                    fail(error)
+                    return // Keep pending and fail closed for a retry.
+                }
+            }
+            #endif
+            #if DEBUG
+            if usesDisposablePlaybackDemo, let context {
+                do {
+                    try LocalAppSettingIdentity.setValue(
+                        "false", for: Self.disposableStopPendingKey, in: context
+                    )
+                    try context.save()
+                } catch {
+                    fail(error)
+                    return // File is scrubbed, but retain retryable pending state.
+                }
+            }
+            #endif
             enabled = false
             sharingStopPending = false
             status = .off
             return
         }
         sharingStopPending = false
+        #if DEBUG
+        if usesDisposablePlaybackDemo, let bookmarkData {
+            do {
+                _ = try await transport.setDisposablePlaybackScopeAndScrub(
+                    bookmarkData: bookmarkData, deviceID: deviceID,
+                    episodes: true
+                )
+            } catch {
+                sharingStopPending = true
+                fail(error)
+                return
+            }
+        }
+        #endif
         enabled = true
         store?.setBool(value, for: SettingsKey.listeningPlacesEnabled)
         status = .ready
@@ -947,6 +1045,11 @@ final class ListeningPlacesService {
             let loader = await ListeningPlacesSnapshotLoader.makeBackground(
                 modelContainer: context.container
             )
+            #if DEBUG
+            let requirePublicApproval = ScreenshotHarness.isListeningPlacesPlaybackDemo
+            #else
+            let requirePublicApproval = false
+            #endif
             let prepared = try await loader.prepare(
                 pendingZeroSnapshots: Array(capturedPendingZeroSnapshots.values),
                 includeLabels: capturedIncludeLabels,
@@ -955,6 +1058,7 @@ final class ListeningPlacesService {
                 previousUpdatedAtByID: capturedUpdatedAtByID,
                 deviceID: capturedDeviceID,
                 appVersion: "earshot/\(AppInfo.version)",
+                requirePublicApproval: requirePublicApproval,
                 verifyLegacyRecordAttribution: !hasVerifiedPriorRecordAttribution
             )
             // Another waiter may have started a write while this snapshot was
@@ -1195,6 +1299,7 @@ final class ListeningPlacesService {
 #if DEBUG
     var isRemovingDeviceFileForTesting: Bool { removingDeviceFile }
     var isSharingStopPendingForTesting: Bool { sharingStopPending }
+    var disposableTransportForTesting: ListeningPlacesFileTransport { transport }
     var isOlderConfirmationInFlightForTesting: Bool { olderConfirmationInFlight != nil }
     @ObservationIgnored private(set) var olderConfirmationDeliveriesForTesting = 0
 #endif

@@ -1003,6 +1003,59 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.releasePersistence()
     }
 
+    func testDisposableCleanupFailureRemainsPendingAfterServiceRebind() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-disposable-stop-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let context = container.mainContext
+        let podcast = Podcast(feedURL: "https://example.invalid/stop.xml", title: "Synthetic")
+        let episode = Episode(guid: "stop-fixture", title: "Synthetic episode",
+            audioURL: "https://example.invalid/stop.mp3", positionSeconds: 42)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try context.save()
+
+        let service = ListeningPlacesService()
+        service.useDisposablePlaybackDemoForTesting()
+        service.configure(context: context)
+        await service.chooseFolder(directory)
+        let file = try deviceFile(in: directory)
+        let original = try Data(contentsOf: file)
+        try setSelfReportedApp("other-app/synthetic-conflict", in: file)
+
+        await service.setEnabled(false)
+        XCTAssertTrue(service.isSharingStopPendingForTesting)
+        XCTAssertTrue(service.enabled, "A failed scrub must not acknowledge Off")
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: SettingsKey.listeningPlacesEnabled, in: ModelContext(container)
+        ), "false", "A relaunch cannot resume sharing")
+        service.releasePersistence()
+
+        let reopenedContext = ModelContext(container)
+        let reopened = ListeningPlacesService()
+        reopened.useDisposablePlaybackDemoForTesting()
+        reopened.configure(context: reopenedContext)
+        XCTAssertTrue(reopened.isSharingStopPendingForTesting)
+        XCTAssertFalse(reopened.enabled)
+        guard case .failed = reopened.status else {
+            return XCTFail("Unfinished owned-file cleanup must remain visible")
+        }
+        await reopened.setEnabled(true)
+        XCTAssertFalse(reopened.enabled, "Pending cleanup blocks a new disclosure")
+
+        try original.write(to: file, options: .atomic)
+        await reopened.setEnabled(false)
+        XCTAssertFalse(reopened.isSharingStopPendingForTesting)
+        XCTAssertEqual(reopened.status, .off)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: "listening_places_disposable_stop_pending_v1", in: ModelContext(container)
+        ), "false")
+        reopened.releasePersistence()
+    }
+
     private func setSelfReportedApp(_ app: String, in file: URL) throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         json["app"] = app
@@ -1127,6 +1180,46 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertEqual(publicEpisode.positionSeconds, 42)
         XCTAssertEqual(privateEpisode.positionSeconds, 43,
             "Withdrawing a shared-file row must preserve local playback history")
+    }
+
+    func testDisposablePlaybackExportRequiresPublicFixtureApproval() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let feeds = [
+            "https://example.invalid/approved.xml",
+            "https://example.invalid/user-entered.xml",
+            "https://example.invalid/private.xml?token=synthetic",
+            "not a feed URL",
+            "https://example.invalid/device-only.xml",
+        ]
+        var episodes: [Episode] = []
+        for (index, feed) in feeds.enumerated() {
+            let podcast = Podcast(feedURL: feed, title: "Synthetic \(index)")
+            let episode = Episode(guid: "synthetic-\(index)", title: "Episode \(index)",
+                audioURL: "https://example.invalid/audio-\(index).mp3", positionSeconds: 10)
+            episode.podcast = podcast
+            context.insert(podcast)
+            context.insert(episode)
+            episodes.append(episode)
+        }
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(
+            for: feeds[0], in: context)
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(
+            for: feeds[4], in: context)
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(feedURL: feeds[4], in: context)
+        try context.save()
+        let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
+        let prepared = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: true,
+            previousRecords: [], previousSignatures: [:], previousUpdatedAtByID: [:],
+            deviceID: "1234abcd", appVersion: "earshot/debug",
+            requirePublicApproval: true, now: Date(timeIntervalSince1970: 1_000)
+        )
+        XCTAssertEqual(prepared.records.map(\.id), [ListeningPlacesFormat.episodeID(
+            guid: episodes[0].guid, enclosureURL: episodes[0].audioURL
+        )])
+        XCTAssertEqual(episodes.map(\.positionSeconds), [10, 10, 10, 10, 10],
+            "Fail-closed staging must not mutate the local library")
     }
 
     func testOwnedSnapshotNeverAddsCredentialBearingEpisodePlace() async throws {

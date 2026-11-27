@@ -393,18 +393,37 @@ enum ListeningPlacesSubscriptionTestCoordinator {
         bookmarkData: Data, ownDeviceID: String, context: ModelContext,
         transport: ListeningPlacesFileTransport = ListeningPlacesFileTransport(),
         now: Date = .now,
-        loadedEpisodeID: (@MainActor () -> PersistentIdentifier?)? = nil
+        loadedEpisodeID: (@MainActor () -> PersistentIdentifier?)? = nil,
+        isPlaybackEnabled: (@MainActor () -> Bool)? = nil
     ) async throws -> Result {
         let episodeImportEnabled = LocalAppSettingIdentity.value(
             for: episodeImportKey, in: context
         ) == "enabled"
         guard let initialPolicy = policy(in: context),
-              initialPolicy.shareSubscriptions || episodeImportEnabled
+              initialPolicy.shareSubscriptions || episodeImportEnabled,
+              isPlaybackEnabled?() != false
         else { return Result() }
         guard !context.hasChanges else { throw CoordinatorError.dirtyContext }
-        guard let observed = try await transport.readDeviceFile(
-            bookmarkData: bookmarkData, deviceID: ownDeviceID
-        ) else { return Result() }
+        // The disposable Playback-only route serializes its scope and owned
+        // file with the same actor. Subscription/folder experiments retain
+        // their separate disabled path and are not enabled by this slice.
+        let playbackOnly = episodeImportEnabled && !initialPolicy.shareSubscriptions
+        let scope: ListeningPlacesFileTransport.ScopeResult?
+        let observed: Data
+        if playbackOnly {
+            let current = try await transport.setDisposablePlaybackScopeAndScrub(
+                bookmarkData: bookmarkData, deviceID: ownDeviceID, episodes: true, now: now
+            )
+            guard let file = current.ownedFile else { return Result() }
+            scope = current
+            observed = file
+        } else {
+            scope = nil
+            guard let file = try await transport.readDeviceFile(
+                bookmarkData: bookmarkData, deviceID: ownDeviceID
+            ) else { return Result() }
+            observed = file
+        }
         guard let root = (try? JSONSerialization.jsonObject(with: observed)) as? [String: Any],
               root["format"] as? String == ListeningPlacesFormat.identifier,
               root["device"] as? String == ownDeviceID,
@@ -414,6 +433,7 @@ enum ListeningPlacesSubscriptionTestCoordinator {
         let peers = try await transport.readOtherDeviceFiles(
             bookmarkData: bookmarkData, excludingDeviceID: ownDeviceID
         )
+        guard isPlaybackEnabled?() != false else { throw CoordinatorError.policyChanged }
         var result = Result()
         var carried: [[String: Any]] = []
         var episodePeerFiles: [(deviceID: String, data: Data)] = []
@@ -446,7 +466,8 @@ enum ListeningPlacesSubscriptionTestCoordinator {
         }
         guard policy(in: context) == initialPolicy,
               (LocalAppSettingIdentity.value(for: episodeImportKey, in: context)
-                == "enabled") == episodeImportEnabled
+                == "enabled") == episodeImportEnabled,
+              isPlaybackEnabled?() != false
         else { throw CoordinatorError.policyChanged }
         if episodeImportEnabled {
             guard let loadedEpisodeID else { throw CoordinatorError.missingLoadedEpisodeProvider }
@@ -460,10 +481,23 @@ enum ListeningPlacesSubscriptionTestCoordinator {
             policy: initialPolicy, carriedPeerRows: carried, now: now
         )
         if composed != observed {
-            try await transport.replaceDeviceFile(
-                bookmarkData: bookmarkData, deviceID: ownDeviceID,
-                expected: observed, with: composed
-            )
+            guard policy(in: context) == initialPolicy,
+                  (LocalAppSettingIdentity.value(for: episodeImportKey, in: context)
+                    == "enabled") == episodeImportEnabled,
+                  isPlaybackEnabled?() != false else {
+                throw CoordinatorError.policyChanged
+            }
+            if let scope {
+                try await transport.replaceDisposablePlaybackFileWithConsent(
+                    bookmarkData: bookmarkData, deviceID: ownDeviceID,
+                    expected: observed, with: composed, token: scope.token, now: now
+                )
+            } else {
+                try await transport.replaceDeviceFile(
+                    bookmarkData: bookmarkData, deviceID: ownDeviceID,
+                    expected: observed, with: composed
+                )
+            }
             result.wroteOwnedFile = true
         }
         return result

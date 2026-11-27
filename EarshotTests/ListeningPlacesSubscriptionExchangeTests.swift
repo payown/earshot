@@ -930,6 +930,68 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
                              label: nil, feed: nil, deleted: nil)
     }
 
+    func testDisposablePlaybackConsentSerializesProviderDelayAndRevocation() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "places-playback-consent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bookmark = try root.bookmarkData(options: .minimalBookmark,
+            includingResourceValuesForKeys: nil, relativeTo: nil)
+        let transport = ListeningPlacesFileTransport()
+        try await transport.prepareFolder(bookmarkData: bookmark)
+        let empty = try emptyFile()
+        try await transport.writeDeviceFile(bookmarkData: bookmark,
+            deviceID: "phone123", data: empty)
+        let peerPath = root.appending(path: "Listening Places/devices/desktop99.json")
+        let peer = try file(records: [])
+        try peer.write(to: peerPath)
+        let proposed = try JSONSerialization.data(withJSONObject: [
+            "format": ListeningPlacesFormat.identifier,
+            "device": "phone123", "app": "earshot/debug",
+            "written_at": "2027-01-15T08:00:00Z",
+            "records": [["id": "episode:synthetic", "kind": "episode",
+                         "position_ms": 12_000, "played": false,
+                         "updated_at": "2027-01-15T08:00:00Z"]],
+        ])
+
+        // Revocation reaches the actor while an earlier provider write waits.
+        let first = try await transport.setDisposablePlaybackScopeAndScrub(
+            bookmarkData: bookmark, deviceID: "phone123", episodes: true, now: newer)
+        _ = try await transport.setDisposablePlaybackScopeAndScrub(
+            bookmarkData: bookmark, deviceID: "phone123", episodes: false, now: newer)
+        do {
+            try await transport.replaceDisposablePlaybackFileWithConsent(
+                bookmarkData: bookmark, deviceID: "phone123",
+                expected: empty, with: proposed, token: first.token, now: newer)
+            XCTFail("A stale writer must not disclose an episode after revocation")
+        } catch ListeningPlacesFileTransport.ConsentError.staleScope {}
+        let afterEarlyRevoke = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123")
+        XCTAssertEqual(afterEarlyRevoke, empty)
+
+        // The write reaches the actor first; the later revocation must scrub
+        // the owned file before acknowledging Off, leaving the peer untouched.
+        let second = try await transport.setDisposablePlaybackScopeAndScrub(
+            bookmarkData: bookmark, deviceID: "phone123", episodes: true, now: newer)
+        do {
+            try await transport.replaceDisposablePlaybackFileWithConsent(
+                bookmarkData: bookmark, deviceID: "phone123",
+                expected: empty, with: peer, token: second.token, now: newer)
+            XCTFail("A peer-root payload must not be written as this device")
+        } catch ListeningPlacesFileTransport.ConsentError.foreignOwnedFile {}
+        try await transport.replaceDisposablePlaybackFileWithConsent(
+            bookmarkData: bookmark, deviceID: "phone123",
+            expected: empty, with: proposed, token: second.token, now: newer)
+        let afterWrite = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123")
+        XCTAssertEqual(try rows(try XCTUnwrap(afterWrite)).count, 1)
+        let revoked = try await transport.setDisposablePlaybackScopeAndScrub(
+            bookmarkData: bookmark, deviceID: "phone123", episodes: false, now: newer)
+        XCTAssertTrue(revoked.scrubbed)
+        XCTAssertTrue(try rows(try XCTUnwrap(revoked.ownedFile)).isEmpty)
+        XCTAssertEqual(try Data(contentsOf: peerPath), peer)
+    }
+
     private func file(records: [[String: Any]]) throws -> Data {
         try JSONSerialization.data(withJSONObject: [
             "format": ListeningPlacesFormat.identifier,

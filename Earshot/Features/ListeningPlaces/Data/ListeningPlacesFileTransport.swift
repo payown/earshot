@@ -1,6 +1,37 @@
 import Darwin
 import Foundation
 
+/// Disposable Playback staging only. This filters this device's file; it does
+/// not inspect, edit, or delete another app's file.
+#if DEBUG
+enum ListeningPlacesOwnedFileFilter {
+    enum FilterError: Error { case invalidFile, fileTooLarge }
+    private static let maximumBytes = 2 * 1_024 * 1_024
+
+    static func filtered(
+        _ data: Data, shareEpisodes: Bool, now: Date = .now
+    ) throws -> Data {
+        guard data.count <= maximumBytes,
+              var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              root["format"] as? String == ListeningPlacesFormat.identifier,
+              let rows = root["records"] as? [[String: Any]] else {
+            throw FilterError.invalidFile
+        }
+        let allowed = rows.filter { row in
+            guard let id = row["id"] as? String else { return false }
+            // This staging slice never enables follow or folder exchange.
+            return shareEpisodes && id.hasPrefix("episode:")
+        }
+        guard allowed.count != rows.count else { return data }
+        root["records"] = allowed
+        root["written_at"] = ISO8601DateFormatter().string(from: now)
+        let filtered = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
+        guard filtered.count <= maximumBytes else { throw FilterError.fileTooLarge }
+        return filtered
+    }
+}
+#endif
+
 /// Bounded bytes from a different writer. Parsing and applying are separate:
 /// the transport never trusts metadata in a file or mutates another device's file.
 struct ListeningPlacesOtherDeviceRead: Sendable {
@@ -31,6 +62,64 @@ struct ListeningPlacesOtherDeviceRead: Sendable {
 }
 
 actor ListeningPlacesFileTransport {
+    #if DEBUG
+    enum ConsentError: Error { case staleScope, foreignOwnedFile }
+    struct ConsentToken: Sendable { let revision: UInt64 }
+    struct ScopeResult: Sendable {
+        let token: ConsentToken
+        let ownedFile: Data?
+        let scrubbed: Bool
+    }
+    private var scopeRevision: UInt64 = 0
+    private var shareEpisodes = false
+
+    /// Consent and coordinated file replacement share one actor boundary.
+    /// A caller acknowledges Off only after this returns or reports failure.
+    func setDisposablePlaybackScopeAndScrub(
+        bookmarkData: Data, deviceID: String,
+        episodes: Bool, now: Date = .now
+    ) throws -> ScopeResult {
+        scopeRevision &+= 1
+        shareEpisodes = episodes
+        if let observed = try readDeviceFile(bookmarkData: bookmarkData, deviceID: deviceID) {
+            guard let root = (try? JSONSerialization.jsonObject(with: observed)) as? [String: Any],
+                  root["device"] as? String == deviceID,
+                  (root["app"] as? String)?.hasPrefix("earshot/") == true else {
+                throw ConsentError.foreignOwnedFile
+            }
+            let filtered = try ListeningPlacesOwnedFileFilter.filtered(
+                observed, shareEpisodes: episodes, now: now
+            )
+            let changed = filtered != observed
+            if changed {
+                try replaceDeviceFile(bookmarkData: bookmarkData, deviceID: deviceID,
+                    expected: observed, with: filtered)
+            }
+            return ScopeResult(token: ConsentToken(revision: scopeRevision),
+                ownedFile: filtered, scrubbed: changed)
+        }
+        return ScopeResult(token: ConsentToken(revision: scopeRevision),
+            ownedFile: nil, scrubbed: false)
+    }
+
+    func replaceDisposablePlaybackFileWithConsent(
+        bookmarkData: Data, deviceID: String, expected: Data?,
+        with data: Data, token: ConsentToken, now: Date = .now
+    ) throws {
+        guard token.revision == scopeRevision else { throw ConsentError.staleScope }
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              root["device"] as? String == deviceID,
+              (root["app"] as? String)?.hasPrefix("earshot/") == true else {
+            throw ConsentError.foreignOwnedFile
+        }
+        let filtered = try ListeningPlacesOwnedFileFilter.filtered(
+            data, shareEpisodes: shareEpisodes, now: now
+        )
+        try replaceDeviceFile(bookmarkData: bookmarkData, deviceID: deviceID,
+            expected: expected, with: filtered)
+    }
+    #endif
+
     private static let maximumOtherDeviceFileBytes = 2 * 1_024 * 1_024
     private static let maximumOtherDeviceTotalBytes = 16 * 1_024 * 1_024
     private static let maximumOtherDeviceFiles = 64
