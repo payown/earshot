@@ -337,3 +337,28 @@ sidecar could duplicate folders after a crash. A migration-safe mapping and
 older-store test are required before applying peer folder structure. The
 coordinator's policy rechecks are not proof of full provider race safety, and
 stored HTTP credentials still need a conservative privacy classification.
+
+The folder mapping probe (`EarshotLPFolderIDAtomicProbe20261127.xcresult`)
+showed a trap when a `PersistentIdentifier` encoded before the folder's first
+save was resolved after reopening. That is failed diagnostic evidence; the
+probe is not in the passing suite. A two-save sidecar would leave an orphan
+or duplicate if interrupted. Adding a field to the live `PodcastFolder` would
+also change the older V12–V14 schemas that currently reference that class,
+so a frozen old model graph and verified V14→new migration are prerequisite
+to any persistent external folder mapping. No folder model or schema was
+changed in this branch.
+
+The subscription exchange now requires a per-feed, device-local public-share
+approval marker in addition to the global test policy and URL privacy check.
+The marker stores only a full hash of the canonical URL. Missing, conflicting,
+or unapproved rows are deferred, and a peer row with no explicit `private:
+false` is rejected. The synthetic test harness alone stages approvals; there
+is no product UI, no inferred consent and no network fetch. Source inspection
+found URLSession transport and URL-based private-feed checks, but no verified
+app-owned store that can prove the absence of credentials held elsewhere.
+Future product consent and credential-change revocation therefore remain
+release gates. No live feed or account was accessed for this assessment.
+The final adjacent Listening Places run passed 104/104 with zero failures or
+skips on disposable iOS 26.5 Simulator
+(`EarshotLPApprovalAdjacentFinal20261127.xcresult`). No current source schema
+was changed; this run does not validate a future folder-ID schema migration.

@@ -46,6 +46,14 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         XCTAssertEqual(try ListeningPlacesSubscriptionExchange.exportOwnedFile(
             episodeFile: original, context: context, policy: .init()
         ), original)
+        XCTAssertEqual(try rows(ListeningPlacesSubscriptionExchange.exportOwnedFile(
+            episodeFile: original, context: context,
+            policy: .init(shareSubscriptions: true)
+        )).count, episodeRows.count, "Sharing without per-feed approval must fail closed")
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(
+            for: feed, in: context
+        )
+        try context.save()
 
         let carried: [[String: Any]] = [
             ["id": "folder:unknown1", "kind": "folder", "name": "Peer-only",
@@ -100,6 +108,8 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         episode.podcast = podcast
         context.insert(podcast)
         context.insert(episode)
+        try context.save()
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
         try context.save()
         let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
         let before = try await loader.prepare(
@@ -166,6 +176,8 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
     func testPeerFollowAndUnfollowRetainLocalGraphAndDeviceOnlyWins() throws {
         let context = TestStore.freshContext()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try context.save()
         let follow: [String: Any] = [
             "id": id, "kind": "subscription", "feed_url": feed,
             "title": "Public", "private": false,
@@ -262,6 +274,8 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
 
     func testMalformedSiblingDoesNotDiscardFractionalTimestampFollow() throws {
         let context = TestStore.freshContext()
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try context.save()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
         let data = try JSONSerialization.data(withJSONObject: [
             "format": ListeningPlacesFormat.identifier,
@@ -290,6 +304,8 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         context.insert(original)
         try context.save()
         let renamed = "https://example.com/renamed.xml"
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: renamed, in: context)
+        try context.save()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(renamed))
         let peer = try file(records: [[
             "id": id, "kind": "subscription", "feed_url": renamed,
@@ -313,6 +329,8 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         let original = Podcast(feedURL: feed, title: "Locally followed", createdAt: newer)
         context.insert(original)
         try context.save()
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try context.save()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
         let peer = try file(records: [[
             "id": id, "deleted": true, "updated_at": "2023-11-14T22:13:20Z",
@@ -331,6 +349,8 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         let context = TestStore.freshContext()
         let original = Podcast(feedURL: feed, title: "My follow", createdAt: older)
         context.insert(original)
+        try context.save()
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
         try context.save()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
         let peer = try file(records: [[
@@ -352,6 +372,9 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
 
     func testPrivatePeerSubscriptionAndTokenFeedCannotBeFollowed() throws {
         let context = TestStore.freshContext()
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try context.save()
+        let publicID = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
         let peer = try file(records: [
             ["id": "sub:private", "kind": "subscription", "feed_url": feed,
              "title": "Private", "private": true,
@@ -362,6 +385,9 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
              "title": "Token feed", "private": false,
              "subscribed_at": "2023-11-14T22:13:20Z",
              "updated_at": "2023-11-14T22:13:20Z"],
+            ["id": publicID, "kind": "subscription", "feed_url": feed,
+             "title": "Unclassified", "subscribed_at": "2023-11-14T22:13:20Z",
+             "updated_at": "2023-11-14T22:13:20Z"],
         ])
         let result = try ListeningPlacesSubscriptionExchange.applyPeerFile(
             peer, context: context,
@@ -369,9 +395,30 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             expectedPeerID: "peer1234", ownDeviceID: "phone123", now: newer
         )
         XCTAssertEqual(result.follows, 0)
-        XCTAssertEqual(result.privateRows, 2)
+        XCTAssertEqual(result.privateRows, 3)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 0)
     }
+
+    func testPublicPeerFollowWithoutLocalApprovalIsDeferred() throws {
+        let context = TestStore.freshContext()
+        let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
+        let peer = try file(records: [[
+            "id": id, "kind": "subscription", "feed_url": feed,
+            "title": "Public", "private": false,
+            "subscribed_at": "2023-11-14T22:13:20Z",
+            "updated_at": "2023-11-14T22:13:20Z",
+        ]])
+        let deferred = try ListeningPlacesSubscriptionExchange.applyPeerFile(
+            peer, context: context,
+            policy: .init(shareSubscriptions: true, acceptFollows: true),
+            expectedPeerID: "peer1234", ownDeviceID: "phone123", now: newer
+        )
+        XCTAssertEqual(deferred.follows, 0)
+        XCTAssertEqual(deferred.deferred, 1)
+        XCTAssertEqual(deferred.privateRows, 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 0)
+    }
+
 
     func testDisposableCoordinatorReadsPeerAndCASWritesOnlyOwnedFile() async throws {
         guard ProcessInfo.processInfo.environment["EARSHOT_LP_DISPOSABLE_SYNC"] == "1",
@@ -395,6 +442,8 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         let peerPath = root.appending(path: "Listening Places/devices/\(peerID).json")
         try peer.write(to: peerPath)
         let context = TestStore.freshContext()
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try context.save()
         try ListeningPlacesSubscriptionTestCoordinator.stagePolicy(.init(), in: context)
         try context.save()
         let off = try await ListeningPlacesSubscriptionTestCoordinator.sync(

@@ -57,6 +57,7 @@ enum ListeningPlacesSubscriptionExchange {
             ($0["id"] as? String)?.hasPrefix("episode:") == true
         }
         let localOnly = try ListeningPlacesFeedPrivacy.deviceOnlyKeys(in: context)
+        let approved = try ListeningPlacesPublicFeedApproval.approvedKeys(in: context)
         let podcasts = try context.fetch(PodcastQuery.followedDescriptor())
         var rows = episodeRows
         var sharedIDs = Set<String>()
@@ -65,7 +66,8 @@ enum ListeningPlacesSubscriptionExchange {
             let feed = podcast.feedURL
             guard ListeningPlacesFeedPrivacy.mayShare(
                 feedURL: feed, deviceOnlyKeys: localOnly
-            ), let canonical = ListeningPlacesSubscriptionIdentity.canonicalURL(feed),
+            ), approved.contains(ListeningPlacesPublicFeedApproval.key(feed)),
+                  let canonical = ListeningPlacesSubscriptionIdentity.canonicalURL(feed),
                   let id = ListeningPlacesSubscriptionIdentity.shareableID(feed)
             else { continue }
             guard sharedIDs.insert(id).inserted else { continue }
@@ -191,6 +193,7 @@ enum ListeningPlacesSubscriptionExchange {
         guard policy.shareSubscriptions else { return ApplyResult() }
         let rows = rawRows.compactMap { $0 as? [String: Any] }
         let localOnly = try ListeningPlacesFeedPrivacy.deviceOnlyKeys(in: context)
+        let approved = try ListeningPlacesPublicFeedApproval.approvedKeys(in: context)
         var result = ApplyResult()
         result.deferred = rawRows.count - rows.count
             + max(0, rows.count - ListeningPlacesFormat.maximumRecordCount - maximumAuxiliaryRows)
@@ -226,7 +229,7 @@ enum ListeningPlacesSubscriptionExchange {
                   eventTime <= now.addingTimeInterval(24 * 60 * 60)
             else { result.deferred += 1; continue }
             let deleted = row["deleted"] as? Bool == true
-            if !deleted && (row["private"] as? Bool == true) {
+            if !deleted && (row["private"] as? Bool != false) {
                 result.privateRows += 1
                 continue
             }
@@ -240,6 +243,7 @@ enum ListeningPlacesSubscriptionExchange {
                 guard policy.acceptUnfollows,
                       let podcast = podcastsByID[id], podcast.isFollowed,
                       let importedClock, importedClock < eventTime,
+                      approved.contains(ListeningPlacesPublicFeedApproval.key(podcast.feedURL)),
                       ListeningPlacesFeedPrivacy.mayShare(
                         feedURL: podcast.feedURL, deviceOnlyKeys: localOnly
                       ),
@@ -257,6 +261,8 @@ enum ListeningPlacesSubscriptionExchange {
                       ListeningPlacesFeedPrivacy.mayShare(
                         feedURL: feed, deviceOnlyKeys: localOnly
                       ) else { result.privateRows += 1; continue }
+                guard approved.contains(ListeningPlacesPublicFeedApproval.key(feed))
+                else { result.deferred += 1; continue }
                 let canonical = FeedURLIdentity.canonical(feed)
                 guard policy.acceptFollows,
                       let firstFollow = row["subscribed_at"] as? String,
@@ -298,6 +304,41 @@ enum ListeningPlacesSubscriptionExchange {
         }
         return result
     }
+}
+
+/// Until a product UI can obtain and revoke per-feed disclosure consent, a
+/// missing/ambiguous local approval keeps subscription URLs out of the plain
+/// shared file and prevents automatic follows of peer-provided addresses.
+/// This is device-local and carries only a hash, never a feed URL or password.
+enum ListeningPlacesPublicFeedApproval {
+    private static let prefix = "listening_places_public_feed_approval_v1:"
+
+    static func key(_ feedURL: String) -> String {
+        let canonical = ListeningPlacesSubscriptionIdentity.canonicalURL(feedURL) ?? feedURL
+        let hash = SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        return prefix + hash
+    }
+
+    static func approvedKeys(in context: ModelContext) throws -> Set<String> {
+        let prefix = Self.prefix
+        let rows = try context.fetch(FetchDescriptor<LocalAppSetting>(predicate: #Predicate {
+            $0.key.starts(with: prefix)
+        }))
+        let grouped = Dictionary(grouping: rows, by: \.key)
+        return Set(grouped.compactMap { key, values in
+            values.count == 1 && values[0].value == "approved" ? key : nil
+        })
+    }
+
+    #if DEBUG
+    static func stageDisposableApproval(for feedURL: String, in context: ModelContext) throws {
+        guard ListeningPlacesSubscriptionIdentity.shareableID(feedURL) != nil else {
+            throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+        }
+        try LocalAppSettingIdentity.setValue("approved", for: key(feedURL), in: context)
+    }
+    #endif
 }
 
 #if DEBUG
