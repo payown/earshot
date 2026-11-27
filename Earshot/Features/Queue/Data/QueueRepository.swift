@@ -242,6 +242,7 @@ final class QueueRepository {
     static let autoQueueOptInDefaultAgeLimitDays = 7
 
     private let context: ModelContext
+    private let saveContext: (ModelContext) throws -> Void
 
     /// A no-save result used only by ``CatalogEpisodeQueueRepository``. Keeping
     /// this staging surface inside the existing queue owner prevents catalog
@@ -262,8 +263,12 @@ final class QueueRepository {
         let fileURL: URL?
     }
 
-    init(context: ModelContext) {
+    init(
+        context: ModelContext,
+        saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() }
+    ) {
         self.context = context
+        self.saveContext = saveContext
     }
 
     // MARK: Catalog transaction staging
@@ -1356,7 +1361,7 @@ final class QueueRepository {
     @discardableResult
     private func save(notifyQueueChange: Bool = true) -> Bool {
         do {
-            try context.save()
+            try saveContext(context)
             if notifyQueueChange {
                 NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)
             }

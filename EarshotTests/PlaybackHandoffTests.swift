@@ -151,6 +151,51 @@ final class PlaybackHandoffTests: XCTestCase {
         }
     }
 
+    func testRemovingLoadedEpisodeDuringPendingResumeHonorsContinuationBoundary() async throws {
+        for continueAfter in [false, true] {
+            let context = TestStore.freshContext()
+            AppSettingsStore(context: context).setBool(
+                continueAfter, for: SettingsKey.continueAfterEpisode
+            )
+            let audio = try playableAudioFile()
+            defer { try? FileManager.default.removeItem(at: audio) }
+            let loaded = makeEpisode(context)
+            loaded.audioURL = audio.absoluteString
+            let survivor = Episode(guid: "survivor", title: "Survivor", audioURL: audio.absoluteString)
+            survivor.podcast = loaded.podcast
+            context.insert(survivor)
+            try context.save()
+            let queue = QueueRepository(context: context)
+            queue.add([loaded, survivor])
+            let handoff = FakePlaybackHandoffClient()
+            await handoff.setFetchDelay(300_000_000)
+            let player = PlayerService(playbackHandoff: handoff)
+            player.configure(context: context)
+            player.load(loaded)
+            XCTAssertFalse(player.isPlaying)
+
+            player.resume()
+            try await Task.sleep(for: .milliseconds(20))
+            XCTAssertTrue(player.hasActivePlaybackRequest)
+            XCTAssertFalse(player.isPlaying, "Resume is waiting for its handoff fetch")
+            player.removeFromQueue(loaded, context: context, keepDownload: true)
+
+            if continueAfter {
+                XCTAssertEqual(player.nowPlayingEpisodeID, survivor.persistentModelID)
+                XCTAssertTrue(player.isPlaying)
+            } else {
+                XCTAssertNil(player.nowPlayingEpisodeID)
+                XCTAssertFalse(player.isPlaying)
+            }
+            XCTAssertEqual(queue.queue().map(\.persistentModelID), [survivor.persistentModelID])
+            try await Task.sleep(for: .milliseconds(350))
+            XCTAssertNotEqual(player.nowPlayingEpisodeID, loaded.persistentModelID,
+                              "The canceled handoff must not restart the removed episode")
+            player.stopAndUnload()
+            player.releasePersistence()
+        }
+    }
+
     func testRecordIdentityIsCanonicalAndDeterministic() throws {
         let first = try XCTUnwrap(
             PlaybackHandoffIdentity(
