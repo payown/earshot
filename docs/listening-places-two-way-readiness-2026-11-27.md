@@ -250,3 +250,16 @@ requires review if the count or file location of direct `positionSeconds` or
 raw double-bypass A→B→A diagnostic still fails; no supported central SwiftData
 save hook was found. Receiver activation still requires a reviewed way to
 cover those saves and a migration-safe authoritative revision design.
+
+The first expanded seven-suite run exposed a new SwiftData crash in the
+pre-save helper: newly inserted Queue episodes also appeared in its changed
+array, but their temporary IDs could not be resolved in the comparison
+context. That run was interrupted after repeated test-runner crashes and is
+**not** a pass (`EarshotLPWritersAndPrivacySuites20261127.xcresult`). The
+helper now skips inserted episodes until they have a committed baseline; it
+does not assign an event time to imported catalog state. The direct
+temporary-ID regression and the formerly crashing Queue test passed 2/2
+(`EarshotLPTempEpisodeFix20261127.xcresult`). The seven affected suites then
+passed 324/324, zero failures and zero skips on iOS 26.5 Simulator
+(`EarshotLPWriterPrivacyBroadFixed20261127.xcresult`). This is local source
+validation, not provider, physical playback, Watch, or two-way acceptance.
