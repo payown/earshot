@@ -589,6 +589,10 @@ specific set of paths, not all older/interrupted routes or full regression.
 The V15 experiment is not in the candidate branch; folder application remains
 off pending complete migration and CloudKit validation. No user store was
 preflighted, reset, or modified.
+The same copied-335 normal-open path then saved separate external IDs for
+two folders both named “Same name” and retained those IDs and membership
+order after restart (`EarshotV15NormalOpenIdentity20261127.xcresult`, 1/1).
+This evidence is on local experimental head `cdb37f75`, not the candidate.
 
 The separate Debug-only lifecycle experiment serializes its coordinated
 peer pass with the normal owned-file writer. A final binding, policy and
@@ -611,3 +615,4 @@ that limitation and any failure to be clearly communicated. Its new status
 text is still Debug-only and requires spoken-semantics approval before use in
 Settings. The adjacent suite and pinned cross-app fixture results are
 recorded separately from migration because the branches are not integrated.
+This Debug-only experiment is on local head `dd3c7c02`.
