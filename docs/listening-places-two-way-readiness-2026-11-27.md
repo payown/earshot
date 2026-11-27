@@ -290,3 +290,31 @@ settings saves, can still commit dirty Episode values made elsewhere. Until
 those boundaries are classified or a supported authoritative episode
 revision exists, arbitrary unstaged A→B→A remains a real application risk,
 not merely an artificial test case. The incoming receiver stays disconnected.
+
+### Harness-only subscription exchange after the writer audit
+
+`ListeningPlacesSubscriptionExchange` now composes public subscription and
+folder rows beside the bounded episode rows only when its explicit policy is
+enabled. It is not called by the app or exposed in Settings. A disposable
+QUILL Cast `64651e5884b779b7cf75e3c5cc4125b77a983e82` import accepted
+Earshot's public follow and ordered folders; QUILL re-exported its own file,
+which Earshot's test-only receiver imported. Unknown peer folder membership,
+folder rows and `app_private` data survive a compose/reopen cycle. The
+receiver does **not** apply folders or preferences locally. It defers an
+alias that matches an existing local show and will only apply a peer unfollow
+to a show introduced by the peer, retaining local episodes, Queue, downloads
+and history. An independently followed show is not remotely unfollowed.
+
+The seven focused disposable iOS 26.5 tests passed with no failures/skips
+(`EarshotLPSubscriptionBudgetFinal20261127.xcresult`). They cover opt-in
+off/on, 1,000 episode rows without subscription eviction, private/device-only
+exclusion, QUILL follow/re-export, non-destructive unfollow, withdrawal of
+Earshot's owned rows without touching QUILL's file, malformed siblings,
+fractional clocks, alias duplication and local-follow precedence. This
+supersedes the earlier statement above that no subscription rows can be
+emitted; that statement described the shipped path before this **unwired**
+harness was added. It does not establish provider, Windows, NVDA or physical
+acceptance. In particular, local follow event provenance, local folder and
+preference application, explicit settings UI, file transport/CAS wiring,
+privacy classification of stored credentials, and the shared-context
+playback provenance gap still block receiver activation or a 336 build.
