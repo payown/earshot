@@ -10,12 +10,12 @@ final class ListeningPlacesFormatTests: XCTestCase {
             "https://feeds.example.com/Show?a=1"
         )
         XCTAssertEqual(
-            ListeningPlacesSubscriptionIdentity.id(" HTTPS://Feeds.Example.com:443/Show/?a=1#x "),
+            ListeningPlacesSubscriptionIdentity.shareableID(" HTTPS://Feeds.Example.com:443/Show/?a=1#x "),
             "sub:c411762416eb5a9a"
         )
         XCTAssertEqual(
-            ListeningPlacesSubscriptionIdentity.id("https://FEEDS.example.com/x/"),
-            ListeningPlacesSubscriptionIdentity.id("https://feeds.example.com/x")
+            ListeningPlacesSubscriptionIdentity.shareableID("https://FEEDS.example.com/x/"),
+            ListeningPlacesSubscriptionIdentity.shareableID("https://feeds.example.com/x")
         )
         XCTAssertEqual(
             ListeningPlacesSubscriptionIdentity.canonicalURL("http://Example.com:80/A///?b=2&a=1"),
@@ -30,16 +30,16 @@ final class ListeningPlacesFormatTests: XCTestCase {
             "https://example.com/café"
         )
         XCTAssertNotEqual(
-            ListeningPlacesSubscriptionIdentity.id("https://example.com/?b=2&a=1"),
-            ListeningPlacesSubscriptionIdentity.id("https://example.com/?a=1&b=2")
+            ListeningPlacesSubscriptionIdentity.shareableID("https://example.com/?b=2&a=1"),
+            ListeningPlacesSubscriptionIdentity.shareableID("https://example.com/?a=1&b=2")
         )
         XCTAssertNotEqual(
-            ListeningPlacesSubscriptionIdentity.id("https://example.com/café"),
-            ListeningPlacesSubscriptionIdentity.id("https://example.com/caf%C3%A9")
+            ListeningPlacesSubscriptionIdentity.shareableID("https://example.com/café"),
+            ListeningPlacesSubscriptionIdentity.shareableID("https://example.com/caf%C3%A9")
         )
         XCTAssertNotEqual(
-            ListeningPlacesSubscriptionIdentity.id("https://example.com/%7Eshow"),
-            ListeningPlacesSubscriptionIdentity.id("https://example.com/~show")
+            ListeningPlacesSubscriptionIdentity.shareableID("https://example.com/%7Eshow"),
+            ListeningPlacesSubscriptionIdentity.shareableID("https://example.com/~show")
         )
     }
 

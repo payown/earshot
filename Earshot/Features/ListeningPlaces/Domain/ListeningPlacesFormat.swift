@@ -78,7 +78,7 @@ enum ListeningPlacesSubscriptionIdentity {
         "secret", "sig", "signature", "password", "pass", "uid",
     ]
 
-    static func id(_ feedURL: String) -> String? {
+    private static func id(_ feedURL: String) -> String? {
         guard let canonical = canonicalURL(feedURL) else { return nil }
         let prefix = SHA256.hash(data: Data(canonical.utf8)).prefix(8)
             .map { String(format: "%02x", $0) }.joined()
