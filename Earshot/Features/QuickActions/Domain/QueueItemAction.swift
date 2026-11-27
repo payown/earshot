@@ -10,6 +10,8 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
     case moveToBottom
     case moveUp
     case moveDown
+    case pickUpToDrag
+    case openEpisodeDetails
     case openShowNotes
     case download
     // Shared Episode actions are opt-in for existing Queue configurations.
@@ -48,7 +50,8 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
         case .addToFolder: .addToFolder
         case .moveToFolder: .moveToFolder
         case .unfollow: .unfollow
-        case .removeFromQueue, .moveToTop, .moveToBottom, .moveUp, .moveDown: nil
+        case .removeFromQueue, .moveToTop, .moveToBottom, .moveUp, .moveDown,
+             .pickUpToDrag, .openEpisodeDetails: nil
         }
     }
 
@@ -60,6 +63,8 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
         case .moveToBottom: return "Move to bottom"
         case .moveUp: return "Move up"
         case .moveDown: return "Move down"
+        case .pickUpToDrag: return "Pick up for move"
+        case .openEpisodeDetails: return "Open episode details"
         case .openShowNotes: return EpisodeAction.openShowNotes.label
         // The row's runtime label flips to "Remove download" when downloaded;
         // this is the static Settings-list name (see buildQueueActions).
@@ -106,4 +111,6 @@ let defaultQueueItemActions: [QueueItemAction] = [
     .moveDown,
     .openShowNotes,
     .download,
+    .pickUpToDrag,
+    .openEpisodeDetails,
 ]

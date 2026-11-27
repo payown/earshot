@@ -1497,6 +1497,29 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, .downloaded)
     }
 
+    func test_selectionQueueRemoval_keepsDownloadedAudioEvenWithAutomaticCleanupOn() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let name = "earshot-test-selected-queue-remove-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let podcast = Podcast(feedURL: "https://h/selected-feed.xml", title: "Selected queue")
+        let episode = Episode(guid: "selected", title: "Keep audio", audioURL: "https://h/selected.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        let queue = QueueRepository(context: context)
+        queue.add(episode)
+
+        XCTAssertEqual(queue.cancelSelectedFromQueue([episode]), 1)
+
+        XCTAssertTrue(queue.queue().isEmpty)
+        XCTAssertFalse(episode.isPlayed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, name)
+    }
+
     func test_clearQueue_withAutomaticCleanupOn_removesAllDownloads() throws {
         let context = TestStore.freshContext()
         AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)

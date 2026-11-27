@@ -90,6 +90,12 @@ struct QueueScreen: View {
     @State private var savedLineupCount = 0
     @State private var isEnrollingDownloads = false
     @State private var pickedItem: QueuePickedItem?
+    @State private var selection = MultiSelectState()
+    @State private var isBulkMutation = false
+    @State private var pendingBulkPlayed: Bool?
+    @State private var queueEditMode: EditMode = .inactive
+    @AccessibilityFocusState private var focusSelectButton: Bool
+    @AccessibilityFocusState private var focusEmptyQueue: Bool
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusedGroup: QueueGroup.Kind?
     @AccessibilityFocusState private var focusLaunchHeading: Bool
@@ -168,6 +174,71 @@ struct QueueScreen: View {
             .searchable(text: $searchText, prompt: "Search queue")
             .onSubmit(of: .search) { announceMatches() }
             .toolbar { toolbar }
+            .safeAreaInset(edge: .bottom) {
+                if selection.isSelecting {
+                    let count = episodes.filter { selection.isSelected($0.persistentModelID)
+                        && EpisodeSearchFilter.matches($0, query: searchText) }.count
+                    MultiSelectBar(
+                        count: count,
+                        primary: MultiSelectAction(
+                            id: "removeFromQueue",
+                            title: count == 0 ? "Remove from Queue" : "Remove \(EpisodeBatchLabel.episodePhrase(count)) from Queue",
+                            systemImage: "text.badge.minus",
+                            isDestructive: true,
+                            handler: { removeSelectedFromQueue() }
+                        ),
+                        secondary: [
+                            MultiSelectAction(
+                                id: "download",
+                                title: count == 0 ? "Download selected" : "Download \(EpisodeBatchLabel.episodePhrase(count))",
+                                systemImage: "arrow.down.circle",
+                                handler: {
+                                    let current = repo.queue().filter {
+                                        selection.isSelected($0.persistentModelID)
+                                            && EpisodeSearchFilter.matches($0, query: searchText)
+                                    }
+                                    guard !current.isEmpty else { return }
+                                    downloadAllRequest = QueueDownloadAllRequest(
+                                        candidates: current, scope: "selected Queue episodes"
+                                    )
+                                }
+                            ),
+                            MultiSelectAction(
+                                id: "markPlayed",
+                                title: EpisodeBatchLabel.markPlayed(count: count),
+                                systemImage: "checkmark.circle",
+                                handler: { pendingBulkPlayed = true }
+                            ),
+                            MultiSelectAction(
+                                id: "markUnplayed",
+                                title: EpisodeBatchLabel.markUnplayed(count: count),
+                                systemImage: "arrow.uturn.backward.circle",
+                                handler: { pendingBulkPlayed = false }
+                            ),
+                        ],
+                        announcementNoun: "episode"
+                    )
+                    .disabled(isBulkMutation)
+                }
+            }
+            .confirmationDialog(
+                pendingBulkPlayed == true ? "Mark selected Queue episodes as played?"
+                    : "Mark selected Queue episodes as unplayed?",
+                isPresented: Binding(
+                    get: { pendingBulkPlayed != nil },
+                    set: { if !$0 { pendingBulkPlayed = nil } }
+                ), titleVisibility: .visible
+            ) {
+                if let played = pendingBulkPlayed {
+                    Button(played ? "Mark as played" : "Mark as unplayed") {
+                        pendingBulkPlayed = nil
+                        markSelectedPlayed(played)
+                    }
+                }
+                Button("Cancel", role: .cancel) { pendingBulkPlayed = nil }
+            } message: {
+                Text("Only the selected episodes still in Queue will change. Keep finished episodes in Queue determines whether played episodes remain queued.")
+            }
             .alert("Clear the entire Queue?", isPresented: $confirmingClearQueue) {
                 Button("Clear entire Queue", role: .destructive) {
                     let saved = repo.clear()
@@ -196,6 +267,7 @@ struct QueueScreen: View {
             ) { request in
                 Button("Download \(request.episodes.count) episodes") {
                     startDownloadAll(request)
+                    if selection.isSelecting { endSelection(announce: false) }
                 }
                 .disabled(request.episodes.isEmpty)
                 Button("Cancel", role: .cancel) { downloadAllRequest = nil }
@@ -330,6 +402,20 @@ struct QueueScreen: View {
                 requestLaunchHeadingFocus()
             }
             .onChange(of: settings.queueGrouping) { _, _ in pickedItem = nil }
+            .onChange(of: searchText) { _, _ in
+                if selection.isSelecting { selection.clear() }
+                if searchActive { queueEditMode = .inactive }
+            }
+            .onChange(of: episodes.map(\.persistentModelID)) { old, new in
+                guard selection.isSelecting, let focusedEpisode,
+                      old.contains(focusedEpisode), !new.contains(focusedEpisode) else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    guard selection.isSelecting, self.focusedEpisode == focusedEpisode else { return }
+                    self.focusedEpisode = nil
+                    if new.isEmpty { focusEmptyQueue = true }
+                    else { focusSelectButton = true }
+                }
+            }
     }
 
     @ViewBuilder
@@ -340,6 +426,7 @@ struct QueueScreen: View {
                 systemImage: "list.bullet",
                 description: Text("Episodes you add to the queue appear here.")
             )
+            .accessibilityFocused($focusEmptyQueue)
         } else if searchActive && EpisodeSearchFilter.filter(episodes, query: searchText).isEmpty {
             // A search is active and nothing in the queue matches — covers both
             // flat and grouped modes (a group survives filtering only if one of
@@ -369,16 +456,18 @@ struct QueueScreen: View {
         return List {
             ForEach(indexed, id: \.element.persistentModelID) { index, episode in
                 row(episode, position: index + 1, total: total, moveMode: .flat)
+                    .moveDisabled(queueEditMode != .active || selection.isSelecting || searchActive)
             }
             // Drag reorder is suspended while a search narrows the list: move
             // destination indices refer to the visible subset, not real queue
             // positions, so a drop would land in the wrong place. The rotor
             // move actions (which address the real queue) keep working.
             .onMove { from, to in
-                guard !searchActive else { return }
+                guard queueEditMode == .active && !searchActive && !selection.isSelecting else { return }
                 handleMove(from, to)
             }
         }
+        .environment(\.editMode, $queueEditMode)
     }
 
     // MARK: Grouped
@@ -436,9 +525,10 @@ struct QueueScreen: View {
                             displayedGroups: groups,
                             groupKind: group.kind
                         )
+                        .moveDisabled(queueEditMode != .active || selection.isSelecting || searchActive)
                     }
                     .onMove { from, to in
-                        guard !searchActive else { return }
+                        guard queueEditMode == .active && !searchActive && !selection.isSelecting else { return }
                         handleGroupedMove(group, moveMode: moveMode, from: from, to: to)
                     }
                 } header: {
@@ -446,6 +536,7 @@ struct QueueScreen: View {
                 }
             }
         }
+        .environment(\.editMode, $queueEditMode)
     }
 
     /// A single heading element per group. It carries the `.isHeader` trait and
@@ -615,6 +706,7 @@ struct QueueScreen: View {
 
     // MARK: Row
 
+    @ViewBuilder
     private func row(
         _ episode: Episode,
         position: Int?,
@@ -623,6 +715,18 @@ struct QueueScreen: View {
         displayedGroups: [QueueGroup] = [],
         groupKind: QueueGroup.Kind? = nil
     ) -> some View {
+        if selection.isSelecting {
+            EpisodeSelectableRow(
+                episode: episode,
+                includesPodcastName: true,
+                isQueued: true,
+                isInInbox: false,
+                isSelected: selection.isSelected(episode.persistentModelID),
+                onToggle: { selection.toggle(episode.persistentModelID) }
+            )
+            .disabled(isBulkMutation)
+            .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
+        } else {
         QueueRow(
             episode: episode,
             isDetailSelected: selectedDetailEpisode?.persistentModelID == episode.persistentModelID,
@@ -634,9 +738,23 @@ struct QueueScreen: View {
             total: total,
             moveMode: moveMode,
             focusedEpisode: $focusedEpisode,
-            actions: availableQueueActions(order: quickActions.queueActions, moveMode: moveMode, episode: episode),
+            actions: availableQueueActions(order: quickActions.queueActions, moveMode: moveMode, episode: episode)
+                .filter { $0 != .pickUpToDrag || pickedItem == nil },
             supplementalActions: episodeMoveActions(episode, moveMode: moveMode, groupKind: groupKind),
             performAction: { action in
+                if action == .openEpisodeDetails {
+                    selectedDetailEpisode = episode
+                    if !isWide { compactDetailEpisode = episode }
+                    return
+                }
+                if action == .pickUpToDrag {
+                    guard pickedItem == nil,
+                          repo.queue().contains(where: { $0.persistentModelID == episode.persistentModelID })
+                    else { return }
+                    pickedItem = .episode(episode.persistentModelID, groupKind)
+                    Announcer.announce("Picked up \(episode.title). Find an episode in this group and choose Drop before or after.")
+                    return
+                }
                 buildQueueActions(
                     episode: episode,
                     order: [action],
@@ -664,12 +782,12 @@ struct QueueScreen: View {
                 ).first?.run()
             }
         )
+        }
     }
 
     private func episodeMoveActions(_ episode: Episode, moveMode: QueueMoveMode,
                                     groupKind: QueueGroup.Kind?) -> [QuickActionItem] {
         let episodeID = episode.persistentModelID
-        let episodeTitle = episode.title
         if let pickedItem {
             var actions: [QuickActionItem] = []
             if case let .episode(sourceID, sourceGroup) = pickedItem,
@@ -687,11 +805,7 @@ struct QueueScreen: View {
             })
             return actions
         }
-        return [QuickActionItem(id: "pickUp", label: "Pick up for move", isDestructive: false) {
-            guard repo.queue().contains(where: { $0.persistentModelID == episodeID }) else { return }
-            pickedItem = .episode(episodeID, groupKind)
-            Announcer.announce("Picked up \(episodeTitle). Find an episode in this group and choose Drop before or after.")
-        }]
+        return []
     }
 
     private func dropEpisode(_ sourceID: PersistentIdentifier, on destinationID: PersistentIdentifier,
@@ -723,14 +837,38 @@ struct QueueScreen: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityFocused($focusLaunchHeading)
         }
-        // Edit (drag reorder) is hidden while a search is active, matching the
-        // suspended `.onMove` — reordering a partial view of the queue would
-        // move rows to the wrong real positions (#457).
-        if !episodes.isEmpty && !searchActive {
-            ToolbarItem(placement: .topBarLeading) { EditButton() }
+        if !episodes.isEmpty || selection.isSelecting {
+            ToolbarItem(placement: .topBarLeading) {
+                if selection.isSelecting {
+                    Button("Done") { endSelection() }
+                        .disabled(isBulkMutation)
+                        .accessibilityFocused($focusSelectButton)
+                } else if queueEditMode == .active {
+                    Button("Done reordering") { queueEditMode = .inactive }
+                } else {
+                    Button("Select episodes") { beginSelection() }
+                        .accessibilityFocused($focusSelectButton)
+                }
+            }
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
+                if selection.isSelecting {
+                    Button("Select all matching episodes", systemImage: "checkmark.circle.fill") {
+                        selection.selectAll(EpisodeSearchFilter.filter(episodes, query: searchText)
+                            .map(\.persistentModelID))
+                    }
+                    Button("Invert selection", systemImage: "arrow.left.arrow.right") {
+                        selection.invert(EpisodeSearchFilter.filter(episodes, query: searchText)
+                            .map(\.persistentModelID))
+                    }
+                } else {
+                if !searchActive && !episodes.isEmpty {
+                    Button(queueEditMode == .active ? "Done reordering" : "Reorder Queue",
+                           systemImage: "line.3.horizontal") {
+                        queueEditMode = queueEditMode == .active ? .inactive : .active
+                    }
+                }
                 Section("Organization") {
                     Picker("Group queue", selection: queueGrouping) {
                         ForEach(QueueGrouping.allCases) { mode in
@@ -794,16 +932,101 @@ struct QueueScreen: View {
                         }
                     }
                 }
+                }
             } label: {
                 Label(
-                    isEnrollingDownloads ? "Preparing downloads" : "Queue options",
+                    isEnrollingDownloads ? "Preparing downloads" : selection.isSelecting ? "Selection options" : "Queue options",
                     systemImage: isEnrollingDownloads ? "arrow.down.circle" : "ellipsis.circle"
                 )
             }
             // Toolbar presentation can reduce the visible Label to its icon;
             // give the menu itself a name even in that presentation.
-            .accessibilityLabel(isEnrollingDownloads ? "Preparing downloads" : "Queue options")
-            .disabled(isEnrollingDownloads)
+            .accessibilityLabel(isEnrollingDownloads ? "Preparing downloads" : selection.isSelecting ? "Selection options" : "Queue options")
+            .disabled(isEnrollingDownloads || isBulkMutation)
+        }
+    }
+
+    private func beginSelection() {
+        queueEditMode = .inactive
+        selection.enter()
+        Announcer.announce("Selection mode on")
+        let first = EpisodeSearchFilter.filter(episodes, query: searchText).first?.persistentModelID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { focusedEpisode = first }
+    }
+
+    private func endSelection(announce: Bool = true) {
+        selection.exit()
+        if announce { Announcer.announce("Selection mode off") }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if episodes.isEmpty { focusEmptyQueue = true }
+            else { focusSelectButton = true }
+        }
+    }
+
+    private func removeSelectedFromQueue() {
+        // Resolve selection against CURRENT Queue membership at activation. Remove
+        // the playing row last so an automatic advance cannot start a row that
+        // this same batch is about to remove.
+        let current = repo.queue()
+        let chosen = current.filter { selection.isSelected($0.persistentModelID)
+            && EpisodeSearchFilter.matches($0, query: searchText) }
+        guard !chosen.isEmpty else { return }
+        let playingID = player.nowPlayingEpisodeID
+        let nonPlaying = chosen.filter { $0.persistentModelID != playingID }
+        var removed = repo.cancelSelectedFromQueue(nonPlaying)
+        if !nonPlaying.isEmpty && removed == 0 {
+            Announcer.announce("Could not remove selected episodes. Please try again.", assertive: true)
+            return
+        }
+        if let playing = chosen.first(where: { $0.persistentModelID == playingID }) {
+            player.removeFromQueue(playing, context: context, keepDownload: true)
+            if !repo.queue().contains(where: { $0.persistentModelID == playingID }) { removed += 1 }
+        }
+        if removed < chosen.count {
+            Announcer.announce(
+                "Removed \(removed) of \(chosen.count) episodes from Queue. Try the remaining episodes again.",
+                assertive: true
+            )
+            return
+        }
+        Announcer.announce("Removed \(EpisodeBatchLabel.episodePhrase(removed)) from Queue", assertive: true)
+        endSelection(announce: false)
+    }
+
+    private func markSelectedPlayed(_ played: Bool) {
+        let chosen = repo.queue().filter {
+            selection.isSelected($0.persistentModelID)
+                && EpisodeSearchFilter.matches($0, query: searchText)
+        }
+        guard !chosen.isEmpty, !isBulkMutation else { return }
+        let needingChange = chosen.filter { $0.isPlayed != played }.count
+        isBulkMutation = true
+        Task { @MainActor in
+            let groups = Dictionary(grouping: chosen.compactMap { episode -> (Podcast, Episode)? in
+                episode.podcast.map { ($0, episode) }
+            }, by: { $0.0.persistentModelID })
+            let episodeRepo = EpisodeRepository(context: context)
+            var changed = 0
+            for group in groups.values {
+                guard let podcast = group.first?.0 else { continue }
+                let ids = Set(group.map { $0.1.persistentModelID })
+                changed += played
+                    ? await episodeRepo.markSelectedPlayed(in: podcast, ids: ids)
+                    : await episodeRepo.markSelectedUnplayed(in: podcast, ids: ids)
+            }
+            isBulkMutation = false
+            if changed < needingChange {
+                Announcer.announce(
+                    "Changed (changed) of (needingChange) episodes. Check the remaining episodes and try again.",
+                    assertive: true
+                )
+                return
+            }
+            Announcer.announce(
+                "Marked \(EpisodeBatchLabel.episodePhrase(changed)) as \(played ? "played" : "unplayed")",
+                assertive: true
+            )
+            endSelection(announce: false)
         }
     }
 
@@ -955,10 +1178,7 @@ private struct QueueRow: View {
             ? QueueItemAction.presentations(actions + [.playNow], for: episode, moveMode: moveMode)
             : presentations
         let remainingActions = ConfiguredRowDefault.remaining(rotorPresentations, promoted: promoted)
-        let detailsAction = promoted == nil ? [] : [QuickActionItem(
-            id: "openEpisodeDetails", label: "Open episode details", isDestructive: false,
-            run: onSelect
-        )]
+            .filter { promoted != nil || $0.action != .openEpisodeDetails }
         // Castro-style "X min left" / total length, the same treatment EpisodeRow
         // gives every other list. The Queue was the original surface this was
         // requested for but #493 only reached the shared row, not this bespoke
@@ -1062,7 +1282,7 @@ private struct QueueRow: View {
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572). The
         // selection double-tap and hint above stay independent of those actions.
-        .queueActionsRotor(remainingActions, supplementalActions: supplementalActions + detailsAction) { action in
+        .queueActionsRotor(remainingActions, supplementalActions: supplementalActions) { action in
             guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
             performAction(action)
         }

@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import os
 @testable import Earshot
 
 @MainActor
@@ -1126,6 +1127,36 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(Set(memberships.map(\.isQueued)), [true, false])
         XCTAssertGreaterThanOrEqual(try PendingCloudQueueMutation.orderings(in: ctx).count, 2)
         XCTAssertTrue(repo.queue().isEmpty)
+    }
+
+    func testSelectedQueueRemovalKeepsSurvivorOrderAndDurableCloudIntents() throws {
+        let context = TestStore.freshContext()
+        let podcast = makePodcast(context, "Selection")
+        let episodes = (0..<4).map { makeEpisode(context, "selected-\($0)", podcast: podcast) }
+        try context.save()
+        let repo = QueueRepository(context: context)
+        repo.add(episodes)
+
+        let notifications = OSAllocatedUnfairLock(initialState: 0)
+        let observer = NotificationCenter.default.addObserver(
+            forName: .earshotQueueDidChange, object: nil, queue: nil
+        ) { _ in notifications.withLock { $0 += 1 } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        XCTAssertEqual(repo.cancelSelectedFromQueue([episodes[0], episodes[2]]), 2)
+        XCTAssertEqual(notifications.withLock { $0 }, 1,
+                       "One batch commit should invalidate Queue consumers once")
+        XCTAssertEqual(repo.queue().map(\.persistentModelID),
+                       [episodes[1].persistentModelID, episodes[3].persistentModelID])
+        XCTAssertFalse(episodes[0].isPlayed)
+        XCTAssertTrue(episodes[0].inboxDismissed)
+        let intents = try PendingCloudQueueMutation.memberships(in: context)
+        for episode in [episodes[0], episodes[2]] {
+            XCTAssertTrue(intents.contains { $0.guid == episode.guid && !$0.isQueued })
+        }
+        XCTAssertEqual(repo.cancelSelectedFromQueue([episodes[0], episodes[2]]), 0,
+                       "Repeating a stale selection must not remove or re-notify survivors")
+        XCTAssertEqual(notifications.withLock { $0 }, 1)
     }
 
     func testCatalogQueueMutationCreatesNoCloudIntent() throws {

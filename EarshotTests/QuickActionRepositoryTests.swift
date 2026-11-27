@@ -77,15 +77,38 @@ final class QuickActionRepositoryTests: XCTestCase {
         let repo = QuickActionRepository(context: context)
         repo.setQueueConfiguration(.init(enabled: [.moveUp, .download], available: [.playNow]))
         var value = repo.queueConfiguration()
-        XCTAssertEqual(value.enabled, [.moveUp, .download])
+        XCTAssertEqual(value.enabled, [.moveUp, .download, .pickUpToDrag, .openEpisodeDetails])
         XCTAssertTrue(value.available.contains(.markPlayed))
 
         let store = QuickActionStore()
         store.configure(context: context)
         store.addQueueAction(.markPlayed)
         value = QuickActionRepository(context: context).queueConfiguration()
-        XCTAssertEqual(value.enabled, [.moveUp, .download, .markPlayed])
+        XCTAssertEqual(value.enabled, [.moveUp, .download, .pickUpToDrag, .openEpisodeDetails, .markPlayed])
         XCTAssertFalse(value.available.contains(.markPlayed))
+    }
+
+    func testFormerFixedQueueActionsCanBeReorderedAndDisabledAcrossRelaunch() {
+        let context = TestStore.freshContext()
+        let repo = QuickActionRepository(context: context)
+        repo.setQueueConfiguration(.init(
+            enabled: [.playNow, .openEpisodeDetails, .pickUpToDrag],
+            available: QueueItemAction.allCases.filter {
+                ![QueueItemAction.playNow, .openEpisodeDetails, .pickUpToDrag].contains($0)
+            }
+        ))
+        let store = QuickActionStore()
+        store.configure(context: context)
+        store.moveQueueActions(from: IndexSet(integer: 2), to: 0)
+        XCTAssertEqual(store.queueActions.prefix(3), [.pickUpToDrag, .playNow, .openEpisodeDetails])
+        XCTAssertTrue(store.removeQueueAction(.openEpisodeDetails))
+        XCTAssertTrue(store.removeQueueAction(.pickUpToDrag))
+
+        let relaunched = QuickActionStore()
+        relaunched.configure(context: context)
+        XCTAssertEqual(relaunched.queueActions, [.playNow])
+        XCTAssertTrue(relaunched.availableQueueActions.contains(.openEpisodeDetails))
+        XCTAssertTrue(relaunched.availableQueueActions.contains(.pickUpToDrag))
     }
 
     func testQueueReorderPreservesUnknownFutureActionRows() throws {

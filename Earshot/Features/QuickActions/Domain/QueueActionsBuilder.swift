@@ -39,7 +39,7 @@ func availableQueueActions(
             ).contains(shared) else { return false }
         }
         switch action {
-        case .moveToTop, .moveToBottom:
+        case .moveToTop, .moveToBottom, .pickUpToDrag:
             return moveMode != .none
         case .moveUp, .moveDown:
             return moveMode != .none
@@ -134,6 +134,8 @@ func buildQueueActions(
                 player.removeFromQueue(episode, context: context)
                 onFocus(neighbor)
             }
+        case .pickUpToDrag, .openEpisodeDetails:
+            return nil // QueueScreen owns navigation and its pick-up state.
         case .playNow, .openShowNotes, .download, .markPlayed, .viewBookmarks,
              .share, .exportTranscript, .exportAudio, .refreshAudio, .addToFolder,
              .moveToFolder, .unfollow:
