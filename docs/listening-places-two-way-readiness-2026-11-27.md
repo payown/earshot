@@ -199,10 +199,9 @@ checks it first; credential-bearing and invalid feed identities fail the
 a peer unfollow, leaves a followed podcast intact, stores no raw feed URL in
 the key, and can be cleared by an explicit local sharing choice. This is a
 data-layer precedence rule only. No UI exposes the choice, no subscription or
-folder importer invokes it, and the existing episode exporter has **not** been
-updated to filter all current and retained prior places by this marker. It
-would be misleading to claim private-feed or device-only export safety until
-that retained-record rewrite and provider-file tests pass.
+folder importer invokes it. The later owned-file scrub covers currently known
+episodes, with the historical unknown-ID limitation below; it does not make
+the whole two-way privacy contract complete.
 The focused marker/journal suite passed 14/14 with no skips
 (`EarshotLPPrivacyProspectiveFixed20261127.xcresult`); three existing
 retention/explicit-follow regressions passed separately with no skips
@@ -218,3 +217,36 @@ not enabled in the green suite. Direct writers in Quick Actions, Episode,
 Inbox, Queue, feed refresh, identity repair and Watch still need an exhaustive
 origin-aware save audit. A partial hook is not sufficient to activate an
 incoming receiver or make export-time clocks authoritative. No 336 build exists.
+
+### Owned-file privacy and additional writer work
+
+The off-main snapshot loader now checks public feed identity and the
+device-only marker once per catalog pass. It scans excluded podcasts' episodes
+in bounded pages to match IDs retained in **this device's** file, removes
+matched rows and their cached signatures, and omits new places for those
+podcasts. It emits no tombstone and does not modify a peer file or local Episode.
+Two synthetic tests failed before the filter (a token-bearing place and a
+retained reset) and passed afterward. A disposable owned-file rewrite preserved
+a pinned QUILL Cast `64651e5884b779b7cf75e3c5cc4125b77a983e82`
+synthetic subscription file byte-for-byte. This is the owned-file withdrawal
+portion of S8/S11, not the complete cross-app round-trip.
+
+The format cannot identify a legacy hashed record whose episode is no longer
+in Earshot's catalog; it carries no feed mapping. This scrub cannot erase a
+copy another app already imported. Stored credentials outside the feed URL
+are not represented on `Podcast`, so URL checks do not establish complete
+private-feed classification. Earshot does not yet emit subscription or folder
+rows, and its inbound subscription parser remains disconnected. Therefore a
+QUILL follow imported from Earshot and subsequent incoming-precedence pass
+cannot yet be claimed.
+
+Explicit `EpisodeRepository`, `InboxRepository`, `QueueRepository` and Quick
+Action saves now call one local journal helper. Feed-refresh saves invalidate
+unknown-origin place changes. A batch Played→Unplayed regression through the
+repository returns to the original state with a newer event time. A test
+requires review if the count or file location of direct `positionSeconds` or
+`isPlayed` assignments changes. It does **not** intercept arbitrary
+`ModelContext.save` calls or prove complete writer coverage. The deliberately
+raw double-bypass A→B→A diagnostic still fails; no supported central SwiftData
+save hook was found. Receiver activation still requires a reviewed way to
+cover those saves and a migration-safe authoritative revision design.

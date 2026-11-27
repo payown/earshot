@@ -987,6 +987,114 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertNotNil(prepared.data)
     }
 
+    func testOwnedSnapshotScrubsExistingDeviceOnlyEpisodeIncludingRetainedReset() async throws {
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/device-only", title: "Local show")
+        let episode = Episode(guid: "local-guid", title: "Local episode",
+                              audioURL: "https://example.com/local.mp3", positionSeconds: 42)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
+        let first = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: true,
+            previousRecords: [], previousSignatures: [:], previousUpdatedAtByID: [:],
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        XCTAssertEqual(first.records.count, 1)
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(
+            feedURL: podcast.feedURL, in: container.mainContext
+        )
+        try container.mainContext.save()
+        episode.positionSeconds = 0
+        try container.mainContext.save()
+
+        let scrubbed = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: true,
+            previousRecords: first.records, previousSignatures: first.signatures,
+            previousUpdatedAtByID: first.updatedAtByID,
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 2_000)
+        )
+        XCTAssertTrue(scrubbed.records.isEmpty, "Retained own-file reset must not leak after device-only")
+        XCTAssertNotNil(scrubbed.data, "Own file must be rewritten without the private row")
+        XCTAssertEqual(episode.positionSeconds, 0, "Privacy scrub must not alter local playback state")
+    }
+
+    func testOwnedSnapshotNeverAddsCredentialBearingEpisodePlace() async throws {
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed?token=synthetic", title: "Private")
+        let episode = Episode(guid: "private-guid", title: "Private episode",
+                              audioURL: "https://example.com/private.mp3", positionSeconds: 90)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
+        let snapshot = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: true,
+            previousRecords: [], previousSignatures: [:], previousUpdatedAtByID: [:],
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        XCTAssertTrue(snapshot.records.isEmpty)
+    }
+
+    func testDeviceOnlyScrubRewritesOwnedFileWithoutTouchingPeerFileOrEpisode() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-scrub-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/local-show", title: "Local")
+        let episode = Episode(guid: "local-episode", title: "Episode",
+                              audioURL: "https://example.com/local.mp3", positionSeconds: 73)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+
+        let service = ListeningPlacesService()
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        let ownFile = try deviceFile(in: directory)
+        let peerFile = ownFile.deletingLastPathComponent().appending(path: "peer.json")
+        // A local cross-app run can supply an actual pinned QUILL output file;
+        // the ordinary unit run remains fully self-contained.
+        let peerBytes: Data
+        if let path = ProcessInfo.processInfo.environment["QUILL_PEER_FIXTURE_PATH"] {
+            peerBytes = try Data(contentsOf: URL(fileURLWithPath: path))
+            print("Listening Places cross-app test loaded pinned QUILL peer fixture")
+            let peerJSON = try XCTUnwrap(JSONSerialization.jsonObject(
+                with: peerBytes
+            ) as? [String: Any])
+            let peerRows = try XCTUnwrap(peerJSON["records"] as? [[String: Any]])
+            XCTAssertTrue(peerRows.contains { $0["kind"] as? String == "subscription" },
+                          "The optional cross-app fixture must be a real subscription export")
+        } else {
+            peerBytes = Data("synthetic peer file that this device does not own".utf8)
+        }
+        try peerBytes.write(to: peerFile)
+        let originalOwn = try Data(contentsOf: ownFile)
+        XCTAssertFalse(originalOwn.isEmpty)
+
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(
+            feedURL: podcast.feedURL, in: container.mainContext
+        )
+        try container.mainContext.save()
+        await service.writeNow()
+
+        let ownJSON = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(contentsOf: ownFile)
+        ) as? [String: Any])
+        XCTAssertTrue(try XCTUnwrap(ownJSON["records"] as? [[String: Any]]).isEmpty)
+        XCTAssertEqual(try Data(contentsOf: peerFile), peerBytes)
+        XCTAssertEqual(episode.positionSeconds, 73)
+        service.releasePersistence()
+    }
+
     func testChoosingFolderWritesMeaningfulStateWithoutPrivateLabels() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "listening-places-\(UUID().uuidString)", directoryHint: .isDirectory)

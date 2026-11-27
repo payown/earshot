@@ -57,6 +57,24 @@ enum ListeningPlacesSubscriptionRetention {
 enum ListeningPlacesFeedPrivacy {
     private static let prefix = "listening_places_device_only_v1:"
 
+    /// One indexed local-settings read for a background catalog pass instead
+    /// of one query per podcast on each file write.
+    static func deviceOnlyKeys(in context: ModelContext) throws -> Set<String> {
+        let keyPrefix = prefix
+        return Set(try context.fetch(FetchDescriptor<LocalAppSetting>(predicate: #Predicate {
+            $0.key.starts(with: keyPrefix)
+        })).map(\.key))
+    }
+
+    static func mayShare(
+        feedURL: String, deviceOnlyKeys: Set<String>,
+        hasStoredCredentials: Bool = false
+    ) -> Bool {
+        ListeningPlacesSubscriptionIdentity.shareableID(
+            feedURL, hasStoredCredentials: hasStoredCredentials
+        ) != nil && !deviceOnlyKeys.contains(key(feedURL))
+    }
+
     static func isDeviceOnly(feedURL: String, in context: ModelContext) throws -> Bool {
         try !LocalAppSettingIdentity.rows(for: key(feedURL), in: context).isEmpty
     }
@@ -65,10 +83,10 @@ enum ListeningPlacesFeedPrivacy {
         feedURL: String, hasStoredCredentials: Bool = false,
         in context: ModelContext
     ) throws -> Bool {
-        guard ListeningPlacesSubscriptionIdentity.shareableID(
-            feedURL, hasStoredCredentials: hasStoredCredentials
-        ) != nil else { return false }
-        return try !isDeviceOnly(feedURL: feedURL, in: context)
+        try mayShare(
+            feedURL: feedURL, deviceOnlyKeys: deviceOnlyKeys(in: context),
+            hasStoredCredentials: hasStoredCredentials
+        )
     }
 
     /// Caller commits this with its own user-choice transaction. It does not

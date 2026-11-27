@@ -110,10 +110,23 @@ actor ListeningPlacesSnapshotLoader {
         var signatures = previousSignatures
         var updatedAtByID = previousUpdatedAtByID
         var recordsByID: [String: ListeningPlaceRecord] = [:]
+        let excludedPodcastIDs = try excludedPodcasts()
+        // The old owned file carries hashed episode IDs, not feed IDs. Resolve
+        // locally known excluded IDs before retaining any old zero/reset row.
+        // This rewrites only our device file; it emits no peer tombstone.
+        let excludedRecordIDs = try excludedEpisodeRecordIDs(
+            podcastIDs: excludedPodcastIDs,
+            matching: Set(previousRecords.map(\.id))
+        )
+        for id in excludedRecordIDs {
+            signatures.removeValue(forKey: id)
+            updatedAtByID.removeValue(forKey: id)
+        }
         // Preserve historical records until a known local state replaces them.
         // A missing record might be a reset made while sharing was off; its
         // event time is unknown and must not be fabricated at export time.
         for record in previousRecords where record.deleted != true {
+            guard !excludedRecordIDs.contains(record.id) else { continue }
             if record.feed != nil || (!includeLabels && record.label != nil) {
                 let updatedAt = record.updatedAt
                 let label = includeLabels ? record.label : nil
@@ -153,6 +166,11 @@ actor ListeningPlacesSnapshotLoader {
             for episode in batch {
                 try Task.checkCancellation()
                 processedEpisodeIDs.insert(episode.persistentModelID)
+                guard let podcast = episode.podcast,
+                      !excludedPodcastIDs.contains(podcast.persistentModelID),
+                      !excludedRecordIDs.contains(ListeningPlacesFormat.episodeID(
+                        guid: episode.guid, enclosureURL: episode.audioURL
+                      )) else { continue }
                 Self.addRecord(
                     for: episode,
                     includeLabels: includeLabels,
@@ -174,7 +192,12 @@ actor ListeningPlacesSnapshotLoader {
             ))
             guard let episode = matches.first(where: {
                 $0.podcast.map { FeedURLIdentity.canonical($0.feedURL) } == snapshot.feedURL
-            }), processedEpisodeIDs.insert(episode.persistentModelID).inserted else { continue }
+            }), processedEpisodeIDs.insert(episode.persistentModelID).inserted,
+                  let podcast = episode.podcast,
+                  !excludedPodcastIDs.contains(podcast.persistentModelID),
+                  !excludedRecordIDs.contains(ListeningPlacesFormat.episodeID(
+                    guid: episode.guid, enclosureURL: episode.audioURL
+                  )) else { continue }
             inspectedCount += 1
             Self.addRecord(
                 for: episode,
@@ -201,6 +224,50 @@ actor ListeningPlacesSnapshotLoader {
             writtenAt: now,
             inspectedCount: inspectedCount
         )
+    }
+
+    private func excludedPodcasts() throws -> Set<PersistentIdentifier> {
+        let podcasts = try modelContext.fetch(FetchDescriptor<Podcast>())
+        let deviceOnlyKeys = try ListeningPlacesFeedPrivacy.deviceOnlyKeys(in: modelContext)
+        var excluded = Set<PersistentIdentifier>()
+        for podcast in podcasts {
+            try Task.checkCancellation()
+            if !ListeningPlacesFeedPrivacy.mayShare(
+                feedURL: podcast.feedURL, deviceOnlyKeys: deviceOnlyKeys
+            ) {
+                excluded.insert(podcast.persistentModelID)
+            }
+        }
+        return excluded
+    }
+
+    private func excludedEpisodeRecordIDs(
+        podcastIDs: Set<PersistentIdentifier>, matching priorIDs: Set<String>
+    ) throws -> Set<String> {
+        guard !priorIDs.isEmpty, !podcastIDs.isEmpty else { return [] }
+        var excluded = Set<String>()
+        for podcastID in podcastIDs {
+            var offset = 0
+            while true {
+                try Task.checkCancellation()
+                var descriptor = FetchDescriptor<Episode>(predicate: #Predicate {
+                    $0.podcast?.persistentModelID == podcastID
+                })
+                descriptor.fetchOffset = offset
+                descriptor.fetchLimit = 256
+                let episodes = try modelContext.fetch(descriptor)
+                for episode in episodes {
+                    let id = ListeningPlacesFormat.episodeID(
+                        guid: episode.guid, enclosureURL: episode.audioURL
+                    )
+                    if priorIDs.contains(id) { excluded.insert(id) }
+                }
+                if episodes.count < 256 { break }
+                offset += episodes.count
+            }
+            if excluded.count == priorIDs.count { break }
+        }
+        return excluded
     }
 
     private static func addRecord(
