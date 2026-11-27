@@ -1,6 +1,41 @@
+import Darwin
 import Foundation
 
+/// Bounded bytes from a different writer. Parsing and applying are separate:
+/// the transport never trusts metadata in a file or mutates another device's file.
+struct ListeningPlacesOtherDeviceRead: Sendable {
+    struct File: Sendable {
+        let fileName: String
+        let data: Data
+    }
+
+    struct Skip: Sendable {
+        enum Reason: Sendable, Equatable {
+            case invalidName
+            case notRegularFile
+            case tooLarge
+            case totalBudget
+            case fileLimit
+            case directoryLimit
+            case unavailable
+        }
+
+        /// Nil for unsafe names and directory-wide failures. Never use an
+        /// unvalidated provider name directly in a spoken status message.
+        let fileName: String?
+        let reason: Reason
+    }
+
+    let files: [File]
+    let skipped: [Skip]
+}
+
 actor ListeningPlacesFileTransport {
+    private static let maximumOtherDeviceFileBytes = 2 * 1_024 * 1_024
+    private static let maximumOtherDeviceTotalBytes = 16 * 1_024 * 1_024
+    private static let maximumOtherDeviceFiles = 64
+    private static let maximumDirectoryEntries = 256
+
     private static let legacyReadme = """
         Listening Places
         ================
@@ -45,6 +80,158 @@ actor ListeningPlacesFileTransport {
             if let readError { throw readError }
             return result
         }
+    }
+
+    /// Reads only existing other-device files. Unlike the writer paths this
+    /// must not call `prepareLayout`: a read never creates the README or any
+    /// directory, and a missing shared folder simply has no places to import.
+    /// Each file is coordinated and capped before the parser sees its bytes.
+    func readOtherDeviceFiles(
+        bookmarkData: Data,
+        excludingDeviceID ownDeviceID: String
+    ) throws -> ListeningPlacesOtherDeviceRead {
+        try withFolder(bookmarkData: bookmarkData) { folder in
+            let places = folder.appending(path: "Listening Places", directoryHint: .isDirectory)
+            let devices = places.appending(path: "devices", directoryHint: .isDirectory)
+            guard try Self.existingDirectory(at: places),
+                  try Self.existingDirectory(at: devices) else {
+                return ListeningPlacesOtherDeviceRead(files: [], skipped: [])
+            }
+
+            var enumerationFailed = false
+            guard let enumerator = FileManager.default.enumerator(
+                at: devices,
+                includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey],
+                options: [.skipsSubdirectoryDescendants, .skipsPackageDescendants],
+                errorHandler: { _, _ in enumerationFailed = true; return false }
+            ) else {
+                return ListeningPlacesOtherDeviceRead(files: [], skipped: [
+                    .init(fileName: nil, reason: .unavailable)
+                ])
+            }
+            var candidates: [URL] = []
+            var directoryLimitReached = false
+            while let url = enumerator.nextObject() as? URL {
+                try Task.checkCancellation()
+                guard candidates.count < Self.maximumDirectoryEntries else {
+                    directoryLimitReached = true
+                    break
+                }
+                candidates.append(url)
+            }
+            var files: [ListeningPlacesOtherDeviceRead.File] = []
+            var skipped: [ListeningPlacesOtherDeviceRead.Skip] = []
+            var remainingBytes = Self.maximumOtherDeviceTotalBytes
+            var eligibleCount = 0
+
+            for url in candidates.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                try Task.checkCancellation()
+                let name = url.lastPathComponent
+                guard name.hasSuffix(".json"), name != "\(ownDeviceID).json" else { continue }
+                guard Self.safeDeviceFileName(name) else {
+                    skipped.append(.init(fileName: nil, reason: .invalidName))
+                    continue
+                }
+                let values: URLResourceValues
+                do { values = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]) }
+                catch {
+                    skipped.append(.init(fileName: name, reason: .unavailable))
+                    continue
+                }
+                guard values.isSymbolicLink != true,
+                      values.isDirectory != true,
+                      values.isRegularFile != false else {
+                    skipped.append(.init(fileName: name, reason: .notRegularFile))
+                    continue
+                }
+                eligibleCount += 1
+                guard eligibleCount <= Self.maximumOtherDeviceFiles else {
+                    skipped.append(.init(fileName: name, reason: .fileLimit))
+                    continue
+                }
+                guard remainingBytes > 0 else {
+                    skipped.append(.init(fileName: name, reason: .totalBudget))
+                    continue
+                }
+                let limit = min(Self.maximumOtherDeviceFileBytes, remainingBytes)
+                switch Self.coordinatedRead(at: url, limit: limit) {
+                case .data(let data):
+                    remainingBytes -= data.count
+                    files.append(.init(fileName: name, data: data))
+                case .exceeded:
+                    skipped.append(.init(fileName: name, reason: limit < Self.maximumOtherDeviceFileBytes
+                        ? .totalBudget : .tooLarge))
+                case .unavailable:
+                    skipped.append(.init(fileName: name, reason: .unavailable))
+                }
+            }
+            if directoryLimitReached { skipped.append(.init(fileName: nil, reason: .directoryLimit)) }
+            if enumerationFailed { skipped.append(.init(fileName: nil, reason: .unavailable)) }
+            return ListeningPlacesOtherDeviceRead(files: files, skipped: skipped)
+        }
+    }
+
+    private enum BoundedRead {
+        case data(Data)
+        case exceeded
+        case unavailable
+    }
+
+    private static func coordinatedRead(at target: URL, limit: Int) -> BoundedRead {
+        var result: BoundedRead = .unavailable
+        var coordinationError: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: target, options: [], error: &coordinationError) { url in
+            do {
+                // Recheck inside coordination, then open without following a
+                // final-component symlink if a shared-folder peer replaces it
+                // between enumeration and the coordinated read.
+                let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
+                guard values.isSymbolicLink != true, values.isDirectory != true else { return }
+                let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+                guard descriptor >= 0 else { return }
+                let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+                defer { try? handle.close() }
+                var data = Data()
+                while data.count <= limit {
+                    let amount = min(64 * 1_024, limit + 1 - data.count)
+                    guard let chunk = try handle.read(upToCount: amount), !chunk.isEmpty else {
+                        result = .data(data)
+                        return
+                    }
+                    data.append(chunk)
+                }
+                result = .exceeded
+            } catch {
+                result = .unavailable
+            }
+        }
+        return coordinationError == nil ? result : .unavailable
+    }
+
+    private static func existingDirectory(at url: URL) throws -> Bool {
+        do {
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values.isDirectory == true, values.isSymbolicLink != true else {
+                throw ListeningPlacesFileError.expectedDirectory(url.lastPathComponent)
+            }
+            return true
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoSuchFileError {
+                return false
+            }
+            throw error
+        }
+    }
+
+    private static func safeDeviceFileName(_ name: String) -> Bool {
+        guard name.hasSuffix(".json") else { return false }
+        let stem = name.dropLast(5)
+        return (1 ... 64).contains(stem.utf8.count)
+            && stem.utf8.allSatisfy { byte in
+                (48 ... 57).contains(byte) || (65 ... 90).contains(byte)
+                    || (97 ... 122).contains(byte) || byte == 45 || byte == 95
+            }
     }
 
     /// Replaces the device file only if its contents still match the last
