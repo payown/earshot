@@ -38,7 +38,9 @@ it is not a claim that two-way sync or subscriptions are available in 335.
    remote subscription-only unfollow that retains episodes, downloads and
    history. Remote follow/unfollow, folder parent/extra-membership round trips,
    URL aliases, and per-device private-feed choices need a separate tested
-   preservation path. No remote subscription mutation is enabled by a parser.
+   preservation path. Earshot now has nested folders, so the earlier flat-folder
+   description is stale; folder `parent` and extra memberships still require
+   round-trip proof. No remote subscription mutation is enabled by a parser.
 4. **Privacy.** A device-local "keep here" choice must suppress that show's
    subscription, folders, episode places and incoming changes without emitting
    an unfollow tombstone. Private feed URLs and authentication must never enter
@@ -49,6 +51,14 @@ it is not a claim that two-way sync or subscriptions are available in 335.
    validate IDs, clamp positions, ignore stale devices, and index a large local
    episode catalog once off the interaction path. The current 1,000-record
    writer cap cannot silently let subscription rows evict episode places.
+
+Conservative interim choices: read only at launch or an explicit request, not
+during playback; leave a loaded episode untouched, including one that is paused;
+leave unknown-time legacy state unchanged instead of stamping it at import or
+export time; and leave remote subscription/unfollow rows unapplied until the
+preserving path is proven. None of these choices may be described as complete
+two-way sync. Personal Audio import exists in Earshot, but the current places
+writer does not exchange local-file IDs; adding that identity is separate work.
 
 ## Verification before an internal two-way candidate
 
