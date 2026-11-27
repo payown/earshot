@@ -15,7 +15,9 @@ it is not a claim that two-way sync or subscriptions are available in 335.
   feed URLs in opt-in subscription records.
 - One device owns one JSON file. An Earshot reader must not write, rename, or
   delete another device's file. A read failure or unfamiliar row cannot make
-  a valid episode row disappear from the same or another file.
+  a valid episode row disappear from the same or another file. Before any
+  future apply, compare a safe filename ID with the file's self-reported
+  device ID; neither that ID nor the display label authenticates the writer.
 - The external file may reveal titles when labels are enabled. Opt-in
   subscription rows also contain plain feed URLs. This is distinct from
   Earshot's private iCloud sync and needs explicit local controls and copy.
