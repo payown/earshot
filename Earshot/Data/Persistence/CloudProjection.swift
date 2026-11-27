@@ -3209,7 +3209,15 @@ actor CloudProjectionCoordinator: ModelActor {
                 changed = true
             }
         }
-        if appContext.hasChanges { try appContext.save() }
+        if appContext.hasChanges {
+            // Compact CloudKit state does not carry the original Listening
+            // Places event identity. Clear any older local provenance in this
+            // same save rather than attributing a peer change to this phone.
+            try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+                in: appContext, localDeviceID: nil
+            )
+            try appContext.save()
+        }
         if !resetTicksToDiscard.isEmpty {
             let ticks = resetTicksToDiscard
             await MainActor.run {

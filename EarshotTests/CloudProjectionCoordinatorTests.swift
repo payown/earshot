@@ -2703,6 +2703,34 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(applicationEpisode(in: app)).isPlayed)
     }
 
+    func testRemotePositionImportInvalidatesOldLocalListeningPlaceClock() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 10)
+        let local = try XCTUnwrap(applicationEpisode(in: app))
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: local, in: app.mainContext, deviceID: "phone",
+            now: Date(timeIntervalSince1970: 100)
+        )
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        projection.mainContext.insert(episodeStateRow(
+            device: "other-device", position: 30, updatedAt: 200
+        ))
+        try projection.mainContext.save()
+
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+
+        let fresh = ModelContext(app)
+        let imported = try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertEqual(imported.positionSeconds, 30)
+        XCTAssertEqual(try ListeningPlacesEventJournal.read(
+            for: imported, in: fresh
+        ), .unknownLegacy)
+    }
+
     func testExplicitLocalPlayedSaveSurvivesReconciliationBeforeNotificationPublishes() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 2_400)
         let projection = try makeProjectionContainer()

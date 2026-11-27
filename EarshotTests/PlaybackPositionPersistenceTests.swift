@@ -245,6 +245,36 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         XCTAssertEqual(episode.positionSeconds, 180)
     }
 
+    func testSeekAndManualPlayedSaveLocalPlacesEventInSameStore() throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setRawValue(
+            "synthetic-phone", for: SettingsKey.listeningPlacesDeviceID
+        )
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        clearLive()
+
+        let episode = makeEpisode(ctx, guid: "journal-entry")
+        player.load(episode)
+        player.seek(to: 42)
+        guard case let .event(seekEvent) = try ListeningPlacesEventJournal.read(
+            for: episode, in: ctx
+        ) else { return XCTFail("Seek did not persist provenance") }
+        XCTAssertEqual(seekEvent.positionMilliseconds, 42_000)
+        XCTAssertEqual(seekEvent.sourceDeviceID, "synthetic-phone")
+
+        player.markCurrentPlayedAndAdvance()
+        let fresh = ModelContext(ctx.container)
+        let saved = try XCTUnwrap(fresh.model(for: episode.persistentModelID) as? Episode)
+        guard case let .event(playedEvent) = try ListeningPlacesEventJournal.read(
+            for: saved, in: fresh
+        ) else { return XCTFail("Manual Played did not persist provenance") }
+        XCTAssertTrue(playedEvent.played)
+        XCTAssertEqual(playedEvent.positionMilliseconds, 0)
+        XCTAssertGreaterThan(playedEvent.updatedAt, seekEvent.updatedAt)
+    }
+
     /// A CloudKit reconcile occurs while the app remains open. The player owns a
     /// separate observable position cache, so its notification hook must update
     /// the visible scrubber/VoiceOver value without requiring relaunch.

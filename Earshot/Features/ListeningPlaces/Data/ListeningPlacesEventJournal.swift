@@ -44,7 +44,8 @@ enum ListeningPlacesEventJournal {
     @discardableResult
     static func stageLocalMutation(
         of episode: Episode, in context: ModelContext,
-        deviceID: String, now: Date = .now, isReset: Bool = false
+        deviceID: String, now: Date = .now, isReset: Bool = false,
+        force: Bool = false
     ) throws -> Bool {
         guard let key = key(for: episode), !deviceID.isEmpty else {
             throw Error.missingEpisodeIdentity
@@ -52,7 +53,7 @@ enum ListeningPlacesEventJournal {
         let previous = try AppSettingIdentity.valueThrowing(for: key, in: context).flatMap(decode)
         let position = ListeningPlacesFormat.milliseconds(episode.positionSeconds)
         let played = episode.isPlayed
-        if previous?.positionMilliseconds == position && previous?.played == played {
+        if !force, previous?.positionMilliseconds == position && previous?.played == played {
             return false
         }
         let event = StoredEvent(
@@ -62,6 +63,44 @@ enum ListeningPlacesEventJournal {
         )
         try AppSettingIdentity.setValue(encode(event), for: key, in: context)
         return true
+    }
+
+    /// Stage provenance at the same save boundary as an Episode mutation. A
+    /// fresh context supplies the last committed values so a metadata-only
+    /// save does not invent a playback event. A changed value forces a new
+    /// clock even when a previously unstaged write made the old signature
+    /// match again. This covers only callers that use this boundary; there is
+    /// deliberately no claim that it intercepts every SwiftData save.
+    static func stageChangedEpisodesBeforeSave(
+        in context: ModelContext, localDeviceID: String?, now: Date = .now
+    ) throws {
+        let changed = context.changedModelsArray.compactMap { $0 as? Episode }
+        guard !changed.isEmpty else { return }
+        let committed = ModelContext(context.container)
+        for episode in changed {
+            guard let previous = committed.model(for: episode.persistentModelID) as? Episode,
+                  previous.positionSeconds != episode.positionSeconds
+                    || previous.isPlayed != episode.isPlayed else { continue }
+            // A playable catalog row can lack a stable interchange identity.
+            // Its ordinary playback save must never fail for that reason.
+            guard key(for: episode) != nil else { continue }
+            if let localDeviceID, !localDeviceID.isEmpty {
+                try stageLocalMutation(
+                    of: episode, in: context, deviceID: localDeviceID,
+                    now: now, force: true
+                )
+            } else {
+                try invalidate(for: episode, in: context)
+            }
+        }
+    }
+
+    /// An imported state with no trustworthy peer event time must not inherit
+    /// an earlier local event. The receiver can later stage the true peer
+    /// event in the same transaction when that time is available.
+    static func invalidate(for episode: Episode, in context: ModelContext) throws {
+        guard let key = key(for: episode) else { return }
+        try AppSettingIdentity.removeValue(for: key, in: context)
     }
 
     /// Peer application will use its original event time and device identity,

@@ -1083,7 +1083,7 @@ final class PlayerService {
         if let handoff {
             episode.positionSeconds = handoff.positionSeconds
             writeLivePosition(episode, second: handoff.positionSeconds)
-            _ = saveContext()
+            _ = saveContext(localPlaceMutation: false)
         }
         let resume = startSecondsOverride ?? Double(PlaybackLogic.playbackStartPosition(
             position: handoff?.positionSeconds ?? resumePosition(for: episode),
@@ -2927,7 +2927,7 @@ final class PlayerService {
         lastProjectedSecond = position
         lastNowPlayingSyncSecond = nil
         writeLivePosition(episode, second: position)
-        _ = saveContext()
+        _ = saveContext(localPlaceMutation: false)
         applyRate()
     }
 
@@ -3165,10 +3165,22 @@ final class PlayerService {
     }
 
     @discardableResult
-    private func saveContext(publishEpisodeSnapshot: Bool = true) -> Bool {
+    private func saveContext(
+        publishEpisodeSnapshot: Bool = true,
+        localPlaceMutation: Bool = true
+    ) -> Bool {
         guard let context else { return false }
         guard context.hasChanges else { return true }
         do {
+            // The player owns seek, pause/checkpoint and completion saves. Keep
+            // the optional local event clock in the Episode's save transaction.
+            // A fetched handoff has no source event time, so it invalidates old
+            // provenance rather than pretending the import happened now.
+            let deviceID = localPlaceMutation
+                ? settings?.rawValue(SettingsKey.listeningPlacesDeviceID) : nil
+            try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+                in: context, localDeviceID: deviceID
+            )
             try context.save()
             if publishEpisodeSnapshot, let currentEpisode {
                 // The five-second tick lives in UserDefaults, so the Episode row

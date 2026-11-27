@@ -104,6 +104,111 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
                        .unknownLegacy)
     }
 
+    func testPreSaveChangeInventorySeparatesMetadataFromPlaceMutation() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let writer = ModelContext(container)
+        let (podcast, episode) = makeEpisode(position: 10)
+        writer.insert(podcast)
+        writer.insert(episode)
+        try writer.save()
+        let episodeID = episode.persistentModelID
+
+        episode.title = "New title"
+        XCTAssertTrue(writer.changedModelsArray.contains {
+            ($0 as? Episode)?.persistentModelID == episodeID
+        })
+        let persistedMetadata = try XCTUnwrap(
+            ModelContext(container).model(for: episodeID) as? Episode
+        )
+        XCTAssertEqual(persistedMetadata.positionSeconds, 10)
+        writer.rollback()
+
+        let changed = try XCTUnwrap(writer.model(for: episodeID) as? Episode)
+        changed.positionSeconds = 20
+        XCTAssertTrue(writer.changedModelsArray.contains {
+            ($0 as? Episode)?.persistentModelID == episodeID
+        })
+        let persistedPlace = try XCTUnwrap(
+            ModelContext(container).model(for: episodeID) as? Episode
+        )
+        XCTAssertEqual(persistedPlace.positionSeconds, 10)
+        XCTAssertEqual(changed.positionSeconds, 20)
+    }
+
+    func testSaveBoundaryAdvancesClockAfterOneUnstagedBackwardAndForwardChange() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let writer = ModelContext(container)
+        let (podcast, episode) = makeEpisode(position: 10)
+        writer.insert(podcast)
+        writer.insert(episode)
+        let original = Date(timeIntervalSince1970: 1_000)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: writer, deviceID: "phone", now: original
+        )
+        try writer.save()
+
+        // Reproduce an old writer that saved a position without staging.
+        episode.positionSeconds = 20
+        try writer.save()
+        episode.positionSeconds = 10
+        let returned = original.addingTimeInterval(100)
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: writer, localDeviceID: "phone", now: returned
+        )
+        try writer.save()
+        let fresh = ModelContext(container)
+        let saved = try storedEpisode(in: fresh)
+        XCTAssertEqual(event(in: fresh, episode: saved)?.updatedAt, returned)
+    }
+
+    func testSaveBoundaryDoesNotStampMetadataAndInvalidatesUnknownPeerOrigin() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let writer = ModelContext(container)
+        let (podcast, episode) = makeEpisode(position: 10)
+        writer.insert(podcast)
+        writer.insert(episode)
+        let original = Date(timeIntervalSince1970: 1_000)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: writer, deviceID: "phone", now: original
+        )
+        try writer.save()
+
+        episode.title = "Publisher corrected title"
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: writer, localDeviceID: "phone", now: original.addingTimeInterval(50)
+        )
+        try writer.save()
+        XCTAssertEqual(event(in: writer, episode: episode)?.updatedAt, original)
+
+        episode.positionSeconds = 30
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: writer, localDeviceID: nil, now: original.addingTimeInterval(100)
+        )
+        try writer.save()
+        let fresh = ModelContext(container)
+        XCTAssertEqual(try ListeningPlacesEventJournal.read(
+            for: storedEpisode(in: fresh), in: fresh
+        ), .unknownLegacy)
+    }
+
+    func testSaveBoundaryDoesNotBlockEpisodeWithoutInterchangeIdentity() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let writer = ModelContext(container)
+        let podcast = Podcast(feedURL: "", title: "Catalog row")
+        let episode = Episode(guid: "", title: "Audio", audioURL: "", positionSeconds: 10)
+        episode.podcast = podcast
+        writer.insert(podcast)
+        writer.insert(episode)
+        try writer.save()
+
+        episode.positionSeconds = 20
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: writer, localDeviceID: "phone"
+        )
+        try writer.save()
+        XCTAssertEqual(try storedEpisode(in: ModelContext(container)).positionSeconds, 20)
+    }
+
     func testExistingV14StoreKeepsUnknownClockUntilNewSavedMutation() throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

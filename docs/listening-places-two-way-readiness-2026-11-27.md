@@ -176,3 +176,29 @@ An unstaged A → B → A remains a release blocker even with a same-store journ
 The source and precedence of a device-only choice, including whether it also
 affects private iCloud Follow status, need review before subscriptions and
 folders can round-trip safely.
+
+### November 27 save-boundary checkpoint
+
+The local branch now stages the journal at `PlayerService.saveContext` for
+changed Episode place values. The actual seek and manual Played entry points
+have a synthetic-store regression. The two direct playback-handoff imports use
+the unknown-origin path instead of claiming a fresh phone event. CloudProjection
+also clears an older local clock in the transaction that saves a changed remote
+Episode. Its compact projection cannot supply one unambiguous Listening Places
+event when Played and position contributions have separate winners, so that
+import stays unknown-time. A shared pre-save helper compares the dirty Episode
+to a fresh context's committed position and Played value, leaves metadata-only
+saves alone, and forces a newer clock for a backward return to the old value.
+The on-disk journal test uses the same Episode/AppSetting schema as signed 335;
+`git diff 35f90ead --` for those model and schema files is empty.
+
+The focused tests passed on a disposable iOS 26.5 simulator:
+`EarshotLPPlayerCloudRegression20261127.xcresult` (28/28, no skips), including
+player persistence, journal and CloudProjection entry points. A separate intentionally failing
+diagnostic, `EarshotLPUnstagedABAFail20261127.xcresult`, proves that two saves
+which both bypass this helper can return to the original signature and make an
+old clock appear current. The failing test is preserved as a backup patch,
+not enabled in the green suite. Direct writers in Quick Actions, Episode,
+Inbox, Queue, feed refresh, identity repair and Watch still need an exhaustive
+origin-aware save audit. A partial hook is not sufficient to activate an
+incoming receiver or make export-time clocks authoritative. No 336 build exists.
