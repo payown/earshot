@@ -362,3 +362,25 @@ The final adjacent Listening Places run passed 104/104 with zero failures or
 skips on disposable iOS 26.5 Simulator
 (`EarshotLPApprovalAdjacentFinal20261127.xcresult`). No current source schema
 was changed; this run does not validate a future folder-ID schema migration.
+
+### Disposable folder migration exercise
+
+An isolated clone at `/tmp/earshot-folder-migration-probe-20261127` created a
+V14 store with the unchanged signed-335 schema shape, containing two distinct,
+identically named folders and their
+memberships. The fixture test passed 1/1
+(`EarshotFolderV14Fixture20261127.xcresult`); its V14 schema fingerprint is
+`f4abf284b8a87276115ccb1aab3e0ee72d66d9f741c7853c7067f3e454ef5159`.
+In that clone only, adding an optional external ID to the live folder model
+changed the purported V14 fingerprint to
+`b1734c32bd13bb835fa90c255f518ca99162caae410a9e85a2c5aa6861f2b59a`.
+The V12 and V13 definitions also inherited the new field because their
+mirrored model lists reference the live `PodcastFolder`. The drift test passed
+1/1 (`EarshotFolderV14Drift20261127.xcresult`), proving the naive additive
+field would rewrite shipped versioned schemas. The isolated experiment does
+not modify this branch or a real library; it does not prove a safe V15
+migration. A correct implementation must freeze the old mirrored relationship
+graph, create a new versioned model, and migrate a copy of this disposable
+fixture with identity, membership, restart and rollback assertions before it
+can be considered for production. No folder receiver activation or build 336
+is justified by the current evidence.
