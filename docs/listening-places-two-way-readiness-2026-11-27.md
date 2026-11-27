@@ -545,7 +545,7 @@ build or normal-user receiver is enabled.
 ### Default-off service lifecycle probe
 
 The separate local `experiment/listening-places-lifecycle-gate-20261127`
-branch at `388a8c2b` keeps the receiver Debug-only and adds a callable
+branch at `0300c07e` keeps the receiver Debug-only and adds a callable
 configured-service path only for disposable tests. It captures the selected
 bookmark, device ID, binding ID, write generation, context identity and
 persisted sharing switch. The coordinator revalidates that lease after
@@ -553,9 +553,11 @@ coordinated reads, before each peer mutation and before replacing its own
 file. A deterministic test revokes sharing between peer read and apply:
 neither the local library nor either file changes. Re-enabling then imports
 the synthetic approved public follow, updates only Earshot's owned file and
-leaves the peer file byte-for-byte unchanged. The affected service and
-exchange suites passed 64 tests, failed zero and skipped two tests requiring
-the pinned QUILL file (`EarshotLPLifecycleAdjacent20261127.xcresult`); those
+leaves the peer file byte-for-byte unchanged. A separate test marks the feed
+device-only after the peer read; the subsequent import and owned file contain
+no feed URL, while the peer file remains unchanged. The affected service and
+exchange suites passed 65 tests, failed zero and skipped two tests requiring
+the pinned QUILL file (`EarshotLPLifecycleFinalAdjacent20261127.xcresult`); those
 two already passed on the unchanged predecessor source and must run again
 if this slice is integrated. This probe is committed and backed up locally,
 not merged into the candidate.
