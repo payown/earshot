@@ -33,6 +33,26 @@ final class EarshotUITests: XCTestCase {
         expectation(for: applied, evaluatedWith: demoStatus)
         waitForExpectations(timeout: 10)
         XCTAssertTrue(demoStatus.label.contains("Own file unchanged: yes"), demoStatus.label)
+        XCTAssertTrue(demoStatus.label.contains("Peer file unchanged: yes"), demoStatus.label)
+        XCTAssertTrue(demoStatus.label.contains("Private and stale places unchanged: yes"), demoStatus.label)
+        XCTAssertTrue(demoStatus.label.contains("Loaded rewind is 12 seconds"), demoStatus.label)
+
+        let unload = app.buttons["Unload and apply deferred rewind"].firstMatch
+        XCTAssertTrue(unload.waitForExistence(timeout: 5), app.debugDescription)
+        unload.tap()
+        let rewound = NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@",
+                                  "Deferred while loaded 0", "Loaded rewind is 5 seconds")
+        expectation(for: rewound, evaluatedWith: demoStatus)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(demoStatus.label.contains("Own file unchanged: yes"), demoStatus.label)
+
+        let returnWrite = app.buttons["Advance idle place and write back"].firstMatch
+        XCTAssertTrue(returnWrite.waitForExistence(timeout: 5), app.debugDescription)
+        returnWrite.tap()
+        let returned = NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@",
+                                   "Own file updated: yes", "Peer file unchanged: yes")
+        expectation(for: returned, evaluatedWith: demoStatus)
+        waitForExpectations(timeout: 10)
 
         app.swipeUp()
         let sharing = app.switches["Share listening places"].firstMatch

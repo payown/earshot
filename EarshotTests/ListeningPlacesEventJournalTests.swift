@@ -337,6 +337,9 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
         }
         XCTAssertEqual(observed, [
             "Earshot/App/Screenshots/ScreenshotFixtures.swift": 4,
+            // Debug-only disposable pairing screen stages two initial places
+            // and one later return write in its in-memory test store.
+            "Earshot/App/Screenshots/ScreenshotHarness.swift": 3,
             "Earshot/Data/Models/Bookmark.swift": 1,
             "Earshot/Data/Models/Episode.swift": 2,
             "Earshot/Data/Models/PersonalAudioItem.swift": 3,

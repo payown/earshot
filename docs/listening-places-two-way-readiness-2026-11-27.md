@@ -1,5 +1,9 @@
 # Listening Places two-way readiness — November 27, 2026
 
+The runnable secluded Debug Playback rehearsal and the later physical
+iPhone/Windows checklist are in
+[the pairing handoff](listening-places-debug-pairing-handoff-2026-11-27.md).
+
 This follows the [write-only 1.2.0 plan](listening-places-1.2.0-plan.md).
 Signed Earshot 1.3.1 (335) still writes only its own device file. This
 document records the verified gates for importing places from another app;

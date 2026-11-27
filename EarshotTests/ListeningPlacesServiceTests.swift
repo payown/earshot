@@ -1097,6 +1097,9 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.useDisposablePlaybackDemoForTesting()
         service.configure(context: context)
         await service.chooseFolder(directory)
+        // Capture the Earshot-owned path before adding a peer JSON file. A
+        // directory enumeration after that can return the peer first.
+        let ownedPath = try deviceFile(in: directory)
         let peerPath = directory.appending(path: "Listening Places/devices/desktopfixture.json")
         let peer = Data("synthetic peer unchanged".utf8)
         try peer.write(to: peerPath)
@@ -1136,7 +1139,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         await reopened.setEnabled(false)
         XCTAssertEqual(reopened.status, .off)
         XCTAssertFalse(reopened.isSharingStopPendingForTesting)
-        let owned = try Data(contentsOf: deviceFile(in: directory))
+        let owned = try Data(contentsOf: ownedPath)
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: owned) as? [String: Any])
         XCTAssertTrue(try XCTUnwrap(root["records"] as? [[String: Any]]).isEmpty)
         XCTAssertEqual(try Data(contentsOf: peerPath), peer)

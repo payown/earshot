@@ -259,9 +259,58 @@ actor FeedRetryScreenshotFeed: FeedFetching {
 /// Native Settings rehearsal using only an in-memory library and a fresh
 /// temporary folder. The launch gate is absent from Release builds. It never
 /// reads the user's bookmark, account, library, or a network feed.
+private final class DisposableDirectoryURLProtocol: URLProtocol, @unchecked Sendable {
+    static let feedURL = "https://example.invalid/playback-demo.xml"
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        let data: Data
+        if url.host == "itunes.apple.com", url.path == "/search" {
+            data = Data("""
+            {"results":[{"collectionName":"Synthetic playback demo",
+            "feedUrl":"https://example.invalid/playback-demo.xml"}]}
+            """.utf8)
+        } else if url.absoluteString == Self.feedURL {
+            data = Data("""
+            <rss version="2.0"><channel><title>Synthetic playback demo</title>
+            <item><guid>synthetic-loaded</guid><title>Loaded rewind</title>
+            <enclosure url="https://example.invalid/loaded.mp3" type="audio/mpeg"/></item>
+            <item><guid>synthetic-idle</guid><title>Idle progress</title>
+            <enclosure url="https://example.invalid/idle.mp3" type="audio/mpeg"/></item>
+            </channel></rss>
+            """.utf8)
+        } else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        guard let response = HTTPURLResponse(url: url, statusCode: 200,
+            httpVersion: "HTTP/1.1", headerFields: nil) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private actor DisposableNoNetworkFeed: FeedFetching {
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        throw FeedError.network("Disposable directory proof did not complete")
+    }
+}
+
 struct ListeningPlacesPlaybackDemoControls: View {
     @MainActor private static var directory: URL?
-    private static let feed = "https://example.invalid/playback-demo.xml"
+    private static let feed = DisposableDirectoryURLProtocol.feedURL
     private static let blockedFeeds: [(feed: String, guid: String)] = [
         ("https://example.invalid/private.xml?token=synthetic", "synthetic-private"),
         ("https://example.invalid/redirect.xml", "synthetic-redirect"),
@@ -273,6 +322,7 @@ struct ListeningPlacesPlaybackDemoControls: View {
     @Environment(ListeningPlacesService.self) private var service
     @Environment(PlayerService.self) private var player
     @State private var isSyncing = false
+    @State private var hasSyncedPeer = false
     @State private var ownedFileBeforeConflict: Data?
     @State private var status = "Preparing disposable playback fixtures."
 
@@ -281,6 +331,17 @@ struct ListeningPlacesPlaybackDemoControls: View {
             Text("This Debug test uses synthetic episodes and a temporary folder. It does not use your library, iCloud, or a network feed.")
             Button("Sync synthetic peer place") { Task { await syncNow() } }
                 .disabled(isSyncing || !service.enabled || service.isSharingStopPendingForTesting)
+            Button("Unload and apply deferred rewind") {
+                Task {
+                    player.stopAndUnload()
+                    await syncNow()
+                }
+            }
+            .disabled(isSyncing || !hasSyncedPeer || !service.enabled)
+            Button("Advance idle place and write back") {
+                Task { await returnWriteNow() }
+            }
+            .disabled(isSyncing || !hasSyncedPeer || !service.enabled)
             Button("Simulate disposable cleanup conflict") {
                 Task { await makeCleanupConflict() }
             }
@@ -313,16 +374,32 @@ struct ListeningPlacesPlaybackDemoControls: View {
                 loaded = first
                 idle = second
             } else {
-                show = Podcast(feedURL: Self.feed, title: "Synthetic playback demo")
-                loaded = Episode(guid: "synthetic-loaded", title: "Loaded rewind",
-                    audioURL: "https://example.invalid/loaded.mp3", positionSeconds: 12)
-                idle = Episode(guid: "synthetic-idle", title: "Idle progress",
-                    audioURL: "https://example.invalid/idle.mp3", positionSeconds: 20)
-                context.insert(show)
-                for episode in [loaded, idle] {
-                    episode.podcast = show
-                    context.insert(episode)
+                let configuration = AnonymousVerifiedDirectoryFeed.makeConfiguration()
+                configuration.protocolClasses = [DisposableDirectoryURLProtocol.self]
+                let session = URLSession(configuration: configuration)
+                defer { session.invalidateAndCancel() }
+                let directoryResult = await ITunesSearchService(session: session)
+                    .search("synthetic playback demo")
+                guard case .results(let matches) = directoryResult,
+                      let match = matches.first,
+                      match.feedURL == Self.feed,
+                      match.directoryResponseURL != nil else {
+                    throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
                 }
+                show = try await SubscriptionRepository(
+                    context: context, feed: DisposableNoNetworkFeed()
+                ).subscribe(directoryResult: match, anonymousSession: session)
+                guard try ListeningPlacesPublicFeedApproval.approvedKeys(in: context)
+                    .contains(ListeningPlacesPublicFeedApproval.key(Self.feed)),
+                      let episodes = show.episodes,
+                      let first = episodes.first(where: { $0.guid == "synthetic-loaded" }),
+                      let second = episodes.first(where: { $0.guid == "synthetic-idle" }) else {
+                    throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+                }
+                loaded = first
+                idle = second
+                loaded.positionSeconds = 12
+                idle.positionSeconds = 20
                 let deviceID = AppSettingsStore(context: context).rawValue(
                     SettingsKey.listeningPlacesDeviceID) ?? "phone123"
                 let earlier = Date().addingTimeInterval(-3_600)
@@ -330,8 +407,6 @@ struct ListeningPlacesPlaybackDemoControls: View {
                     of: loaded, in: context, deviceID: deviceID, now: earlier)
                 try ListeningPlacesEventJournal.stageLocalMutation(
                     of: idle, in: context, deviceID: deviceID, now: earlier)
-                try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
-                    for: show.feedURL, in: context)
                 for fixture in Self.blockedFeeds {
                     let blockedShow = Podcast(feedURL: fixture.feed, title: "Blocked synthetic feed")
                     let blockedEpisode = Episode(guid: fixture.guid, title: "Blocked synthetic place",
@@ -429,21 +504,50 @@ struct ListeningPlacesPlaybackDemoControls: View {
                 return
             }
             let now = Date()
+            let peerTime = now.addingTimeInterval(-30)
+            let privateEpisode = episodes.first { $0.guid == "synthetic-private" }
+            guard let privateEpisode else {
+                throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+            }
             let peerRecords = [
                 ListeningPlaceRecord(id: ListeningPlacesFormat.episodeID(
                     guid: loaded.guid, enclosureURL: loaded.audioURL), kind: "episode",
                     positionMilliseconds: 5_000, durationMilliseconds: nil,
-                    played: false, updatedAt: now, label: nil, feed: nil, deleted: nil),
+                    played: false, updatedAt: peerTime, label: nil, feed: nil, deleted: nil),
                 ListeningPlaceRecord(id: ListeningPlacesFormat.episodeID(
                     guid: idle.guid, enclosureURL: idle.audioURL), kind: "episode",
                     positionMilliseconds: 25_000, durationMilliseconds: nil,
-                    played: false, updatedAt: now, label: nil, feed: nil, deleted: nil),
+                    played: false, updatedAt: peerTime, label: nil, feed: nil, deleted: nil),
+                ListeningPlaceRecord(id: ListeningPlacesFormat.episodeID(
+                    guid: privateEpisode.guid, enclosureURL: privateEpisode.audioURL),
+                    kind: "episode", positionMilliseconds: 40_000,
+                    durationMilliseconds: nil, played: false, updatedAt: peerTime,
+                    label: nil, feed: nil, deleted: nil),
             ]
             let peer = try ListeningPlacesFormat.encodedDeviceFile(
                 deviceID: "desktopfixture", appVersion: "quill-cast/synthetic-fixture",
-                writtenAt: now, records: peerRecords)
+                writtenAt: peerTime, records: peerRecords)
             let peerPath = directory.appending(path: "Listening Places/devices/desktopfixture.json")
-            try peer.write(to: peerPath, options: .atomic)
+            if !FileManager.default.fileExists(atPath: peerPath.path) {
+                try peer.write(to: peerPath, options: .atomic)
+            }
+            let staleTime = now.addingTimeInterval(-181 * 24 * 60 * 60)
+            let stalePeerPath = directory.appending(
+                path: "Listening Places/devices/staledesktop.json")
+            if !FileManager.default.fileExists(atPath: stalePeerPath.path) {
+                let stalePeer = try ListeningPlacesFormat.encodedDeviceFile(
+                    deviceID: "staledesktop", appVersion: "quill-cast/stale-fixture",
+                    writtenAt: staleTime, records: [ListeningPlaceRecord(
+                        id: ListeningPlacesFormat.episodeID(
+                            guid: idle.guid, enclosureURL: idle.audioURL),
+                        kind: "episode", positionMilliseconds: 50_000,
+                        durationMilliseconds: nil, played: false,
+                        updatedAt: staleTime, label: nil, feed: nil, deleted: nil
+                    )])
+                try stalePeer.write(to: stalePeerPath, options: .atomic)
+            }
+            let peerBefore = try Data(contentsOf: peerPath)
+            let stalePeerBefore = try Data(contentsOf: stalePeerPath)
             let bookmark = try directory.bookmarkData(options: .minimalBookmark,
                 includingResourceValuesForKeys: nil, relativeTo: nil)
             let before = try await service.disposableTransportForTesting.readDeviceFile(
@@ -457,15 +561,73 @@ struct ListeningPlacesPlaybackDemoControls: View {
                 })
             let after = try await service.disposableTransportForTesting.readDeviceFile(
                 bookmarkData: bookmark, deviceID: deviceID)
+            let peerAfter = try Data(contentsOf: peerPath)
+            guard privateEpisode.positionSeconds == 10,
+                  idle.positionSeconds == 25,
+                  try Data(contentsOf: stalePeerPath) == stalePeerBefore else {
+                throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+            }
             let applied = result.episodes.applied
             let deferredLoaded = result.episodes.deferredLoaded
             let deferredOther = result.episodes.deferred
             let ownFileUnchanged = before == after ? "yes" : "no"
+            hasSyncedPeer = true
             status = "Applied \(applied). Deferred while loaded \(deferredLoaded). "
                 + "Other deferred \(deferredOther). Idle progress is "
-                + "\(idle.positionSeconds) seconds. Own file unchanged: \(ownFileUnchanged)."
+                + "\(idle.positionSeconds) seconds. Loaded rewind is "
+                + "\(loaded.positionSeconds) seconds. Own file unchanged: \(ownFileUnchanged). "
+                + "Peer file unchanged: \(peerBefore == peerAfter ? "yes" : "no"). "
+                + "Private and stale places unchanged: yes."
         } catch {
             status = "Disposable sync failed. Confirm sharing is on, then retry Sync synthetic peer place."
+        }
+    }
+
+    private func returnWriteNow() async {
+        guard !isSyncing, hasSyncedPeer, service.enabled,
+              let directory = Self.directory else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        do {
+            let idle = try context.fetch(FetchDescriptor<Episode>()).first {
+                $0.guid == "synthetic-idle"
+            }
+            guard let idle,
+                  let deviceID = AppSettingsStore(context: context).rawValue(
+                    SettingsKey.listeningPlacesDeviceID) else {
+                throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+            }
+            let bookmark = try directory.bookmarkData(options: .minimalBookmark,
+                includingResourceValuesForKeys: nil, relativeTo: nil)
+            let peerPath = directory.appending(
+                path: "Listening Places/devices/desktopfixture.json")
+            let peerBefore = try Data(contentsOf: peerPath)
+            let ownBefore = try await service.disposableTransportForTesting.readDeviceFile(
+                bookmarkData: bookmark, deviceID: deviceID)
+
+            idle.positionSeconds = 30
+            try ListeningPlacesEventJournal.stageLocalMutation(
+                of: idle, in: context, deviceID: deviceID, now: .now)
+            try context.save()
+            await service.writeNow()
+
+            let ownAfter = try await service.disposableTransportForTesting.readDeviceFile(
+                bookmarkData: bookmark, deviceID: deviceID)
+            let root = try ownAfter.flatMap {
+                try JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            let rows = root?["records"] as? [[String: Any]] ?? []
+            let id = ListeningPlacesFormat.episodeID(
+                guid: idle.guid, enclosureURL: idle.audioURL)
+            let returned = rows.first { $0["id"] as? String == id }
+            let didWrite = ownBefore != ownAfter
+                && returned?["position_ms"] as? Int == 30_000
+            let peerUnchanged = try Data(contentsOf: peerPath) == peerBefore
+            status = "Return write 30 seconds. Own file updated: "
+                + "\(didWrite ? "yes" : "no"). Peer file unchanged: "
+                + "\(peerUnchanged ? "yes" : "no")."
+        } catch {
+            status = "Disposable return write failed. Reopen this Debug screen to retry."
         }
     }
 

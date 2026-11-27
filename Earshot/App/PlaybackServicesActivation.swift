@@ -12,7 +12,9 @@ extension AppRuntime {
         return await activateRootServices(for: container) {
             self.bindRootServicesIfNeeded(to: container) {
                 #if DEBUG
-                if ScreenshotHarness.isSeeding { ScreenshotFixtures.seed(into: context) }
+                if ScreenshotHarness.isSeeding && !ScreenshotHarness.isListeningPlacesPlaybackDemo {
+                    ScreenshotFixtures.seed(into: context)
+                }
                 #endif
                 self.player.configure(context: context)
                 self.quickActions.configure(context: context)
