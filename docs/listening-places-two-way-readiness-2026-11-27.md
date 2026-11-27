@@ -16,6 +16,12 @@ it is not a claim that two-way sync or subscriptions are available in 335.
   fixtures are the useful comparison; its `listening-places-spec.md` prose is
   behind the implementation on subscription support, GUID trimming, and plain
   feed URLs in opt-in subscription records.
+- The standalone QUILL Cast release host's Latest currently resolves to
+  `v1.0.0`; that label does not prove an installed desktop build includes the
+  subscription controls from the pinned source. Before S1–S15, confirm the
+  desktop app exposes both its plain-file Listening Places control and “Also
+  share the podcasts I follow” in Carry My Place Between Machines. Record its
+  exact source/build so a missing control is not mistaken for an Earshot bug.
 - One device owns one JSON file. An Earshot reader must not write, rename, or
   delete another device's file. A read failure or unfamiliar row cannot make
   a valid episode row disappear from the same or another file. Before any
@@ -45,7 +51,11 @@ it is not a claim that two-way sync or subscriptions are available in 335.
    URL aliases, and per-device private-feed choices need a separate tested
    preservation path. Earshot now has nested folders, so the earlier flat-folder
    description is stale; folder `parent` and extra memberships still require
-   round-trip proof. No remote subscription mutation is enabled by a parser.
+   round-trip proof. QUILL's pinned
+   `test_what_cast_cannot_hold_is_carried_back_untouched` preserves a second
+   Earshot folder membership, `sortOrder`, and Earshot `app_private` metadata
+   on re-export; Earshot's round trip must preserve them too. No remote
+   subscription mutation is enabled by a parser.
 4. **Privacy.** A device-local "keep here" choice must suppress that show's
    subscription, folders, episode places and incoming changes without emitting
    an unfollow tombstone. Private feed URLs and authentication must never enter
