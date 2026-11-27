@@ -287,19 +287,28 @@ coordinator use the same file-transport actor for the consent boundary.
 Release still has no peer
 receiver, Debug screen, or new consent behavior.
 
-The Debug exporter additionally requires an explicit local approval marker
-for each synthetic feed. A test passes one approved fixture while deferring
+The isolated candidate's normal episode-file writer now requires an explicit
+versioned local public-provenance marker; missing or legacy markers fail closed.
+The Debug harness can stage that marker only for reserved synthetic domains.
+A test passes one synthetic fixture while deferring
 an unapproved user-entered URL, token-bearing URL, invalid URL, and marked
-device-only feed without changing their local positions. This marker is **not**
-proof that a real feed is public. Normal Add Feed accepts a typed URL; OPML
+device-only feed without changing their local positions. The native demo also
+checks that redirected and stale-marker places stay out of the owned file.
+This synthetic marker is **not** proof that a real feed is public. Normal Add Feed accepts a typed URL; OPML
 imports URLs, and directory search supplies feed URLs. `FeedService.fetch`
 discards the final response URL; refresh retains it only as validator metadata.
 The shared URL session uses a default configuration with no explicit
 credential/cookie exclusion. `Podcast` has no stored-credential provenance.
 Redirects, private servers, and credentials held outside a URL therefore lack
 a reliable anonymous-public proof. The new two-way path remains unavailable
-for those feeds. Signed 335's existing one-way export still uses URL screening;
-this Debug slice does not claim to resolve that older classification gap.
+for those feeds. The eligibility rule requires an Apple directory search/lookup
+response, byte-identical listed/requested/final feed URLs, a known zero-redirect
+fetch, positively anonymous access, and confirmed absence of stored credentials
+and device-only preference. Generic successful fetches, aliases, unknowns and
+old approvals cannot satisfy it. No production path currently retains and
+stages all that evidence, so this candidate's normal writer exports no unverified
+places. Signed 335's existing one-way export still uses URL screening; this
+unreleased candidate does not retroactively change that shipped behavior.
 
 On the final isolated source, the native Settings/interop/fresh-context focus
 run passed 6/6 (`EarshotPlaybackFinalFocused20261127.xcresult`). Its two
@@ -770,3 +779,33 @@ writes but does not itself remove the last shared file; the explicit Stop
 Sharing and Remove This Device action owns removal. Any future per-feed
 revocation control needs copy and status that distinguish those actions.
 Neither action can erase a peer's previously imported copy.
+
+### Paired-device acceptance after a future eligible build
+
+Use disposable public feeds and a separate shared test folder; never reset a
+real library. On iPhone, confirm a positively verified directory show shares a
+place, while typed, redirected, credentialed, unknown, and device-only shows
+do not. On the pinned compatible QUILL build, confirm a later backward seek
+returns to Earshot only when the episode is idle; a loaded episode defers until
+playback ends. Turn sharing off while a provider write is delayed, relaunch,
+and confirm the pending cleanup is announced and retry removes only Earshot's
+file, without changing QUILL's file or local playback history. Repeat with
+VoiceOver on both devices and record actual provider/Windows/NVDA behavior.
+The current Debug simulator demo is not an installable two-device build.
+
+The public-provenance candidate's affected service suite passed 56/56,
+adjacent parser/format/journal/exchange/transport and native UI checks passed
+66 with two opt-in skips, the held-provider consent case passed after reopening
+separate on-disk synthetic stores, and the two opted-in pinned QUILL fixture
+cases passed. The exact-source full iPhone run on iOS 26.5 Simulator passed
+2,962 tests with 62 established skips and zero failures
+(`EarshotLPProvenanceFull20261127.xcresult`). The Folder Membership Picker UI
+case passed in that run. The earlier service fixture run failed seven cases
+because synthetic feeds lacked the newly required positive marker; those
+fixtures were corrected without relaxing the app guard and the complete
+service suite then passed. An interrupted mixed diagnostic and an initial
+test assertion that expected an empty file instead of no file are not counted
+as passes. Watch, physical paired devices, real providers, Windows and NVDA
+remain unverified for this exact source. The production feed path cannot yet
+provide the required positive evidence; this is a privacy-safe staging gate,
+not a functional 336 release candidate.
