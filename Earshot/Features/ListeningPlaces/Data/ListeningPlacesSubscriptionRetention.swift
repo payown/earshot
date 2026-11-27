@@ -23,6 +23,11 @@ enum ListeningPlacesSubscriptionRetention {
     static func stageRemoteUnfollow(_ podcast: Podcast, in context: ModelContext) throws -> Bool {
         let feed = FeedURLIdentity.canonical(podcast.feedURL)
         guard !feed.isEmpty else { return false }
+        // A per-device keep-here choice takes precedence over peer files. It
+        // does not alter this device's independent iCloud subscription state.
+        guard try !ListeningPlacesFeedPrivacy.isDeviceOnly(
+            feedURL: feed, in: context
+        ) else { return false }
         let pending = try PendingCloudUnfollowIntent.feedURLs(in: context)
         guard !pending.contains(feed) else { return false }
         let retained = try isRetained(feedURL: feed, in: context)
@@ -36,6 +41,46 @@ enum ListeningPlacesSubscriptionRetention {
     /// mutation and marker removal must be committed in the same save.
     static func clearForExplicitFollow(feedURL: String, in context: ModelContext) throws {
         try AppSettingIdentity.removeValue(for: key(feedURL), in: context)
+    }
+
+    private static func key(_ feedURL: String) -> String {
+        let canonical = FeedURLIdentity.canonical(feedURL)
+        let hash = SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        return prefix + hash
+    }
+}
+
+/// Prospective per-device Listening Places exclusion. The marker is local to
+/// this installation and is never mirrored to iCloud or written to a peer
+/// file. No UI or inbound subscription application invokes it yet.
+enum ListeningPlacesFeedPrivacy {
+    private static let prefix = "listening_places_device_only_v1:"
+
+    static func isDeviceOnly(feedURL: String, in context: ModelContext) throws -> Bool {
+        try !LocalAppSettingIdentity.rows(for: key(feedURL), in: context).isEmpty
+    }
+
+    static func mayShare(
+        feedURL: String, hasStoredCredentials: Bool = false,
+        in context: ModelContext
+    ) throws -> Bool {
+        guard ListeningPlacesSubscriptionIdentity.shareableID(
+            feedURL, hasStoredCredentials: hasStoredCredentials
+        ) != nil else { return false }
+        return try !isDeviceOnly(feedURL: feedURL, in: context)
+    }
+
+    /// Caller commits this with its own user-choice transaction. It does not
+    /// unfollow, delete a podcast, or publish an iCloud tombstone.
+    static func stageDeviceOnly(feedURL: String, in context: ModelContext) throws {
+        try LocalAppSettingIdentity.setValue("1", for: key(feedURL), in: context)
+    }
+
+    static func clearForExplicitSharing(feedURL: String, in context: ModelContext) throws {
+        for row in try LocalAppSettingIdentity.rows(for: key(feedURL), in: context) {
+            context.delete(row)
+        }
     }
 
     private static func key(_ feedURL: String) -> String {

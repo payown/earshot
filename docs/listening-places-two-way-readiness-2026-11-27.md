@@ -192,6 +192,22 @@ saves alone, and forces a newer clock for a backward return to the old value.
 The on-disk journal test uses the same Episode/AppSetting schema as signed 335;
 `git diff 35f90ead --` for those model and schema files is empty.
 
+A separate prospective per-device marker can now be staged and rolled back in
+`LocalAppSetting` without changing iCloud Follow state. The peer-unfollow helper
+checks it first; credential-bearing and invalid feed identities fail the
+`mayShare` predicate. Synthetic tests prove the marker survives reopen, blocks
+a peer unfollow, leaves a followed podcast intact, stores no raw feed URL in
+the key, and can be cleared by an explicit local sharing choice. This is a
+data-layer precedence rule only. No UI exposes the choice, no subscription or
+folder importer invokes it, and the existing episode exporter has **not** been
+updated to filter all current and retained prior places by this marker. It
+would be misleading to claim private-feed or device-only export safety until
+that retained-record rewrite and provider-file tests pass.
+The focused marker/journal suite passed 14/14 with no skips
+(`EarshotLPPrivacyProspectiveFixed20261127.xcresult`); three existing
+retention/explicit-follow regressions passed separately with no skips
+(`EarshotLPDeviceOnlyRetentionRegression20261127.xcresult`).
+
 The focused tests passed on a disposable iOS 26.5 simulator:
 `EarshotLPPlayerCloudRegression20261127.xcresult` (28/28, no skips), including
 player persistence, journal and CloudProjection entry points. A separate intentionally failing

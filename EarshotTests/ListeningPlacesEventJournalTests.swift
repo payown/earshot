@@ -209,6 +209,55 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
         XCTAssertEqual(try storedEpisode(in: ModelContext(container)).positionSeconds, 20)
     }
 
+    func testDeviceOnlyChoiceIsLocalAndBlocksPeerUnfollowWithoutICloudTombstone() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let writer = ModelContext(container)
+        let feed = "https://example.com/private-choice.xml"
+        let podcast = Podcast(feedURL: feed, title: "Local show")
+        writer.insert(podcast)
+        try writer.save()
+
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(feedURL: feed, in: writer)
+        try writer.save()
+        let fresh = ModelContext(container)
+        let saved = try XCTUnwrap(fresh.fetch(FetchDescriptor<Podcast>()).first)
+        XCTAssertTrue(try ListeningPlacesFeedPrivacy.isDeviceOnly(feedURL: feed, in: fresh))
+        XCTAssertFalse(try ListeningPlacesFeedPrivacy.mayShare(feedURL: feed, in: fresh))
+        XCTAssertFalse(try ListeningPlacesSubscriptionRetention.stageRemoteUnfollow(saved, in: fresh))
+        XCTAssertTrue(saved.isFollowed)
+        XCTAssertFalse(try ListeningPlacesSubscriptionRetention.isRetained(
+            feedURL: feed, in: fresh
+        ))
+        XCTAssertTrue(try fresh.fetch(FetchDescriptor<LocalAppSetting>()).allSatisfy {
+            !$0.key.contains(feed)
+        })
+
+        try ListeningPlacesFeedPrivacy.clearForExplicitSharing(feedURL: feed, in: fresh)
+        try fresh.save()
+        let reopened = ModelContext(container)
+        XCTAssertTrue(try ListeningPlacesFeedPrivacy.mayShare(feedURL: feed, in: reopened))
+        XCTAssertTrue(try XCTUnwrap(reopened.fetch(FetchDescriptor<Podcast>()).first).isFollowed)
+    }
+
+    func testDeviceOnlyRollbackAndCredentialBearingFeedFailClosed() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let writer = ModelContext(container)
+        let feed = "https://example.com/feed?token=synthetic"
+        XCTAssertFalse(try ListeningPlacesFeedPrivacy.mayShare(
+            feedURL: feed, in: writer
+        ))
+        XCTAssertFalse(try ListeningPlacesFeedPrivacy.mayShare(
+            feedURL: "https://example.com/feed", hasStoredCredentials: true, in: writer
+        ))
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(
+            feedURL: "https://example.com/public", in: writer
+        )
+        writer.rollback()
+        XCTAssertFalse(try ListeningPlacesFeedPrivacy.isDeviceOnly(
+            feedURL: "https://example.com/public", in: ModelContext(container)
+        ))
+    }
+
     func testExistingV14StoreKeepsUnknownClockUntilNewSavedMutation() throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
