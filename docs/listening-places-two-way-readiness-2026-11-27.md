@@ -434,6 +434,25 @@ frozen relationship graph or another reviewed atomic stable-key design is
 required before V15 or external folder identity can ship. No real store was
 opened or altered by this experiment.
 
+An additional isolated `experiment/folder-v15-frozen-20261127` probe copied
+the complete transitive V12–V14 mirrored relationship graph into historical
+model definitions and added an optional external UUID only to the new live
+folder model. Stable structural fingerprints for V12, V13 and V14 matched
+the exact signed-335 generator. A disposable copied V14 split store then
+opened explicitly with the frozen V14 graph and migrated to a provisional
+V15 graph: two same-name folders, ordered memberships and an unrelated
+setting survived, and new folder IDs survived rollback/save/reopen
+(`EarshotV15FrozenOldOpenDiagnostic20261127.xcresult`, 1/1). A direct cold
+V15 migration without that V14 preflight failed with a SwiftData container
+load error. The existing older V12/V13 upgrade tests crashed on this
+experimental source (`EarshotV15FrozenOlderPaths20261127.xcresult`, 0/2):
+their fixture/open paths still mix live model classes with newly frozen old
+classes. This is a migration design finding, **not** a usable upgrade path.
+Production `StoreMigration` still targets V14 and fetches live types; the
+probe has not changed that path or the 336 branch. A complete versioned
+V12–V15 migration and all supported older-store routes must pass before
+the optional field can join a candidate. The probe never opened real data.
+
 On the unchanged isolated Listening Places source `98da2d64`, the complete
 iPhone simulator scheme passed 2,955 tests, skipped 59 and failed zero
 (`EarshotLP336FulliPhone20261127.xcresult`). The skips include conditional
@@ -518,3 +537,32 @@ isolated candidate (`EarshotLPExportAnd335MigrationFinal20261127.xcresult`).
 The folder identity migration and off-URL credential-classification gates
 above remain. Incoming application stays behind the Debug-only gate; no 336
 build or normal-user receiver is enabled.
+
+### Default-off service lifecycle probe
+
+The separate local `experiment/listening-places-lifecycle-gate-20261127`
+branch at `388a8c2b` keeps the receiver Debug-only and adds a callable
+configured-service path only for disposable tests. It captures the selected
+bookmark, device ID, binding ID, write generation, context identity and
+persisted sharing switch. The coordinator revalidates that lease after
+coordinated reads, before each peer mutation and before replacing its own
+file. A deterministic test revokes sharing between peer read and apply:
+neither the local library nor either file changes. Re-enabling then imports
+the synthetic approved public follow, updates only Earshot's owned file and
+leaves the peer file byte-for-byte unchanged. The affected service and
+exchange suites passed 64 tests, failed zero and skipped two tests requiring
+the pinned QUILL file (`EarshotLPLifecycleAdjacent20261127.xcresult`); those
+two already passed on the unchanged predecessor source and must run again
+if this slice is integrated. This probe is committed and backed up locally,
+not merged into the candidate.
+
+This does not yet establish a safe normal-app two-way switch. The current
+Settings screen truthfully says Earshot does not import from the chosen
+folder, and no production caller invokes the receiver. Per-feed disclosure
+consent and off-URL credential classification remain unresolved, as do
+serialization of an already-started coordinated own-file replacement with
+revocation and accessible result/status wording. Its initial policy checks
+prevent a known revocation before apply, but cannot retroactively cancel a
+provider write already entered. Product UI, file README and spoken Status
+must change together only after these gates and explicit accessibility
+semantics review; no two-way capability is promised by the existing toggle.
