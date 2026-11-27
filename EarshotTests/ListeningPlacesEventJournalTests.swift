@@ -258,6 +258,52 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
         ))
     }
 
+    /// A new direct state writer needs an explicit provenance review. This is
+    /// an inventory alarm, not proof that every listed writer uses the journal.
+    func testPlaceAssignmentFileAndCountInventoryRequiresReviewForNewWriters() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let appRoot = sourceRoot.appending(path: "Earshot", directoryHint: .isDirectory)
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(
+            at: appRoot, includingPropertiesForKeys: nil
+        ))
+        let expression = try NSRegularExpression(
+            pattern: #"\b[A-Za-z_][A-Za-z_0-9]*\.(?:positionSeconds|isPlayed)\s*=(?!=)"#
+        )
+        var observed: [String: Int] = [:]
+        for case let file as URL in enumerator where file.pathExtension == "swift" {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let count = source.split(separator: "\n", omittingEmptySubsequences: false)
+                .reduce(0) { total, line in
+                    let code = String(line.split(separator: "//", maxSplits: 1,
+                                                 omittingEmptySubsequences: false).first ?? "")
+                    return total + expression.numberOfMatches(
+                        in: code, range: NSRange(code.startIndex..., in: code)
+                    )
+                }
+            if count > 0 {
+                let marker = try XCTUnwrap(file.path.range(of: "/Earshot/"))
+                observed["Earshot/" + String(file.path[marker.upperBound...])] = count
+            }
+        }
+        XCTAssertEqual(observed, [
+            "Earshot/App/Screenshots/ScreenshotFixtures.swift": 4,
+            "Earshot/Data/Models/Bookmark.swift": 1,
+            "Earshot/Data/Models/Episode.swift": 1,
+            "Earshot/Data/Models/PersonalAudioItem.swift": 2,
+            "Earshot/Data/Persistence/CloudProjection.swift": 14,
+            "Earshot/Data/Persistence/EarshotSchema.swift": 8,
+            "Earshot/Data/Persistence/EarshotSchemaV1.swift": 1,
+            "Earshot/Data/Persistence/IdentityRepairService.swift": 1,
+            "Earshot/Features/Inbox/Data/InboxRepository.swift": 1,
+            "Earshot/Features/Player/Data/PlaybackHandoffClient.swift": 1,
+            "Earshot/Features/Player/Data/PlayerService.swift": 15,
+            "Earshot/Features/Queue/Data/QueueRepository.swift": 1,
+            "Earshot/Features/QuickActions/Domain/EpisodeActionsBuilder.swift": 1,
+            "Earshot/Features/Subscriptions/Data/EpisodeRepository.swift": 2,
+        ])
+    }
+
     func testExistingV14StoreKeepsUnknownClockUntilNewSavedMutation() throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

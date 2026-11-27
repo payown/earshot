@@ -256,6 +256,7 @@ final class EpisodeRepository {
         guard context.hasChanges else { return false }
         PendingCloudPlayedMutation.stage(changedEpisodes, in: context)
         do {
+            try ListeningPlacesEventJournal.stageCurrentLocalMutationsBeforeSave(in: context)
             try context.save()
             onSave?()
             if notifyQueue {

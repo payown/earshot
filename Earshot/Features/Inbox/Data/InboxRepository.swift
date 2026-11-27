@@ -462,6 +462,7 @@ final class InboxRepository {
             PendingCloudPlayedMutation.stage(changedEpisodes, in: context)
         }
         do {
+            try ListeningPlacesEventJournal.stageCurrentLocalMutationsBeforeSave(in: context)
             try context.save()
             // Inbox membership changed (dismiss / clear / caps) — refresh the
             // tab badge without it having to poll on every save (#736).

@@ -292,6 +292,7 @@ private func episodeHasTranscript(_ episode: Episode) -> Bool {
 func saveQuickAction(_ context: ModelContext, _ what: String) -> Bool {
     guard context.hasChanges else { return false }
     do {
+        try ListeningPlacesEventJournal.stageCurrentLocalMutationsBeforeSave(in: context)
         try context.save()
         // User-triggered played/include/exclude mutations can change both the
         // global Inbox badge and folder-scoped Inbox snapshots (#763). Other

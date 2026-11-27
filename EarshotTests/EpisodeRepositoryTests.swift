@@ -26,6 +26,39 @@ final class EpisodeRepositoryTests: XCTestCase {
         return e
     }
 
+    func testSelectedPlayedThenUnplayedAdvancesPlaceClockAcrossReturnedSignature() async throws {
+        let ctx = TestStore.freshContext()
+        try LocalAppSettingIdentity.setValue(
+            "synthetic-phone", for: SettingsKey.listeningPlacesDeviceID, in: ctx
+        )
+        let podcast = makePodcast(ctx, "ClockRoundTrip")
+        let episode = makeEpisode(ctx, "round-trip", podcast: podcast)
+        episode.positionSeconds = 10
+        let oldTime = Date(timeIntervalSince1970: 1_000)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: ctx, deviceID: "synthetic-phone", now: oldTime
+        )
+        try ctx.save()
+
+        let repository = EpisodeRepository(context: ctx)
+        let marked = await repository.markSelectedPlayed(
+            in: podcast, ids: [episode.persistentModelID]
+        )
+        let restored = await repository.markSelectedUnplayed(
+            in: podcast, ids: [episode.persistentModelID]
+        )
+        XCTAssertEqual(marked, 1)
+        XCTAssertEqual(restored, 1)
+        let fresh = ModelContext(ctx.container)
+        let saved = try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first)
+        guard case let .event(event) = try ListeningPlacesEventJournal.read(
+            for: saved, in: fresh
+        ) else { return XCTFail("Returned Played state reused an old event") }
+        XCTAssertFalse(event.played)
+        XCTAssertEqual(event.positionMilliseconds, 10_000)
+        XCTAssertGreaterThan(event.updatedAt, oldTime)
+    }
+
     // MARK: Large-list batching (the issue's explicit ask)
 
     func testMarkAllSnapshotSurvivesInsertAndDeleteBetweenSaves() async throws {

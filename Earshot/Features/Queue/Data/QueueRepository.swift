@@ -1361,6 +1361,7 @@ final class QueueRepository {
     @discardableResult
     private func save(notifyQueueChange: Bool = true) -> Bool {
         do {
+            try ListeningPlacesEventJournal.stageCurrentLocalMutationsBeforeSave(in: context)
             try saveContext(context)
             if notifyQueueChange {
                 NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)

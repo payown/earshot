@@ -95,6 +95,15 @@ enum ListeningPlacesEventJournal {
         }
     }
 
+    /// Shared boundary for explicit phone actions. A missing device identity
+    /// fails closed to unknown-time rather than assigning an unstable source.
+    static func stageCurrentLocalMutationsBeforeSave(in context: ModelContext) throws {
+        let deviceID = LocalAppSettingIdentity.value(
+            for: SettingsKey.listeningPlacesDeviceID, in: context
+        )
+        try stageChangedEpisodesBeforeSave(in: context, localDeviceID: deviceID)
+    }
+
     /// An imported state with no trustworthy peer event time must not inherit
     /// an earlier local event. The receiver can later stage the true peer
     /// event in the same transaction when that time is available.

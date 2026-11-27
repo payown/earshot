@@ -2392,6 +2392,11 @@ actor FeedRefreshActor {
         defer {
             PerformanceSignposts.signposter.endInterval("PersistenceSave", saveInterval)
         }
+        // RSS metadata/identity repair is not a listener event. If this batch
+        // changes a place, discard any old event time instead of inventing one.
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: modelContext, localDeviceID: nil
+        )
         try modelContext.save()
     }
 

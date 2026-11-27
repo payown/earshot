@@ -3176,11 +3176,13 @@ final class PlayerService {
             // the optional local event clock in the Episode's save transaction.
             // A fetched handoff has no source event time, so it invalidates old
             // provenance rather than pretending the import happened now.
-            let deviceID = localPlaceMutation
-                ? settings?.rawValue(SettingsKey.listeningPlacesDeviceID) : nil
-            try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
-                in: context, localDeviceID: deviceID
-            )
+            if localPlaceMutation {
+                try ListeningPlacesEventJournal.stageCurrentLocalMutationsBeforeSave(in: context)
+            } else {
+                try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+                    in: context, localDeviceID: nil
+                )
+            }
             try context.save()
             if publishEpisodeSnapshot, let currentEpisode {
                 // The five-second tick lives in UserDefaults, so the Episode row
