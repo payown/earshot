@@ -28,7 +28,11 @@ final class QuickActionRepository {
     func queueConfiguration() -> QuickActionConfiguration<QueueItemAction> {
         resolve(
             .queueItem, all: QueueItemAction.allCases, fallback: defaultQueueItemActions,
-            legacyKnownKeys: Set(defaultQueueItemActions.map(\.rawValue))
+            legacyKnownKeys: Set(defaultQueueItemActions.map(\.rawValue)),
+            previouslyFixedQueueKeys: [
+                QueueItemAction.pickUpToDrag.rawValue,
+                QueueItemAction.openEpisodeDetails.rawValue,
+            ]
         )
     }
 
@@ -96,7 +100,8 @@ final class QuickActionRepository {
         all: [A],
         fallback: [A],
         allowsEmptyEnabled: Bool = false,
-        legacyKnownKeys: Set<String>? = nil
+        legacyKnownKeys: Set<String>? = nil,
+        previouslyFixedQueueKeys: [String] = []
     ) -> QuickActionConfiguration<A> where A.RawValue == String {
         let storedKeys = configs(for: type).map(\.actionKey)
         guard !storedKeys.isEmpty else {
@@ -142,7 +147,12 @@ final class QuickActionRepository {
         let enabledKeys = Set(enabled.map(\.rawValue))
         available.removeAll { enabledKeys.contains($0.rawValue) }
         let present = Set((enabled + available).map(\.rawValue))
+        // These Queue rotor items used to be injected outside the saved list.
+        // Keep them visible on upgrade, but honor an explicit Available entry
+        // after the listener turns either one off.
+        enabled += previouslyFixedQueueKeys.filter { !present.contains($0) }.compactMap { byRaw[$0] }
         available += all.filter { !present.contains($0.rawValue) }
+        available.removeAll { previouslyFixedQueueKeys.contains($0.rawValue) && !present.contains($0.rawValue) }
         if enabled.isEmpty, !allowsEmptyEnabled, let first = available.first {
             enabled = [first]
             available.removeFirst()

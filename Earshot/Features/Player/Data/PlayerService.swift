@@ -2203,11 +2203,11 @@ final class PlayerService {
     /// from a `PlayerService` that hasn't been `configure(context:)`-ed, matching
     /// how `QuickActionBuildersTests` deliberately tests queue-action building in
     /// isolation from full playback setup.
-    func removeFromQueue(_ episode: Episode, context: ModelContext) {
+    func removeFromQueue(_ episode: Episode, context: ModelContext, keepDownload: Bool = false) {
         let repo = QueueRepository(context: context)
 
         guard nowPlayingEpisodeID == episode.persistentModelID else {
-            repo.cancelFromQueue(episode)
+            repo.cancelFromQueue(episode, keepDownload: keepDownload)
             return
         }
 
@@ -2222,7 +2222,7 @@ final class PlayerService {
         // The repository resolves the canonical queue item by episode identity.
         // If persistence fails or the membership disappeared concurrently, keep
         // playback intact instead of advancing while the row remains queued.
-        guard repo.cancelFromQueue(episode) else { return }
+        guard repo.cancelFromQueue(episode, keepDownload: keepDownload) else { return }
 
         guard let nextEpisode else {
             // Nothing queued after this one: stop cleanly and hide the bar (#730).

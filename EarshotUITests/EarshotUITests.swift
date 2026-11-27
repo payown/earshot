@@ -599,6 +599,173 @@ final class EarshotUITests: XCTestCase {
         XCTAssertEqual(app.buttons["player.playPause"].label, "Pause")
     }
 
+    func testQueueSelectionCancelAndBulkRemovalKeepUnselectedEpisode() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        let firstTitle = "#166 – If You Used a Passkey"
+        let secondTitle = "#165 – No Excuses Left"
+        let first = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", firstTitle)).firstMatch
+        let second = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", secondTitle)).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        XCTAssertTrue(second.exists)
+
+        app.buttons["Select episodes"].tap()
+        let selectable = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", firstTitle)).firstMatch
+        selectable.tap()
+        XCTAssertTrue(app.buttons["Remove 1 episode from Queue"].waitForExistence(timeout: 5))
+        let secondSelectable = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", secondTitle)).firstMatch
+        secondSelectable.tap()
+        XCTAssertTrue(app.buttons["Remove 2 episodes from Queue"].waitForExistence(timeout: 5))
+        secondSelectable.tap()
+        XCTAssertTrue(app.buttons["Remove 1 episode from Queue"].exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(first.exists, "Canceling selection must leave Queue membership alone")
+
+        app.buttons["Select episodes"].tap()
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", firstTitle)).firstMatch.tap()
+        app.buttons["Remove 1 episode from Queue"].tap()
+        XCTAssertFalse(first.waitForExistence(timeout: 2))
+        XCTAssertTrue(second.exists)
+        XCTAssertFalse(app.buttons["Close player"].exists, "Selection must not start playback")
+    }
+
+    func testQueueSelectionMarkPlayedHonorsQueueRetention() {
+        for keep in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+                + (keep ? ["-uiTestQueueSelectionKeepFinished"] : [])
+            app.launch()
+            let title = "#166 – If You Used a Passkey"
+            let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15))
+            app.buttons["Select episodes"].tap()
+            app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch.tap()
+            app.buttons["Mark 1 episode as played"].tap()
+            XCTAssertTrue(app.buttons["Mark as played"].waitForExistence(timeout: 5))
+            app.buttons["Mark as played"].tap()
+            if keep {
+                XCTAssertTrue(row.waitForExistence(timeout: 5))
+                XCTAssertTrue(row.label.contains("Played"))
+            } else {
+                XCTAssertFalse(row.waitForExistence(timeout: 3))
+            }
+            XCTAssertFalse(app.buttons["Close player"].exists)
+            app.terminate()
+        }
+    }
+
+    func testQueueVoiceOverSelectionActivatesCheckboxWithoutPlayback() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        let select = app.buttons["Select episodes"].firstMatch
+        XCTAssertTrue(select.waitForExistence(timeout: 15))
+        select.tap()
+        if !app.buttons["Done"].firstMatch.waitForExistence(timeout: 2) { select.doubleTap() }
+        let row = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "#166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        if !row.isSelected { row.doubleTap() }
+        XCTAssertTrue(row.isSelected)
+        XCTAssertTrue(app.buttons["Remove 1 episode from Queue"].exists)
+        XCTAssertFalse(app.buttons["Close player"].exists)
+    }
+
+    func testQueueReorderIsSeparateFromSelectionAndDoesNotStartPlayback() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Select episodes"].waitForExistence(timeout: 15))
+        app.buttons["Queue options"].tap()
+        app.buttons["Reorder Queue"].tap()
+        XCTAssertTrue(app.buttons["Done reordering"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Remove from Queue"].exists)
+        app.buttons["Done reordering"].tap()
+        XCTAssertTrue(app.buttons["Select episodes"].exists)
+        XCTAssertFalse(app.buttons["Close player"].exists)
+    }
+
+    func testQueueDetailsStillOpenByTouchWhenRotorDetailsIsDisabled() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
+                               "-uiTestQueueDetailsDisabled"]
+        app.launch()
+        let row = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "#166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        row.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5),
+                      "Disabling the configurable rotor item must not remove ordinary details navigation")
+        XCTAssertFalse(app.buttons["Close player"].exists)
+    }
+
+    func testQueueSelectionDuringHeldLargeLibraryRefreshKeepsSurvivorsAndSettles() {
+        // The held feed makes refresh and Queue cleanup overlap without a
+        // network request or the listener's library. Compare idle and two
+        // separate overlapping trials; timings are diagnostic, not a thermal
+        // assertion about physical hardware.
+        for trial in 0..<3 {
+            let app = XCUIApplication()
+            app.launchArguments = [
+                "-uiTestScreenshotSeed", "-screenshotScreen", "library", "-heldRefreshUITest"
+            ]
+            app.launch()
+            if trial > 0 {
+                let refresh = app.buttons["Refresh library"].firstMatch
+                XCTAssertTrue(refresh.waitForExistence(timeout: 20))
+                refresh.tap()
+                XCTAssertTrue(app.buttons["Refreshing library"].waitForExistence(timeout: 5))
+            }
+            app.tabBars.buttons["Queue"].tap()
+            let first = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", "#166 – If You Used a Passkey"
+            )).firstMatch
+            let second = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", "#165 – No Excuses Left"
+            )).firstMatch
+            let survivor = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", "Welcome to Our Perspective"
+            )).firstMatch
+            XCTAssertTrue(first.waitForExistence(timeout: 20))
+            let started = Date()
+            app.buttons["Select episodes"].tap()
+            app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", "#166 – If You Used a Passkey"
+            )).firstMatch.tap()
+            app.buttons["Remove 1 episode from Queue"].tap()
+            XCTAssertFalse(first.waitForExistence(timeout: 2))
+            XCTAssertTrue(second.exists)
+            app.buttons["Select episodes"].tap()
+            app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", "#165 – No Excuses Left"
+            )).firstMatch.tap()
+            app.buttons["Mark 1 episode as played"].tap()
+            app.buttons["Mark as played"].tap()
+            XCTAssertFalse(second.waitForExistence(timeout: 2))
+            XCTAssertTrue(survivor.exists)
+            XCTAssertFalse(app.buttons["Close player"].exists)
+            print("QUEUE_REFRESH_DIAGNOSTIC trial=\(trial) removeAndMarkSeconds=\(Date().timeIntervalSince(started))")
+            if trial > 0 {
+                app.tabBars.buttons["Library"].tap()
+                XCTAssertTrue(app.buttons["Refresh library"].waitForExistence(timeout: 45),
+                              "Held refresh must settle after Queue cleanup")
+                app.tabBars.buttons["Queue"].tap()
+                XCTAssertTrue(survivor.exists)
+                XCTAssertFalse(first.exists, "Refresh must not resurrect a removed Queue row")
+                XCTAssertFalse(second.exists, "Refresh must not requeue an episode marked played")
+            }
+            app.terminate()
+        }
+    }
+
     func testQueueVoiceOverHasOneStopPerEpisode() throws {
         guard #available(iOS 27.0, *) else {
             throw XCTSkip("VoiceOver UI automation requires iOS 27")

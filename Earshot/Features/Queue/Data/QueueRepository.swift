@@ -671,7 +671,7 @@ final class QueueRepository {
     /// not have listened to any of it. Use ``markPlayedAndRemove(_:)`` instead
     /// when the episode genuinely finished playing.
     @discardableResult
-    func cancelFromQueue(_ episode: Episode) -> Bool {
+    func cancelFromQueue(_ episode: Episode, keepDownload: Bool = false) -> Bool {
         remove(episode) {
             if !$0.isPlayed { $0.status = .newEpisode }
             $0.inboxDismissed = true
@@ -679,8 +679,39 @@ final class QueueRepository {
             // queue removal means the listener is done with this episode just
             // as surely as marking it played, but it still must not count as a
             // completed listen.
-            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)
+            if !keepDownload {
+                DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)
+            }
         }
+    }
+
+    /// Removes selected non-playing rows in one durable transaction. The caller
+    /// handles a currently playing row through PlayerService after this commit,
+    /// so automatic advance can only choose a surviving Queue item. Selection
+    /// removal keeps downloaded media even when completion cleanup is enabled.
+    @discardableResult
+    func cancelSelectedFromQueue(_ episodes: [Episode]) -> Int {
+        let selectedIDs = Set(episodes.map(\.persistentModelID))
+        guard !selectedIDs.isEmpty else { return 0 }
+        var items = orderedItems()
+        let removed = items.filter { item in
+            item.episode.map { selectedIDs.contains($0.persistentModelID) } ?? false
+        }
+        guard !removed.isEmpty else { return 0 }
+        var needsOrderingIntent = false
+        for item in removed {
+            guard let episode = item.episode else { continue }
+            needsOrderingIntent = PendingCloudQueueMutation.stageMembership(
+                episode: episode, isQueued: false, in: context
+            ) || needsOrderingIntent
+            context.delete(item)
+            if !episode.isPlayed { episode.status = .newEpisode }
+            episode.inboxDismissed = true
+        }
+        if needsOrderingIntent { PendingCloudQueueMutation.stageOrdering(in: context) }
+        let removedItemIDs = Set(removed.map(\.persistentModelID))
+        items.removeAll { removedItemIDs.contains($0.persistentModelID) }
+        return compact(items) ? removed.count : 0
     }
 
     /// Completion-driven removal: marks the episode played atomically.

@@ -306,6 +306,14 @@ enum ScreenshotFixtures {
                 enabled: [.exportTranscript] + defaultQueueItemActions,
                 available: []
             ))
+        } else if args.contains("-uiTestQueueDetailsDisabled") {
+            quickActions.setQueueConfiguration(QuickActionConfiguration(
+                enabled: [.playNow, .removeFromQueue],
+                available: QueueItemAction.allCases.filter { ![.playNow, .removeFromQueue].contains($0) }
+            ))
+        }
+        if args.contains("-uiTestQueueSelectionKeepFinished") {
+            settings.setBool(true, for: SettingsKey.keepFinishedEpisodesInQueue)
         }
     }
 
