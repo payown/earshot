@@ -449,7 +449,11 @@ experimental source (`EarshotV15FrozenOlderPaths20261127.xcresult`, 0/2):
 their fixture/open paths still mix live model classes with newly frozen old
 classes. This is a migration design finding, **not** a usable upgrade path.
 Production `StoreMigration` still targets V14 and fetches live types; the
-probe has not changed that path or the 336 branch. A complete versioned
+probe has not changed that path or the 336 branch. The existing normal-open
+test on the copied signed-335 folder fixture also trapped on the frozen
+experiment (`EarshotV15FrozenNormalOpenEnabled20261127.xcresult`, 0/1), so
+the direct preflight migration result cannot stand in for the app launch
+path. A complete versioned
 V12–V15 migration and all supported older-store routes must pass before
 the optional field can join a candidate. The probe never opened real data.
 
