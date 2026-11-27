@@ -348,10 +348,12 @@ enum ListeningPlacesPublicFeedApproval {
 @MainActor
 enum ListeningPlacesSubscriptionTestCoordinator {
     private static let policyKey = "listening_places_disposable_subscription_policy_v1"
+    private static let episodeImportKey = "listening_places_disposable_episode_import_v1"
     private static let runnerGate = "EARSHOT_LP_DISPOSABLE_SYNC"
 
     struct Result {
         var applied = ListeningPlacesSubscriptionExchange.ApplyResult()
+        var episodes = ListeningPlacesEpisodeTestReceiver.Result()
         var wroteOwnedFile = false
         var peerFilesRead = 0
     }
@@ -359,6 +361,8 @@ enum ListeningPlacesSubscriptionTestCoordinator {
     enum CoordinatorError: Error {
         case foreignOwnedFile
         case policyChanged
+        case missingLoadedEpisodeProvider
+        case dirtyContext
     }
 
     static func stagePolicy(
@@ -369,6 +373,10 @@ enum ListeningPlacesSubscriptionTestCoordinator {
             throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
         }
         try LocalAppSettingIdentity.setValue(raw, for: policyKey, in: context)
+    }
+
+    static func stageEpisodeImportForTesting(in context: ModelContext) throws {
+        try LocalAppSettingIdentity.setValue("enabled", for: episodeImportKey, in: context)
     }
 
     private static func policy(in context: ModelContext)
@@ -384,10 +392,16 @@ enum ListeningPlacesSubscriptionTestCoordinator {
     static func sync(
         bookmarkData: Data, ownDeviceID: String, context: ModelContext,
         transport: ListeningPlacesFileTransport = ListeningPlacesFileTransport(),
-        now: Date = .now
+        now: Date = .now,
+        loadedEpisodeID: (@MainActor () -> PersistentIdentifier?)? = nil
     ) async throws -> Result {
-        guard let initialPolicy = policy(in: context), initialPolicy.shareSubscriptions
+        let episodeImportEnabled = LocalAppSettingIdentity.value(
+            for: episodeImportKey, in: context
+        ) == "enabled"
+        guard let initialPolicy = policy(in: context),
+              initialPolicy.shareSubscriptions || episodeImportEnabled
         else { return Result() }
+        guard !context.hasChanges else { throw CoordinatorError.dirtyContext }
         guard let observed = try await transport.readDeviceFile(
             bookmarkData: bookmarkData, deviceID: ownDeviceID
         ) else { return Result() }
@@ -402,6 +416,7 @@ enum ListeningPlacesSubscriptionTestCoordinator {
         )
         var result = Result()
         var carried: [[String: Any]] = []
+        var episodePeerFiles: [(deviceID: String, data: Data)] = []
         for peer in peers.files {
             try Task.checkCancellation()
             guard policy(in: context) == initialPolicy else { throw CoordinatorError.policyChanged }
@@ -411,18 +426,35 @@ enum ListeningPlacesSubscriptionTestCoordinator {
                   let rawRows = parsed["records"] as? [Any]
             else { continue }
             let rows = rawRows.compactMap { $0 as? [String: Any] }
-            guard let applied = try? ListeningPlacesSubscriptionExchange.applyPeerFile(
-                peer.data, context: context, policy: initialPolicy,
-                expectedPeerID: peerID, ownDeviceID: ownDeviceID, now: now
-            ) else { continue }
+            let applied: ListeningPlacesSubscriptionExchange.ApplyResult
+            do {
+                applied = try ListeningPlacesSubscriptionExchange.applyPeerFile(
+                    peer.data, context: context, policy: initialPolicy,
+                    expectedPeerID: peerID, ownDeviceID: ownDeviceID, now: now
+                )
+            } catch {
+                context.rollback()
+                continue
+            }
             result.applied.follows += applied.follows
             result.applied.unfollows += applied.unfollows
             result.applied.deferred += applied.deferred
             result.applied.privateRows += applied.privateRows
             result.peerFilesRead += 1
             carried.append(contentsOf: rows.prefix(2_000))
+            episodePeerFiles.append((peerID, peer.data))
         }
-        guard policy(in: context) == initialPolicy else { throw CoordinatorError.policyChanged }
+        guard policy(in: context) == initialPolicy,
+              (LocalAppSettingIdentity.value(for: episodeImportKey, in: context)
+                == "enabled") == episodeImportEnabled
+        else { throw CoordinatorError.policyChanged }
+        if episodeImportEnabled {
+            guard let loadedEpisodeID else { throw CoordinatorError.missingLoadedEpisodeProvider }
+            result.episodes = try ListeningPlacesEpisodeTestReceiver.apply(
+                episodePeerFiles, in: context, ownDeviceID: ownDeviceID,
+                now: now, loadedEpisodeID: loadedEpisodeID
+            )
+        }
         let composed = try ListeningPlacesSubscriptionExchange.exportOwnedFile(
             episodeFile: observed, context: context,
             policy: initialPolicy, carriedPeerRows: carried, now: now
@@ -433,6 +465,126 @@ enum ListeningPlacesSubscriptionTestCoordinator {
                 expected: observed, with: composed
             )
             result.wroteOwnedFile = true
+        }
+        return result
+    }
+}
+
+/// Test-only receiver using real SwiftData Episode and journal rows. It has no
+/// normal application caller. The eventual product path must additionally
+/// reconcile the owned-file exporter so an imported event cannot be restamped.
+@MainActor
+enum ListeningPlacesEpisodeTestReceiver {
+    struct Result {
+        var applied = 0
+        var deferredLoaded = 0
+        var deferred = 0
+    }
+
+    enum ReceiverError: Error { case dirtyContext, revalidationFailed }
+
+    static func apply(
+        _ files: [(deviceID: String, data: Data)], in context: ModelContext,
+        ownDeviceID: String, now: Date,
+        loadedEpisodeID: @MainActor () -> PersistentIdentifier?
+    ) throws -> Result {
+        guard !context.hasChanges else { throw ReceiverError.dirtyContext }
+        var remoteByID: [String: [ListeningPlacesRemoteEvent]] = [:]
+        for file in files {
+            guard file.deviceID != ownDeviceID,
+                  let parsed = try? ListeningPlacesInboundParser.parse(data: file.data, now: now),
+                  parsed.deviceID == file.deviceID, !parsed.isStale else { continue }
+            for entry in parsed.entries {
+                remoteByID[entry.record.id, default: []].append(
+                    ListeningPlacesRemoteEvent(deviceID: file.deviceID, entry: entry)
+                )
+            }
+        }
+        guard !remoteByID.isEmpty else { return Result() }
+        let deviceOnly = try ListeningPlacesFeedPrivacy.deviceOnlyKeys(in: context)
+        let approved = try ListeningPlacesPublicFeedApproval.approvedKeys(in: context)
+        var matches: [String: [Episode]] = [:]
+        var offset = 0
+        while true {
+            var descriptor = FetchDescriptor<Episode>()
+            descriptor.fetchOffset = offset
+            descriptor.fetchLimit = 256
+            let batch = try context.fetch(descriptor)
+            if batch.isEmpty { break }
+            for episode in batch {
+                let id = ListeningPlacesFormat.episodeID(
+                    guid: episode.guid, enclosureURL: episode.audioURL
+                )
+                if remoteByID[id] != nil { matches[id, default: []].append(episode) }
+            }
+            if batch.count < 256 { break }
+            offset += batch.count
+        }
+        var result = Result()
+        var staged: [(episode: Episode, event: ListeningPlacesStateEvent,
+                      feed: String)] = []
+        do {
+            for id in remoteByID.keys.sorted() {
+                guard let rows = matches[id], rows.count == 1, let episode = rows.first,
+                      let feed = episode.podcast?.feedURL,
+                      ListeningPlacesFeedPrivacy.mayShare(
+                        feedURL: feed, deviceOnlyKeys: deviceOnly
+                      ),
+                      approved.contains(ListeningPlacesPublicFeedApproval.key(feed)),
+                      episode.status != .expired
+                else { result.deferred += 1; continue }
+                let local = try ListeningPlacesEventJournal.read(for: episode, in: context)
+                let loaded = loadedEpisodeID() == episode.persistentModelID
+                let decision = ListeningPlacesMergePlanner.decide(
+                    id: id, local: local, remote: remoteByID[id] ?? [], isLoaded: loaded
+                )
+                switch decision {
+                case .keepLocal: result.deferred += 1
+                case .deferLoaded: result.deferredLoaded += 1
+                case .apply(let event):
+                    guard event.positionMilliseconds >= 0,
+                          event.positionMilliseconds % 1_000 == 0,
+                          loadedEpisodeID() != episode.persistentModelID,
+                          ListeningPlacesFormat.episodeID(
+                            guid: episode.guid, enclosureURL: episode.audioURL
+                          ) == event.id else {
+                        result.deferred += 1; continue
+                    }
+                    episode.positionSeconds = event.positionMilliseconds / 1_000
+                    if event.played {
+                        episode.status = .played
+                        episode.playedAt = event.updatedAt
+                    } else {
+                        if episode.status == .played { episode.status = .newEpisode }
+                        episode.playedAt = nil
+                    }
+                    try ListeningPlacesEventJournal.stagePeerEvent(
+                        event, for: episode, in: context
+                    )
+                    staged.append((episode, event, feed))
+                    result.applied += 1
+                }
+            }
+            if context.hasChanges {
+                guard staged.allSatisfy({ item in
+                    loadedEpisodeID() != item.episode.persistentModelID
+                        && item.episode.podcast?.feedURL == item.feed
+                        && ListeningPlacesFormat.episodeID(
+                            guid: item.episode.guid, enclosureURL: item.episode.audioURL
+                        ) == item.event.id
+                        && ListeningPlacesFeedPrivacy.mayShare(
+                            feedURL: item.feed, deviceOnlyKeys: deviceOnly
+                        ) && approved.contains(ListeningPlacesPublicFeedApproval.key(item.feed))
+                }) else {
+                    throw ReceiverError.revalidationFailed
+                }
+                // No suspension occurs between the final loaded check and save.
+                // This is a disposable harness, not a player-facing application.
+                try context.save()
+            }
+        } catch {
+            context.rollback()
+            throw error
         }
         return result
     }

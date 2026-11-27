@@ -548,6 +548,324 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: peerPath), tombstone)
     }
 
+    func testDisposableCoordinatorImportsPeerPlaceWithoutEchoAcrossTwoPassesAndReopen() async throws {
+        guard ProcessInfo.processInfo.environment["EARSHOT_LP_DISPOSABLE_SYNC"] == "1",
+              let pinnedPath = ProcessInfo.processInfo.environment["QUILL_PEER_FIXTURE_PATH"]
+        else { throw XCTSkip("Requires explicit disposable runner gate and pinned QUILL fixture") }
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "places-episode-receiver-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bookmark = try root.bookmarkData(options: .minimalBookmark,
+                                             includingResourceValuesForKeys: nil,
+                                             relativeTo: nil)
+        let transport = ListeningPlacesFileTransport()
+        try await transport.prepareFolder(bookmarkData: bookmark)
+        try await transport.writeDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123", data: emptyFile()
+        )
+        let peerPath = root.appending(path: "Listening Places/devices/desktop99.json")
+        let pinned = try Data(contentsOf: URL(fileURLWithPath: pinnedPath))
+        var peerRoot = try XCTUnwrap(JSONSerialization.jsonObject(with: pinned) as? [String: Any])
+        let timestamp = try XCTUnwrap(peerRoot["written_at"] as? String)
+        let peerTime = try XCTUnwrap(ISO8601DateFormatter().date(from: timestamp))
+        let id = ListeningPlacesFormat.episodeID(
+            guid: "receiver-episode", enclosureURL: "https://example.com/receiver.mp3"
+        )
+        var records = try XCTUnwrap(peerRoot["records"] as? [[String: Any]])
+        records.append(["id": id, "kind": "episode", "position_ms": 12_000,
+                        "played": false, "updated_at": timestamp])
+        records.append(["id": "episode:0000000000000000", "kind": "episode",
+                        "position_ms": 20_000, "played": false, "updated_at": timestamp])
+        peerRoot["records"] = records
+        let peer = try JSONSerialization.data(withJSONObject: peerRoot, options: [.sortedKeys])
+        try peer.write(to: peerPath, options: .atomic)
+
+        let store = root.appending(path: "store", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+        func openStore() throws -> ModelContainer {
+            try ModelContainer(for: Schema(versionedSchema: EarshotSchemaV14.self),
+                configurations:
+                    ModelConfiguration("FutureMirrored",
+                        schema: Schema(EarshotSchemaV14.mirroredModels),
+                        url: store.appending(path: "mirrored.store"), cloudKitDatabase: .none),
+                    ModelConfiguration("DeviceLocal",
+                        schema: Schema(EarshotSchemaV14.localModels),
+                        url: store.appending(path: "local.store"), cloudKitDatabase: .none))
+        }
+        let container = try openStore()
+        let context = ModelContext(container)
+        let podcast = Podcast(feedURL: feed, title: "Disposable public")
+        let episode = Episode(guid: "receiver-episode", title: "Receiver",
+                              audioURL: "https://example.com/receiver.mp3",
+                              positionSeconds: 60)
+        let other = Episode(guid: "untouched", title: "Untouched",
+                            audioURL: "https://example.com/untouched.mp3",
+                            positionSeconds: 31)
+        episode.podcast = podcast
+        other.podcast = podcast
+        episode.inboxDismissed = true
+        context.insert(podcast)
+        context.insert(episode)
+        context.insert(other)
+        context.insert(QueueItem(episode: episode, position: 0))
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "phone123",
+            now: peerTime.addingTimeInterval(-120)
+        )
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        // Episode import is independently gated; no subscription sharing is
+        // needed for a preexisting approved public local catalog episode.
+        try ListeningPlacesSubscriptionTestCoordinator.stagePolicy(.init(), in: context)
+        try ListeningPlacesSubscriptionTestCoordinator.stageEpisodeImportForTesting(in: context)
+        try context.save()
+        var loaded: PersistentIdentifier? = episode.persistentModelID
+        let first = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: context,
+            transport: transport, now: peerTime.addingTimeInterval(60),
+            loadedEpisodeID: { loaded }
+        )
+        XCTAssertEqual(first.episodes.applied, 0)
+        XCTAssertEqual(first.episodes.deferredLoaded, 1)
+        XCTAssertEqual(episode.positionSeconds, 60)
+        loaded = nil
+        let second = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: context,
+            transport: transport, now: peerTime.addingTimeInterval(60),
+            loadedEpisodeID: { loaded }
+        )
+        XCTAssertEqual(second.episodes.applied, 1)
+        XCTAssertEqual(episode.positionSeconds, 12)
+        XCTAssertEqual(other.positionSeconds, 31)
+        let ownedBytes = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123"
+        )
+        let owned = try XCTUnwrap(ownedBytes)
+        XCTAssertTrue(try rows(owned).filter {
+            ($0["id"] as? String)?.hasPrefix("episode:") == true
+        }.isEmpty, "peer place must not echo into Earshot's owned file")
+        XCTAssertEqual(try Data(contentsOf: peerPath), peer)
+
+        let reopened = ModelContext(try openStore())
+        let saved = try XCTUnwrap(reopened.fetch(FetchDescriptor<Episode>()).first {
+            $0.guid == "receiver-episode"
+        })
+        XCTAssertEqual(saved.positionSeconds, 12)
+        XCTAssertTrue(saved.inboxDismissed)
+        XCTAssertEqual(try reopened.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        guard case .event(let clock) = try ListeningPlacesEventJournal.read(
+            for: saved, in: reopened
+        ) else { return XCTFail("peer event clock was not durable") }
+        XCTAssertEqual(clock.updatedAt, peerTime)
+        XCTAssertEqual(clock.sourceDeviceID, "desktop99")
+        let repeated = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: reopened,
+            transport: transport, now: peerTime.addingTimeInterval(60),
+            loadedEpisodeID: { nil }
+        )
+        XCTAssertEqual(repeated.episodes.applied, 0)
+        XCTAssertEqual(saved.positionSeconds, 12)
+
+        func replacePeerPlace(position: Int, played: Bool, secondsLater: TimeInterval) throws {
+            let eventTime = peerTime.addingTimeInterval(secondsLater)
+            let timeText = ISO8601DateFormatter().string(from: eventTime)
+            var updated = peerRoot
+            updated["written_at"] = timeText
+            var updatedRows = records.filter { $0["id"] as? String != id }
+            updatedRows.append(["id": id, "kind": "episode",
+                                "position_ms": position, "played": played,
+                                "updated_at": timeText])
+            updated["records"] = updatedRows
+            try JSONSerialization.data(withJSONObject: updated, options: [.sortedKeys])
+                .write(to: peerPath, options: .atomic)
+        }
+        try replacePeerPlace(position: 90_000, played: true, secondsLater: 120)
+        let forward = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: reopened,
+            transport: transport, now: peerTime.addingTimeInterval(180),
+            loadedEpisodeID: { nil }
+        )
+        XCTAssertEqual(forward.episodes.applied, 1)
+        XCTAssertEqual(saved.positionSeconds, 90)
+        XCTAssertTrue(saved.isPlayed)
+        XCTAssertEqual(saved.playedAt, peerTime.addingTimeInterval(120))
+        XCTAssertEqual(try reopened.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        try replacePeerPlace(position: 0, played: false, secondsLater: 240)
+        let reset = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: reopened,
+            transport: transport, now: peerTime.addingTimeInterval(300),
+            loadedEpisodeID: { nil }
+        )
+        XCTAssertEqual(reset.episodes.applied, 1)
+        XCTAssertEqual(saved.positionSeconds, 0)
+        XCTAssertFalse(saved.isPlayed)
+        XCTAssertNil(saved.playedAt)
+        let afterResetBytes = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123"
+        )
+        let afterReset = try XCTUnwrap(afterResetBytes)
+        XCTAssertTrue(try rows(afterReset).allSatisfy {
+            ($0["id"] as? String)?.hasPrefix("episode:") != true
+        })
+    }
+
+    func testEpisodeReceiverDefersAmbiguousIDsConflictingRowsAndStaleFiles() throws {
+        let context = TestStore.freshContext()
+        let firstShow = Podcast(feedURL: feed, title: "First")
+        let secondFeed = "https://example.com/second.xml"
+        let secondShow = Podcast(feedURL: secondFeed, title: "Second")
+        let first = Episode(guid: "same-id", title: "First episode",
+                            audioURL: "https://example.com/first.mp3", positionSeconds: 10)
+        let second = Episode(guid: "same-id", title: "Second episode",
+                             audioURL: "https://example.com/second.mp3", positionSeconds: 20)
+        first.podcast = firstShow
+        second.podcast = secondShow
+        for model in [firstShow, secondShow] { context.insert(model) }
+        for model in [first, second] { context.insert(model) }
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: secondFeed, in: context)
+        let localTime = Date(timeIntervalSince1970: 1_000)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: first, in: context, deviceID: "phone123", now: localTime
+        )
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: second, in: context, deviceID: "phone123", now: localTime
+        )
+        try context.save()
+        let id = ListeningPlacesFormat.episodeID(
+            guid: first.guid, enclosureURL: first.audioURL
+        )
+        let peerTime = Date(timeIntervalSince1970: 1_200)
+        let valid = placeRecord(id: id, position: 30_000, at: peerTime)
+        let file = try ListeningPlacesFormat.encodedDeviceFile(
+            deviceID: "desktop99", appVersion: "quill/test", writtenAt: peerTime,
+            records: [valid]
+        )
+        let ambiguous = try ListeningPlacesEpisodeTestReceiver.apply(
+            [("desktop99", file)], in: context, ownDeviceID: "phone123",
+            now: peerTime.addingTimeInterval(1), loadedEpisodeID: { nil }
+        )
+        XCTAssertEqual(ambiguous.applied, 0)
+        XCTAssertEqual(first.positionSeconds, 10)
+        XCTAssertEqual(second.positionSeconds, 20)
+
+        context.delete(second)
+        try context.save()
+        let conflict = try ListeningPlacesFormat.encodedDeviceFile(
+            deviceID: "desktop99", appVersion: "quill/test", writtenAt: peerTime,
+            records: [valid, placeRecord(id: id, position: 40_000, at: peerTime)]
+        )
+        let tied = try ListeningPlacesEpisodeTestReceiver.apply(
+            [("desktop99", conflict)], in: context, ownDeviceID: "phone123",
+            now: peerTime.addingTimeInterval(1), loadedEpisodeID: { nil }
+        )
+        XCTAssertEqual(tied.applied, 0)
+        XCTAssertEqual(first.positionSeconds, 10)
+        let stale = try ListeningPlacesEpisodeTestReceiver.apply(
+            [("desktop99", file)], in: context, ownDeviceID: "phone123",
+            now: peerTime.addingTimeInterval(181 * 24 * 60 * 60),
+            loadedEpisodeID: { nil }
+        )
+        XCTAssertEqual(stale.applied, 0)
+        XCTAssertEqual(first.positionSeconds, 10)
+    }
+
+    func testEpisodeReceiverDefersPrivateUnknownLegacyAndMissingRows() throws {
+        let context = TestStore.freshContext()
+        let privateFeed = "https://example.com/private.xml?token=synthetic"
+        let privateShow = Podcast(feedURL: privateFeed, title: "Private")
+        let privateEpisode = Episode(guid: "private", title: "Private episode",
+                                     audioURL: "https://example.com/private.mp3",
+                                     positionSeconds: 10)
+        privateEpisode.podcast = privateShow
+        let publicShow = Podcast(feedURL: feed, title: "Public")
+        let legacy = Episode(guid: "legacy", title: "Old state",
+                             audioURL: "https://example.com/legacy.mp3",
+                             positionSeconds: 20)
+        legacy.podcast = publicShow
+        context.insert(privateShow)
+        context.insert(privateEpisode)
+        context.insert(publicShow)
+        context.insert(legacy)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: privateEpisode, in: context, deviceID: "phone123",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try context.save()
+        let peerTime = Date(timeIntervalSince1970: 1_200)
+        let file = try ListeningPlacesFormat.encodedDeviceFile(
+            deviceID: "desktop99", appVersion: "quill/test", writtenAt: peerTime,
+            records: [
+                placeRecord(id: ListeningPlacesFormat.episodeID(
+                    guid: privateEpisode.guid, enclosureURL: privateEpisode.audioURL
+                ), position: 30_000, at: peerTime),
+                placeRecord(id: ListeningPlacesFormat.episodeID(
+                    guid: legacy.guid, enclosureURL: legacy.audioURL
+                ), position: 40_000, at: peerTime),
+                placeRecord(id: "episode:0000000000000000", position: 50_000, at: peerTime),
+            ]
+        )
+        let result = try ListeningPlacesEpisodeTestReceiver.apply(
+            [("desktop99", file)], in: context, ownDeviceID: "phone123",
+            now: peerTime.addingTimeInterval(1), loadedEpisodeID: { nil }
+        )
+        XCTAssertEqual(result.applied, 0)
+        XCTAssertEqual(result.deferred, 3)
+        XCTAssertEqual(privateEpisode.positionSeconds, 10)
+        XCTAssertEqual(legacy.positionSeconds, 20)
+    }
+
+    func testEpisodeReceiverRollsBackIfEpisodeLoadsBeforeSaveBoundary() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = ModelContext(container)
+        let podcast = Podcast(feedURL: feed, title: "Disposable")
+        let episode = Episode(guid: "loaded-late", title: "Loaded late",
+                              audioURL: "https://example.com/loaded-late.mp3",
+                              positionSeconds: 10)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "phone123",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        try context.save()
+        let id = ListeningPlacesFormat.episodeID(
+            guid: episode.guid, enclosureURL: episode.audioURL
+        )
+        let peerTime = Date(timeIntervalSince1970: 1_200)
+        let file = try ListeningPlacesFormat.encodedDeviceFile(
+            deviceID: "desktop99", appVersion: "quill/test", writtenAt: peerTime,
+            records: [placeRecord(id: id, position: 20_000, at: peerTime)]
+        )
+        var checks = 0
+        XCTAssertThrowsError(try ListeningPlacesEpisodeTestReceiver.apply(
+            [("desktop99", file)], in: context, ownDeviceID: "phone123",
+            now: peerTime.addingTimeInterval(1), loadedEpisodeID: {
+                checks += 1
+                return checks >= 3 ? episode.persistentModelID : nil
+            }
+        )) { error in
+            guard case ListeningPlacesEpisodeTestReceiver.ReceiverError.revalidationFailed = error
+            else { return XCTFail("expected loaded-row save-boundary rejection") }
+        }
+        let fresh = ModelContext(container)
+        let saved = try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertEqual(saved.positionSeconds, 10)
+        guard case .event(let event) = try ListeningPlacesEventJournal.read(
+            for: saved, in: fresh
+        ) else { return XCTFail("local event should survive rollback") }
+        XCTAssertEqual(event.updatedAt, Date(timeIntervalSince1970: 1_000))
+    }
+
+    private func placeRecord(id: String, position: Int, at time: Date) -> ListeningPlaceRecord {
+        ListeningPlaceRecord(id: id, kind: "episode", positionMilliseconds: position,
+                             durationMilliseconds: nil, played: false, updatedAt: time,
+                             label: nil, feed: nil, deleted: nil)
+    }
+
     private func file(records: [[String: Any]]) throws -> Data {
         try JSONSerialization.data(withJSONObject: [
             "format": ListeningPlacesFormat.identifier,

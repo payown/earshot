@@ -320,6 +320,9 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
             "Earshot/Data/Persistence/EarshotSchemaV1.swift": 1,
             "Earshot/Data/Persistence/IdentityRepairService.swift": 2,
             "Earshot/Features/Inbox/Data/InboxRepository.swift": 1,
+            // Debug-only receiver: position, status, and played timestamp are
+            // staged with the original peer event before one context save.
+            "Earshot/Features/ListeningPlaces/Data/ListeningPlacesSubscriptionExchange.swift": 3,
             "Earshot/Features/Player/Data/PlaybackHandoffClient.swift": 1,
             "Earshot/Features/Player/Data/PlayerService.swift": 17,
             "Earshot/Features/Queue/Data/QueueRepository.swift": 1,
