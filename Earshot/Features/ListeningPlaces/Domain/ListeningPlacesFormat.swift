@@ -68,6 +68,85 @@ enum ListeningPlacesFormat {
     }
 }
 
+/// The public subscription identity used by QUILL Cast. This deliberately
+/// differs from Earshot's internal FeedURLIdentity: the interchange removes
+/// trailing path slashes and leaves the raw query/path spelling intact.
+/// Defining it does not enable subscription sharing.
+enum ListeningPlacesSubscriptionIdentity {
+    private static let privateQueryKeys: Set<String> = [
+        "token", "auth", "key", "apikey", "api_key", "access_token",
+        "secret", "sig", "signature", "password", "pass", "uid",
+    ]
+
+    static func id(_ feedURL: String) -> String? {
+        guard let canonical = canonicalURL(feedURL) else { return nil }
+        let prefix = SHA256.hash(data: Data(canonical.utf8)).prefix(8)
+            .map { String(format: "%02x", $0) }.joined()
+        return "sub:\(prefix)"
+    }
+
+    /// Export callers use this gate; identity alone does not authorize putting
+    /// an address or a related episode place in a readable shared file.
+    static func shareableID(_ feedURL: String, hasStoredCredentials: Bool = false) -> String? {
+        guard !isPrivate(feedURL, hasStoredCredentials: hasStoredCredentials) else { return nil }
+        return id(feedURL)
+    }
+
+    static func canonicalURL(_ feedURL: String) -> String? {
+        let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let schemeEnd = trimmed.range(of: "://") else { return nil }
+        let scheme = trimmed[..<schemeEnd.lowerBound].lowercased()
+        guard scheme == "http" || scheme == "https" else { return nil }
+        let rest = String(trimmed[schemeEnd.upperBound...])
+        let noFragment = String(rest.prefix { $0 != "#" })
+        let queryStart = noFragment.firstIndex(of: "?")
+        let beforeQuery = String(noFragment[..<(queryStart ?? noFragment.endIndex)])
+        let query = queryStart.map { String(noFragment[noFragment.index(after: $0)...]) }
+        let pathStart = beforeQuery.firstIndex(of: "/")
+        let authority = String(beforeQuery[..<(pathStart ?? beforeQuery.endIndex)])
+        let hostPort = String(authority[(authority.lastIndex(of: "@").map { authority.index(after: $0) }
+            ?? authority.startIndex)...])
+        guard !hostPort.isEmpty, !hostPort.contains(where: { $0.isWhitespace }) else { return nil }
+        // The shared format's common feed URLs use DNS names. Reject a form we
+        // cannot canonicalize without guessing, rather than publish a wrong ID.
+        guard !hostPort.contains("[") && !hostPort.contains("]") else { return nil }
+        let host: String
+        let port: Int?
+        if let separator = hostPort.lastIndex(of: ":") {
+            host = String(hostPort[..<separator]).lowercased()
+            guard let parsed = Int(hostPort[hostPort.index(after: separator)...]),
+                  (1...65_535).contains(parsed) else { return nil }
+            port = parsed
+        } else {
+            host = hostPort.lowercased()
+            port = nil
+        }
+        guard !host.isEmpty else { return nil }
+        var path = pathStart.map { String(beforeQuery[$0...]) } ?? ""
+        while path.last == "/" { path.removeLast() }
+        let retainedPort = port.flatMap { value -> Int? in
+            (scheme == "https" && value == 443) || (scheme == "http" && value == 80)
+                ? nil : value
+        }
+        let base = "\(scheme)://\(host)\(retainedPort.map { ":\($0)" } ?? "")\(path)"
+        return query.flatMap { $0.isEmpty ? nil : $0 }.map { base + "?" + $0 } ?? base
+    }
+
+    /// A plain shared file must not carry private podcast addresses or places.
+    /// Unknown/invalid URLs fail closed. A stored credential, if the caller has
+    /// one outside the URL, also makes the feed private.
+    static func isPrivate(_ feedURL: String, hasStoredCredentials: Bool = false) -> Bool {
+        if hasStoredCredentials { return true }
+        guard canonicalURL(feedURL) != nil,
+              let parts = URLComponents(string: feedURL.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return true }
+        if parts.user != nil || parts.password != nil { return true }
+        return parts.queryItems?.contains {
+            privateQueryKeys.contains($0.name.lowercased())
+        } == true
+    }
+}
+
 struct ListeningPlacesDeviceFile: Codable, Equatable, Sendable {
     let format: String
     let device: String

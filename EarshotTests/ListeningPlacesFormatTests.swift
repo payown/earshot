@@ -2,6 +2,66 @@ import XCTest
 @testable import Earshot
 
 final class ListeningPlacesFormatTests: XCTestCase {
+    func testSubscriptionIdentityMatchesMergedQUILLCanonicalExamples() {
+        XCTAssertEqual(
+            ListeningPlacesSubscriptionIdentity.canonicalURL(
+                " HTTPS://Feeds.Example.com:443/Show/?a=1#x "
+            ),
+            "https://feeds.example.com/Show?a=1"
+        )
+        XCTAssertEqual(
+            ListeningPlacesSubscriptionIdentity.id(" HTTPS://Feeds.Example.com:443/Show/?a=1#x "),
+            "sub:c411762416eb5a9a"
+        )
+        XCTAssertEqual(
+            ListeningPlacesSubscriptionIdentity.id("https://FEEDS.example.com/x/"),
+            ListeningPlacesSubscriptionIdentity.id("https://feeds.example.com/x")
+        )
+        XCTAssertEqual(
+            ListeningPlacesSubscriptionIdentity.canonicalURL("http://Example.com:80/A///?b=2&a=1"),
+            "http://example.com/A?b=2&a=1"
+        )
+        XCTAssertEqual(
+            ListeningPlacesSubscriptionIdentity.canonicalURL("https://Example.com:444/%7Eshow"),
+            "https://example.com:444/%7Eshow"
+        )
+        XCTAssertEqual(
+            ListeningPlacesSubscriptionIdentity.canonicalURL("https://Example.com/café"),
+            "https://example.com/café"
+        )
+        XCTAssertNotEqual(
+            ListeningPlacesSubscriptionIdentity.id("https://example.com/?b=2&a=1"),
+            ListeningPlacesSubscriptionIdentity.id("https://example.com/?a=1&b=2")
+        )
+        XCTAssertNotEqual(
+            ListeningPlacesSubscriptionIdentity.id("https://example.com/café"),
+            ListeningPlacesSubscriptionIdentity.id("https://example.com/caf%C3%A9")
+        )
+        XCTAssertNotEqual(
+            ListeningPlacesSubscriptionIdentity.id("https://example.com/%7Eshow"),
+            ListeningPlacesSubscriptionIdentity.id("https://example.com/~show")
+        )
+    }
+
+    func testSubscriptionIdentityClassifiesCredentialBearingFeedsConservatively() {
+        XCTAssertTrue(ListeningPlacesSubscriptionIdentity.isPrivate("https://name:password@example.com/feed"))
+        XCTAssertTrue(ListeningPlacesSubscriptionIdentity.isPrivate("https://name@example.com/feed"))
+        XCTAssertTrue(ListeningPlacesSubscriptionIdentity.isPrivate("https://example.com/feed?TOKEN=secret"))
+        XCTAssertTrue(ListeningPlacesSubscriptionIdentity.isPrivate("https://example.com/feed?api_key="))
+        XCTAssertTrue(ListeningPlacesSubscriptionIdentity.isPrivate("https://example.com/feed?%74oken=x"))
+        for key in ["token", "auth", "key", "apikey", "api_key", "access_token",
+                    "secret", "sig", "signature", "password", "pass", "uid"] {
+            XCTAssertTrue(ListeningPlacesSubscriptionIdentity.isPrivate("https://example.com/feed?\(key)=x"), key)
+        }
+        XCTAssertTrue(ListeningPlacesSubscriptionIdentity.isPrivate(
+            "https://example.com/feed", hasStoredCredentials: true
+        ))
+        XCTAssertTrue(ListeningPlacesSubscriptionIdentity.isPrivate("not a URL"))
+        XCTAssertFalse(ListeningPlacesSubscriptionIdentity.isPrivate("https://example.com/feed?sort=oldest"))
+        XCTAssertNil(ListeningPlacesSubscriptionIdentity.shareableID("https://example.com/feed?token=x"))
+        XCTAssertNotNil(ListeningPlacesSubscriptionIdentity.shareableID("https://example.com/feed?sort=oldest"))
+    }
+
     func testEpisodeIdentityUsesTrimmedGUIDMatchingQUILL() {
         XCTAssertEqual(
             ListeningPlacesFormat.episodeID(guid: "guid-123", enclosureURL: "https://example.com/a.mp3"),
