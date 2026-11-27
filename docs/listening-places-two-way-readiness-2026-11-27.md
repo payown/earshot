@@ -120,8 +120,10 @@ it is not a claim that two-way sync or subscriptions are available in 335.
 
 Conservative interim choices: read only at launch or an explicit request, not
 during playback; leave a loaded episode untouched, including one that is paused;
-leave unknown-time legacy state unchanged instead of stamping it at import or
-export time; and leave remote subscription/unfollow rows unapplied until the
+leave imported unknown-time legacy state unchanged instead of stamping it at
+import or export time; genuinely absent local journal keys retain the older
+one-way export behavior for compatibility. Leave remote subscription/unfollow
+rows unapplied until the
 preserving path is proven. None of these choices may be described as complete
 two-way sync. Personal Audio import exists in Earshot, but the current places
 writer does not exchange local-file IDs; adding that identity is separate work.
