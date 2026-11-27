@@ -295,19 +295,29 @@ an unapproved user-entered URL, token-bearing URL, invalid URL, and marked
 device-only feed without changing their local positions. The native demo also
 checks that redirected and stale-marker places stay out of the owned file.
 This synthetic marker is **not** proof that a real feed is public. Normal Add Feed accepts a typed URL; OPML
-imports URLs, and directory search supplies feed URLs. `FeedService.fetch`
-discards the final response URL; refresh retains it only as validator metadata.
-The shared URL session uses a default configuration with no explicit
-credential/cookie exclusion. `Podcast` has no stored-credential provenance.
+imports URLs, and category results do not carry proof. The Apple directory search
+now retains an exact non-redirected response identity and the directory follow
+path uses a separate ephemeral, cookie-free, credential-free feed request. Only
+an HTTP 200 RSS response at the exact listed address can stage the device-local
+approval after follow succeeds. A failed/redirected/authenticated proof request
+falls back to ordinary follow without approval. The regular refresh path still
+uses the shared feed session; it cannot create proof. `Podcast` has no
+stored-credential provenance.
+No separate app feed-credential store was found in this source audit. A future
+credential writer must revoke an existing approval before committing the new
+credential; this branch does not claim to classify external provider state.
 Redirects, private servers, and credentials held outside a URL therefore lack
 a reliable anonymous-public proof. The new two-way path remains unavailable
 for those feeds. The eligibility rule requires an Apple directory search/lookup
 response, byte-identical listed/requested/final feed URLs, a known zero-redirect
 fetch, positively anonymous access, and confirmed absence of stored credentials
 and device-only preference. Generic successful fetches, aliases, unknowns and
-old approvals cannot satisfy it. No production path currently retains and
-stages all that evidence, so this candidate's normal writer exports no unverified
-places. Signed 335's existing one-way export still uses URL screening; this
+old approvals cannot satisfy it. A new verified Apple-directory follow can now
+reach the native Settings writer; typed URLs, OPML, category rows, redirects,
+authentication challenges, unknowns, and device-only rows stay local. Unfollow,
+device-only changes, and supported feed-URL mutations revoke the exact local
+approval. This is a synthetic native-flow test, not a live public-feed or
+physical provider acceptance. Signed 335's existing one-way export still uses URL screening; this
 unreleased candidate does not retroactively change that shipped behavior.
 
 On the final isolated source, the native Settings/interop/fresh-context focus
@@ -783,9 +793,18 @@ Neither action can erase a peer's previously imported copy.
 ### Paired-device acceptance after a future eligible build
 
 Use disposable public feeds and a separate shared test folder; never reset a
-real library. On iPhone, confirm a positively verified directory show shares a
-place, while typed, redirected, credentialed, unknown, and device-only shows
-do not. On the pinned compatible QUILL build, confirm a later backward seek
+real library. On iPhone, use Add Podcast search to follow a public Apple
+directory result, then open Settings > Listening Places, Choose Folder, turn
+on Share listening places, and activate Write Now after a disposable listening
+checkpoint. Confirm only the positively verified directory show shares a place;
+typed, redirected, credentialed, unknown, and device-only shows must not.
+This has production-method synthetic coverage, but a live directory and the
+actual touch/VoiceOver route still need device acceptance. On pinned QUILL
+source `64651e5884b779b7cf75e3c5cc4125b77a983e82`, verify that
+Podcasts > Carry My Place Between Machines exposes “A plain file other apps
+can read”; keep “Also share the podcasts I follow” off for Playback-only
+pairing. A generic latest desktop binary is not proof those controls exist.
+On that compatible build, confirm a later backward seek
 returns to Earshot only when the episode is idle; a loaded episode defers until
 playback ends. Turn sharing off while a provider write is delayed, relaunch,
 and confirm the pending cleanup is announced and retry removes only Earshot's
@@ -806,6 +825,30 @@ fixtures were corrected without relaxing the app guard and the complete
 service suite then passed. An interrupted mixed diagnostic and an initial
 test assertion that expected an empty file instead of no file are not counted
 as passes. Watch, physical paired devices, real providers, Windows and NVDA
-remain unverified for this exact source. The production feed path cannot yet
-provide the required positive evidence; this is a privacy-safe staging gate,
-not a functional 336 release candidate.
+remain unverified for that earlier exact source. The new isolated Apple
+directory follow path can provide positive evidence to the normal Playback
+writer for a newly followed, exact, anonymous public feed. It rejects obvious
+local/private host forms before the proof request. This remains a privacy-safe
+staging branch, not a functional 336 release candidate: the release receiver,
+broader subscription/folder integration, real-provider behavior, and physical
+paired-device acceptance remain open.
+
+**November 27 directory-proof increment:** Add Podcast's Apple search and
+preview now carry a verified directory response into an isolated anonymous
+feed fetch. The normal repository follow, ordinary refresh, and Listening
+Places Settings writer were exercised with disposable RSS and a temporary
+owned file; the exported place appeared only for the verified show. Redirect,
+401, cookie-capable session, typed result, obvious local/private host, and
+device-only cases followed or stayed local without creating sharing proof.
+Clearing device-only did not revive an old approval; an explicit fresh proof
+was required. The URL-repair regression removed approval across an A→B→A
+spelling change. The exact-source iPhone 26.5 Simulator run passed 2,967
+tests, 62 skips, zero failures
+(`EarshotLPDirectoryVerifiedFull20261127.xcresult`); the native disposable
+Settings UI case passed within it. The two opt-in pinned QUILL fixture cases
+passed separately 2/2 (`EarshotLPDirectoryPinnedQuill2-20261127.xcresult`).
+The ordinary skips include iOS 27 VoiceOver cases, diagnostic fixtures, and
+the two separately run opt-in peer cases. An earlier broad run used the QUILL
+fixture variable across unrelated tests, and an interrupted run still had the
+old re-entry expectation; neither is counted as a pass. This work has no live
+Apple-directory, real provider, Windows/NVDA, or physical paired-device proof.
