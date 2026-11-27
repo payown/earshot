@@ -670,3 +670,9 @@ late privacy withdrawal. These are executable data-layer demonstrations,
 not a VoiceOver app flow or an installable two-way build. Do not reset or
 reinstall a real library to show them. Keep signed 335 available; 336 remains
 unbuilt until the full safety matrix and physical provider checks pass.
+
+Turning the existing **Share listening places** switch off stops future
+writes but does not itself remove the last shared file; the explicit Stop
+Sharing and Remove This Device action owns removal. Any future per-feed
+revocation control needs copy and status that distinguish those actions.
+Neither action can erase a peer's previously imported copy.
