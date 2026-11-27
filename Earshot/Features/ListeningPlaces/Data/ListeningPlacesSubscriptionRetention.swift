@@ -93,6 +93,7 @@ enum ListeningPlacesFeedPrivacy {
     /// unfollow, delete a podcast, or publish an iCloud tombstone.
     static func stageDeviceOnly(feedURL: String, in context: ModelContext) throws {
         try LocalAppSettingIdentity.setValue("1", for: key(feedURL), in: context)
+        try ListeningPlacesPublicFeedApproval.revoke(feedURL: feedURL, in: context)
     }
 
     static func clearForExplicitSharing(feedURL: String, in context: ModelContext) throws {

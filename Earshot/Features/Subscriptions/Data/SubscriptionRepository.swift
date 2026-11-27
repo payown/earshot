@@ -265,6 +265,30 @@ final class SubscriptionRepository {
     /// main-context object.
     @discardableResult
     func subscribe(feedURL: String) async throws -> Podcast {
+        try await subscribe(feedURL: feedURL, verifiedDirectoryFeed: nil)
+    }
+
+    /// A directory row can earn Playback sharing eligibility only when its
+    /// original Apple response and this subscription's anonymous feed fetch
+    /// both prove the same unredirected address. An unproven row still follows
+    /// normally, but cannot create a Listening Places approval.
+    @discardableResult
+    func subscribe(directoryResult: PodcastSearchResult,
+        anonymousSession: URLSession? = nil) async throws -> Podcast {
+        let verifiedFeed = directoryResult.directoryResponseURL.map {
+            AnonymousVerifiedDirectoryFeed(
+                directoryResponseURL: $0,
+                directoryFeedURL: directoryResult.feedURL,
+                session: anonymousSession ?? AnonymousVerifiedDirectoryFeed.makeSession(),
+                fallback: feed
+            )
+        }
+        return try await subscribe(feedURL: directoryResult.feedURL,
+            verifiedDirectoryFeed: verifiedFeed)
+    }
+
+    private func subscribe(feedURL: String,
+        verifiedDirectoryFeed: AnonymousVerifiedDirectoryFeed?) async throws -> Podcast {
         let canonical = FeedURLIdentity.canonical(feedURL)
         if (try? PodcastIdentityService(context: context)
             .existingFollowed(feedURL: canonical)) != nil {
@@ -329,8 +353,9 @@ final class SubscriptionRepository {
         // Hand the fetch/parse/insert/save to the background actor (off the main
         // thread). It returns only Sendable PersistentIdentifiers.
         let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
+        let selectedFeed: FeedFetching = verifiedDirectoryFeed ?? feed
         let result = try await actor.subscribe(
-            feedURL: canonical, feed: feed, inboxSeedCount: inboxSeedCount,
+            feedURL: canonical, feed: selectedFeed, inboxSeedCount: inboxSeedCount,
             maximumFollowedCount: maximumFollowedCount
         )
 
@@ -345,6 +370,27 @@ final class SubscriptionRepository {
             ?? self.podcast(forFeedURL: canonical)
         else {
             throw SubscriptionError.podcastNotFoundAfterSubscribe
+        }
+
+        if let evidence = await verifiedDirectoryFeed?.verifiedEvidence(),
+           evidence.requestedFeedURL == podcast.feedURL {
+            // The approval has its own device-local save. A failure must not
+            // roll back a successfully followed show or approve by inference.
+            // If feed credentials are ever stored by the app, their writer
+            // must revoke this marker before the credential change commits.
+            let approvalContext = ModelContext(context.container)
+            do {
+                let deviceOnly = try ListeningPlacesFeedPrivacy.deviceOnlyKeys(in: approvalContext)
+                if ListeningPlacesFeedPrivacy.mayShare(
+                    feedURL: podcast.feedURL, deviceOnlyKeys: deviceOnly
+                ) {
+                    try ListeningPlacesPublicFeedApproval.stageVerifiedDirectoryEvidence(
+                        evidence, in: approvalContext)
+                    try approvalContext.save()
+                }
+            } catch {
+                AppLog.data.warning("Public feed evidence could not be saved; sharing remains blocked")
+            }
         }
 
         // No read-only check needed here (#635): the cap gate above already threw
@@ -559,6 +605,7 @@ struct SubscriptionDeletionRepository {
             try PendingCloudFollowIntent.clear(feedURL: podcast.feedURL, in: context)
             try PendingCloudRemoteActivationIntent.clear(feedURL: podcast.feedURL, in: context)
             try PendingCloudUnfollowIntent.set(feedURL: podcast.feedURL, in: context)
+            try ListeningPlacesPublicFeedApproval.revoke(feedURL: podcast.feedURL, in: context)
         } catch {
             context.rollback()
             AppLog.subscriptions.error(

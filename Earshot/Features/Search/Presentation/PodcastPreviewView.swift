@@ -444,7 +444,7 @@ struct PodcastPreviewView: View {
         } else {
             Task {
                 do {
-                    let podcast = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: result.feedURL)
+                    let podcast = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(directoryResult: result)
                     Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
                     // Offer to file the new show only when folders already exist
                     // (decision F8, #764). The presentation is deferred ~0.6s so the

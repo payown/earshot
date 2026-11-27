@@ -4,6 +4,31 @@ import XCTest
 
 @MainActor
 final class IdentityRepairServiceTests: XCTestCase {
+    func testFeedURLRepairRevokesOldDirectoryApprovalAcrossReturn() throws {
+        let context = TestStore.freshContext()
+        let original = "https://EXAMPLE.COM/feed.xml"
+        let canonical = FeedURLIdentity.canonical(original)
+        XCTAssertNotEqual(original, canonical)
+        let podcast = Podcast(feedURL: original, title: "Synthetic")
+        context.insert(podcast)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: original, in: context)
+        try context.save()
+        XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(in: context)
+            .contains(ListeningPlacesPublicFeedApproval.key(original)))
+
+        _ = try IdentityRepairService(context: context).repair(feedURLs: [canonical])
+        try context.save()
+        XCTAssertEqual(podcast.feedURL, canonical)
+        XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(in: context).isEmpty)
+
+        // Returning to the old byte spelling without another verified fetch
+        // cannot make its removed proof current again.
+        podcast.feedURL = original
+        try context.save()
+        XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(in: context).isEmpty)
+    }
+
     func testInboxCapNamespaceLookupStillMergesLegacyAliases() throws {
         let context = TestStore.freshContext()
         let prefix = SettingsKey.podcastInboxCapPrefix

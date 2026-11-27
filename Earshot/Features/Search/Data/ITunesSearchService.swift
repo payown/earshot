@@ -12,6 +12,19 @@ struct PodcastSearchResult: Identifiable, Equatable, Hashable, Sendable {
     let author: String?
     let artworkURL: String?
     let feedURL: String
+    /// Present only when this exact result came from a non-redirected Apple
+    /// directory response. It is not proof that the feed itself is public.
+    let directoryResponseURL: String?
+
+    init(id: String, title: String, author: String?, artworkURL: String?,
+         feedURL: String, directoryResponseURL: String? = nil) {
+        self.id = id
+        self.title = title
+        self.author = author
+        self.artworkURL = artworkURL
+        self.feedURL = feedURL
+        self.directoryResponseURL = directoryResponseURL
+    }
 }
 
 /// The outcome of an iTunes directory search.
@@ -45,7 +58,7 @@ struct ITunesSearchService: Sendable {
     private let session: URLSession
     private let log: NetworkDiagnostic.Sink
 
-    init(session: URLSession = EarshotURLSession.shared,
+    init(session: URLSession = AnonymousVerifiedDirectoryFeed.makeSession(),
          log: @escaping NetworkDiagnostic.Sink = NetworkDiagnostic.systemSink) {
         self.session = session
         self.log = log
@@ -62,8 +75,8 @@ struct ITunesSearchService: Sendable {
         // term like "swift&limit=200" would inject a second query parameter into
         // the request. URLQueryItem percent-encodes each value correctly, which
         // confines the user's term to the `term` parameter. The scheme, host, and
-        // path are fixed literals, so the request can never be redirected
-        // off itunes.apple.com.
+        // path are fixed literals. A server redirect is rejected below rather
+        // than treated as directory identity proof.
         var components = URLComponents()
         components.scheme = "https"
         components.host = "itunes.apple.com"
@@ -79,11 +92,24 @@ struct ITunesSearchService: Sendable {
         }
 
         do {
-            let (data, _) = try await session.data(from: url)
+            let proof = NoRedirectNetworkProof()
+            let (data, response) = try await session.data(
+                for: URLRequest(url: url), delegate: proof
+            )
+            guard let http = response as? HTTPURLResponse,
+                  http.statusCode == 200 else { return .failure }
             // Decode directly from the bytes; do not trust the Content-Type
             // header (iTunes mislabels JSON as text/javascript).
             let decoded = try JSONDecoder().decode(ITunesResponse.self, from: data)
-            let mapped = decoded.results.compactMap { $0.asResult }
+            let configuration = session.configuration
+            let verifiedDirectory = configuration.httpCookieStorage == nil
+                && !configuration.httpShouldSetCookies
+                && configuration.urlCredentialStorage == nil
+                && http.url?.absoluteString == url.absoluteString
+                && !proof.wasDiverted
+            let mapped = decoded.results.compactMap {
+                $0.asResult(directoryResponseURL: verifiedDirectory ? url.absoluteString : nil)
+            }
             return .results(Self.dedupedByFeedURL(mapped))
         } catch is DecodingError {
             log(.error, "iTunes search decode failed")
@@ -131,7 +157,7 @@ private struct ITunesPodcast: Decodable {
     /// entry unusable (you can't subscribe to it), so those are dropped and
     /// logged. A missing `collectionName` falls back to `trackName` rather than
     /// silently dropping an otherwise-subscribable podcast.
-    var asResult: PodcastSearchResult? {
+    func asResult(directoryResponseURL: String?) -> PodcastSearchResult? {
         guard let feedUrl else {
             AppLog.networking.info("Dropping iTunes result with no feed URL")
             return nil
@@ -142,7 +168,8 @@ private struct ITunesPodcast: Decodable {
             title: title,
             author: artistName,
             artworkURL: artworkUrl600 ?? artworkUrl100,
-            feedURL: feedUrl
+            feedURL: feedUrl,
+            directoryResponseURL: directoryResponseURL
         )
     }
 }

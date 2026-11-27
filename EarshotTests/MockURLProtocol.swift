@@ -80,6 +80,14 @@ final class MockURLProtocol: URLProtocol {
         return URLSession(configuration: config)
     }
 
+    /// Uses the production anonymous feed policy while intercepting requests
+    /// with synthetic responses. No cookie or credential store is attached.
+    static func makeAnonymousFeedSession() -> URLSession {
+        let config = AnonymousVerifiedDirectoryFeed.makeConfiguration()
+        config.protocolClasses = [MockURLProtocol.self]
+        return URLSession(configuration: config)
+    }
+
     override class func canInit(with request: URLRequest) -> Bool { true }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

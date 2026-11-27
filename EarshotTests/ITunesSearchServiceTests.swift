@@ -12,7 +12,7 @@ final class ITunesSearchServiceTests: XCTestCase {
     }
 
     private func makeService() -> ITunesSearchService {
-        ITunesSearchService(session: MockURLProtocol.makeSession())
+        ITunesSearchService(session: MockURLProtocol.makeAnonymousFeedSession())
     }
 
     // MARK: Success with results
@@ -37,6 +37,30 @@ final class ITunesSearchServiceTests: XCTestCase {
         XCTAssertEqual(results[0].author, "objc.io")
         XCTAssertEqual(results[0].feedURL, "https://talk.objc.io/feed")
         XCTAssertEqual(results[0].artworkURL, "https://img/600.jpg")
+        XCTAssertTrue(results[0].directoryResponseURL?.hasPrefix(
+            "https://itunes.apple.com/search?") == true)
+    }
+
+    func testRedirectedDirectoryResponseCannotSupplyPublicProvenance() async {
+        let body = Data("""
+        {"results":[{"collectionName":"Unverified","feedUrl":"https://example.com/feed.xml"}]}
+        """.utf8)
+        MockURLProtocol.setOutcomes([.response(statusCode: 302, data: body)])
+        let outcome = await makeService().search("synthetic")
+        XCTAssertEqual(outcome, .failure)
+    }
+
+    func testDirectoryResponseThroughCookieCapableSessionIsUnverified() async {
+        let body = Data("""
+        {"results":[{"collectionName":"Synthetic","feedUrl":"https://example.com/feed.xml"}]}
+        """.utf8)
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: body)])
+        let outcome = await ITunesSearchService(session: MockURLProtocol.makeSession())
+            .search("synthetic")
+        guard case .results(let results) = outcome else {
+            return XCTFail("The directory remains usable without sharing proof")
+        }
+        XCTAssertNil(results.first?.directoryResponseURL)
     }
 
     func testExpandedSearchRequests200AndKeepsLaterMatchesInRelevanceOrder() async throws {

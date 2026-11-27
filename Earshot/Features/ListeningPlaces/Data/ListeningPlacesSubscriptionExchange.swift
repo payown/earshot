@@ -307,10 +307,10 @@ enum ListeningPlacesSubscriptionExchange {
 }
 
 /// A local eligibility marker requires a verified directory identity and an
-/// anonymous, non-redirected feed response for that exact URL. Current normal
-/// feed fetching does not retain this evidence, so no production path stages
-/// one. URL spelling, a generic successful fetch, and legacy approvals cannot
-/// turn sharing on. This local marker stores only a hash, never a feed URL.
+/// anonymous, non-redirected feed response for that exact URL. The Apple
+/// directory follow path can stage one; generic fetching cannot. URL spelling,
+/// a generic successful fetch, and legacy approvals cannot turn sharing on.
+/// This local marker stores only a hash, never a feed URL.
 enum ListeningPlacesPublicFeedApproval {
     private static let prefix = "listening_places_public_feed_approval_v2:"
     private static let verifiedValue = "apple-directory-exact-anonymous-v2"
@@ -339,6 +339,16 @@ enum ListeningPlacesPublicFeedApproval {
         return prefix + hash
     }
 
+    private static func publicDNSHost(_ rawHost: String) -> Bool {
+        let host = rawHost.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard host.contains("."),
+              !host.hasSuffix(".local"), !host.hasSuffix(".internal"),
+              !host.hasSuffix(".home.arpa"),
+              !host.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789.").contains($0) })
+        else { return false }
+        return true
+    }
+
     static func eligibleFeedURL(_ evidence: Evidence) -> String? {
         guard case .appleITunesDirectory = evidence.origin,
               case .provenAnonymous = evidence.access,
@@ -363,7 +373,8 @@ enum ListeningPlacesPublicFeedApproval {
         guard !requested.isEmpty, directoryFeedURL == requested,
               resolvedFeedURL == requested,
               let feed = URLComponents(string: requested),
-              feed.scheme?.lowercased() == "https", feed.host != nil,
+              feed.scheme?.lowercased() == "https",
+              let host = feed.host, publicDNSHost(host),
               feed.user == nil, feed.password == nil,
               feed.query == nil, feed.fragment == nil,
               ListeningPlacesSubscriptionIdentity.shareableID(requested) != nil
@@ -382,7 +393,6 @@ enum ListeningPlacesPublicFeedApproval {
         })
     }
 
-    #if DEBUG
     static func stageVerifiedDirectoryEvidence(_ evidence: Evidence, in context: ModelContext) throws {
         guard let feedURL = eligibleFeedURL(evidence) else {
             throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
@@ -390,6 +400,13 @@ enum ListeningPlacesPublicFeedApproval {
         try LocalAppSettingIdentity.setValue(verifiedValue, for: key(feedURL), in: context)
     }
 
+    static func revoke(feedURL: String, in context: ModelContext) throws {
+        for row in try LocalAppSettingIdentity.rows(for: key(feedURL), in: context) {
+            context.delete(row)
+        }
+    }
+
+    #if DEBUG
     /// XCTest and the isolated in-memory screen only. These reserved domains
     /// never contact a directory or feed and cannot approve a live address.
     static func stageSyntheticDirectoryFixture(for feedURL: String, in context: ModelContext) throws {

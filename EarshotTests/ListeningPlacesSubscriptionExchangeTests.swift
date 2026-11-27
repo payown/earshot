@@ -269,6 +269,15 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         XCTAssertTrue(try context.fetch(FetchDescriptor<Podcast>()).isEmpty)
         try ListeningPlacesFeedPrivacy.clearForExplicitSharing(feedURL: feed, in: context)
         try context.save()
+        let stillDeferred = try ListeningPlacesSubscriptionExchange.applyPeerFile(
+            firstFile, context: context, policy: policy,
+            expectedPeerID: peerID, ownDeviceID: "phone123", now: newer
+        )
+        XCTAssertEqual(stillDeferred.follows, 0,
+            "Clearing device-only cannot revive the previous public proof")
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: feed, in: context)
+        try context.save()
         let applied = try ListeningPlacesSubscriptionExchange.applyPeerFile(
             firstFile, context: context, policy: policy,
             expectedPeerID: peerID, ownDeviceID: "phone123", now: newer
@@ -567,7 +576,21 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             bookmarkData: bookmark, deviceID: "phone123"
         )
         let reenteredBytes = try XCTUnwrap(maybeReenteredBytes)
-        XCTAssertEqual(try rows(reenteredBytes).filter {
+        XCTAssertTrue(try rows(reenteredBytes).filter {
+            $0["kind"] as? String == "subscription"
+        }.isEmpty, "Clearing device-only cannot revive the previous public proof")
+
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: feed, in: context)
+        try context.save()
+        _ = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: context,
+            transport: transport, now: newer
+        )
+        let maybeReapprovedBytes = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123")
+        let reapprovedBytes = try XCTUnwrap(maybeReapprovedBytes)
+        XCTAssertEqual(try rows(reapprovedBytes).filter {
             $0["kind"] as? String == "subscription"
         }.count, 1)
         XCTAssertEqual(try Data(contentsOf: peerPath), peer)

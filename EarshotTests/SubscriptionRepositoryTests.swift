@@ -210,6 +210,144 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertEqual(podcast.author, "Host")
     }
 
+    func testDirectoryFollowAnonymousFeedBecomesEligibleAtNativeSettingsWriter() async throws {
+        defer { MockURLProtocol.reset() }
+        let feedURL = "https://example.com/directory.xml"
+        let directoryBody = Data("""
+        {"results":[{"collectionName":"Synthetic Public Show","feedUrl":"\(feedURL)"}]}
+        """.utf8)
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: directoryBody)])
+        let search = await ITunesSearchService(session: MockURLProtocol.makeAnonymousFeedSession())
+            .search("synthetic")
+        guard case .results(let results) = search, let result = results.first else {
+            return XCTFail("Expected synthetic directory result")
+        }
+        XCTAssertNotNil(result.directoryResponseURL)
+
+        let feedBody = Data("""
+        <rss version="2.0"><channel><title>Synthetic Public Show</title>
+        <item><guid>directory-episode</guid><title>Episode</title>
+        <enclosure url="https://example.com/episode.mp3" type="audio/mpeg"/></item>
+        </channel></rss>
+        """.utf8)
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: feedBody)])
+        let context = TestStore.freshContext()
+        let fallback = CountingFeedFetcher(feed([episode("fallback", d1)]))
+        let repository = SubscriptionRepository(context: context, feed: fallback)
+        let podcast = try await repository.subscribe(directoryResult: result,
+            anonymousSession: MockURLProtocol.makeAnonymousFeedSession())
+        XCTAssertEqual(fallback.fetchCount, 0, "The verified path uses one isolated feed fetch")
+        XCTAssertEqual(podcast.feedURL, feedURL)
+        XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(in: ModelContext(context.container))
+            .contains(ListeningPlacesPublicFeedApproval.key(feedURL)))
+
+        _ = try await repository.refresh(podcast)
+        XCTAssertEqual(fallback.fetchCount, 1,
+            "Ordinary refresh must not invent another directory approval")
+
+        let listening = try XCTUnwrap((podcast.episodes ?? []).first)
+        listening.positionSeconds = 25
+        try context.save()
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "directory-proof-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = ListeningPlacesService()
+        service.configure(context: context)
+        await service.chooseFolder(directory)
+        let devices = directory.appending(path: "Listening Places/devices")
+        let files = try FileManager.default.contentsOfDirectory(
+            at: devices, includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+        let owned = try Data(contentsOf: XCTUnwrap(files.first))
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: owned) as? [String: Any])
+        let rows = try XCTUnwrap(root["records"] as? [[String: Any]])
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?["position_ms"] as? Int, 25_000)
+
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(feedURL: feedURL, in: context)
+        try context.save()
+        await service.writeNow()
+        let withdrawn = try Data(contentsOf: XCTUnwrap(files.first))
+        let withdrawnRoot = try XCTUnwrap(JSONSerialization.jsonObject(with: withdrawn) as? [String: Any])
+        XCTAssertTrue(try XCTUnwrap(withdrawnRoot["records"] as? [[String: Any]]).isEmpty)
+        XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(in: ModelContext(context.container))
+            .isEmpty, "Device-only must revoke the previous public proof")
+        try ListeningPlacesFeedPrivacy.clearForExplicitSharing(feedURL: feedURL, in: context)
+        try context.save()
+        await service.writeNow()
+        XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(in: ModelContext(context.container))
+            .isEmpty, "Clearing device-only does not revive old proof")
+        XCTAssertEqual(listening.positionSeconds, 25)
+        service.releasePersistence()
+    }
+
+    func testDirectoryFollowRedirectAndAuthFallbackNeverApproveSharing() async throws {
+        defer { MockURLProtocol.reset() }
+        let feedURL = "https://example.com/unverified.xml"
+        let result = PodcastSearchResult(id: feedURL, title: "Synthetic", author: nil,
+            artworkURL: nil, feedURL: feedURL,
+            directoryResponseURL: "https://itunes.apple.com/search?media=podcast")
+        for status in [302, 401] {
+            MockURLProtocol.reset()
+            MockURLProtocol.setOutcomes([.response(statusCode: status, data: Data())])
+            let context = TestStore.freshContext()
+            let fallback = CountingFeedFetcher(feed([episode("fallback", d1)]))
+            let podcast = try await SubscriptionRepository(context: context, feed: fallback)
+                .subscribe(directoryResult: result,
+                    anonymousSession: MockURLProtocol.makeAnonymousFeedSession())
+            XCTAssertEqual(podcast.feedURL, feedURL)
+            XCTAssertEqual(fallback.fetchCount, 1)
+            XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(
+                in: ModelContext(context.container)).isEmpty)
+        }
+
+        MockURLProtocol.reset()
+        let context = TestStore.freshContext()
+        let fallback = CountingFeedFetcher(feed([episode("fallback", d1)]))
+        let typedResult = PodcastSearchResult(id: feedURL, title: "Synthetic", author: nil,
+            artworkURL: nil, feedURL: feedURL)
+        _ = try await SubscriptionRepository(context: context, feed: fallback)
+            .subscribe(directoryResult: typedResult,
+                anonymousSession: MockURLProtocol.makeAnonymousFeedSession())
+        XCTAssertEqual(fallback.fetchCount, 1)
+        XCTAssertTrue(MockURLProtocol.requestedURLs.isEmpty,
+            "A typed or unverified result must not get a proof-only network probe")
+        XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(
+            in: ModelContext(context.container)).isEmpty)
+
+        MockURLProtocol.reset()
+        let cookieContext = TestStore.freshContext()
+        let cookieFallback = CountingFeedFetcher(feed([episode("fallback", d1)]))
+        _ = try await SubscriptionRepository(context: cookieContext, feed: cookieFallback)
+            .subscribe(directoryResult: result,
+                anonymousSession: MockURLProtocol.makeSession())
+        XCTAssertEqual(cookieFallback.fetchCount, 1)
+        XCTAssertTrue(MockURLProtocol.requestedURLs.isEmpty,
+            "A cookie-capable session must not make an eligibility probe")
+        XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(
+            in: ModelContext(cookieContext.container)).isEmpty)
+
+        for privateURL in ["https://localhost/feed.xml",
+                           "https://192.168.1.2/feed.xml",
+                           "https://device.local/feed.xml"] {
+            MockURLProtocol.reset()
+            let privateContext = TestStore.freshContext()
+            let privateFallback = CountingFeedFetcher(feed([episode("fallback", d1)]))
+            let privateResult = PodcastSearchResult(id: privateURL, title: "Synthetic",
+                author: nil, artworkURL: nil, feedURL: privateURL,
+                directoryResponseURL: "https://itunes.apple.com/search?media=podcast")
+            _ = try await SubscriptionRepository(context: privateContext, feed: privateFallback)
+                .subscribe(directoryResult: privateResult,
+                    anonymousSession: MockURLProtocol.makeAnonymousFeedSession())
+            XCTAssertEqual(privateFallback.fetchCount, 1)
+            XCTAssertTrue(MockURLProtocol.requestedURLs.isEmpty,
+                "A private host must not receive an eligibility probe")
+            XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(
+                in: ModelContext(privateContext.container)).isEmpty)
+        }
+    }
+
     /// The returned `Podcast` must be a valid MAIN-context object — re-fetched by
     /// persistentModelID after the background actor saved — so callers like
     /// `OPMLImportService` can attach relationships (folder membership) to it. A

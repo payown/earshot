@@ -1137,7 +1137,7 @@ actor CloudProjectionCoordinator: ModelActor {
                 feedURL: feed, in: modelContext
             )
         }
-        copy(remote, to: podcast)
+        try copy(remote, to: podcast, in: modelContext)
         if wasCatalogOnly {
             podcast.subscriptionStateRaw = nil
             try PendingCloudRemoteActivationIntent.set(feedURL: feed, in: modelContext)
@@ -1256,7 +1256,7 @@ actor CloudProjectionCoordinator: ModelActor {
                         feedURL: key, in: appContext
                     )
                 }
-                copy(row, to: podcast)
+                try copy(row, to: podcast, in: appContext)
                 inboxScopeChanged = inboxScopeDiffers(before, value(podcast))
                     || inboxScopeChanged
             }
@@ -3981,8 +3981,15 @@ actor CloudProjectionCoordinator: ModelActor {
         return changed
     }
 
-    private func copy(_ source: CloudPodcastProjection, to target: Podcast) {
-        target.feedURL = FeedURLIdentity.canonical(source.feedURL)
+    private func copy(_ source: CloudPodcastProjection, to target: Podcast,
+        in context: ModelContext) throws {
+        let incomingURL = FeedURLIdentity.canonical(source.feedURL)
+        if target.feedURL != incomingURL {
+            // A prior anonymous fetch approved only the old exact identity.
+            // An A→B→A projection sequence must not reuse that approval.
+            try ListeningPlacesPublicFeedApproval.revoke(feedURL: target.feedURL, in: context)
+        }
+        target.feedURL = incomingURL
         target.title = source.title
         target.author = source.author
         target.podcastDescription = source.podcastDescription

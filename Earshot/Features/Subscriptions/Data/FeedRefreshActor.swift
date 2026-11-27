@@ -1345,6 +1345,10 @@ actor FeedRefreshActor {
             Podcast(feedURL: feedURL, title: parsed.title.isEmpty ? "Untitled podcast" : parsed.title)
         }
         let podcast = resolved.podcast
+        if podcast.feedURL != canonical {
+            try ListeningPlacesPublicFeedApproval.revoke(
+                feedURL: podcast.feedURL, in: modelContext)
+        }
         podcast.feedURL = canonical
         try ListeningPlacesSubscriptionRetention.clearForExplicitFollow(
             feedURL: canonical, in: modelContext

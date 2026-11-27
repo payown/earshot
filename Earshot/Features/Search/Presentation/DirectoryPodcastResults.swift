@@ -120,7 +120,7 @@ struct DirectoryPodcastResults: View {
                     context: context,
                     downloader: downloads,
                     isEntitled: entitlements.isEntitled
-                ).subscribe(feedURL: result.feedURL)
+                ).subscribe(directoryResult: result)
                 Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
                 if FolderLogic.shouldOfferSubscribeToFolder(existingFolderCount: folders.count) {
                     try? await Task.sleep(for: .milliseconds(600))

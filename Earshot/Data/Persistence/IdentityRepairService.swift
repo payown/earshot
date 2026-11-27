@@ -478,6 +478,8 @@ struct IdentityRepairService {
             if group.count == 1 {
                 // Normalize a lone legacy row without touching its episode graph.
                 if group[0].feedURL != canonical {
+                    try ListeningPlacesPublicFeedApproval.revoke(
+                        feedURL: group[0].feedURL, in: context)
                     group[0].feedURL = canonical
                     report.relationshipsRetargeted += 1
                 }
@@ -534,6 +536,10 @@ struct IdentityRepairService {
         for duplicatePodcast in ordered.dropFirst() {
             context.delete(duplicatePodcast)
             report.podcastsRemoved += 1
+        }
+        if survivor.feedURL != canonicalFeedURL {
+            try ListeningPlacesPublicFeedApproval.revoke(
+                feedURL: survivor.feedURL, in: context)
         }
         survivor.feedURL = canonicalFeedURL
         LocalStateStore.setRefreshedAt(survivor.refreshedAt, on: survivor, in: context)

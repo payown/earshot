@@ -1,12 +1,14 @@
 import Foundation
 
-/// The one configured ``URLSession`` shared across Earshot's network layer.
+/// The configured ``URLSession`` used for ordinary feed traffic.
 ///
 /// Before #386 every network type defaulted to `URLSession.shared`, which uses
 /// the system default timeouts (60s request / 7 days resource) and no shared
 /// configuration. This type centralises a single configuration with explicit,
 /// tighter timeouts so a hung request fails in seconds instead of leaving the
-/// user staring at a spinner, and so every network call shares one policy.
+/// user staring at a spinner, and so ordinary feed calls share one policy.
+/// Directory proof requests use a separate ephemeral session without cookies
+/// or credentials.
 ///
 /// `ArtworkCache` keeps its own ``URLSession`` on purpose: it wires a dedicated
 /// disk ``URLCache`` (#385) and a `.returnCacheDataElseLoad` cache policy that
@@ -26,8 +28,7 @@ enum EarshotURLSession {
     /// feeds on poor connections but far below the 7-day system default.
     static let resourceTimeout: TimeInterval = 60
 
-    /// The shared, configured session used by ``HTTPClient`` and
-    /// ``ITunesSearchService``.
+    /// The shared, configured session used by ``HTTPClient``.
     static let shared: URLSession = URLSession(configuration: makeConfiguration())
 
     /// Builds a configuration carrying Earshot's explicit timeouts. Exposed so
