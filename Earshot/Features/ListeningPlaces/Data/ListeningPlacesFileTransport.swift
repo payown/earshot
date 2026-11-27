@@ -190,6 +190,12 @@ actor ListeningPlacesFileTransport {
                 guard values.isSymbolicLink != true, values.isDirectory != true else { return }
                 let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
                 guard descriptor >= 0 else { return }
+                var metadata = stat()
+                guard Darwin.fstat(descriptor, &metadata) == 0,
+                      metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
+                    _ = Darwin.close(descriptor)
+                    return
+                }
                 let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
                 defer { try? handle.close() }
                 var data = Data()

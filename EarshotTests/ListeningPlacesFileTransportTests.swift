@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import Earshot
@@ -27,6 +28,7 @@ final class ListeningPlacesFileTransportTests: XCTestCase {
         let invalid = devices.appending(path: "bad name.json")
         let directory = devices.appending(path: "directory.json")
         let symlink = devices.appending(path: "link.json")
+        let fifo = devices.appending(path: "fifo.json")
         let ownBytes = Data("own".utf8)
         let desktopBytes = Data("desktop".utf8)
         let laptopBytes = Data("laptop".utf8)
@@ -37,6 +39,7 @@ final class ListeningPlacesFileTransportTests: XCTestCase {
         try Data("invalid".utf8).write(to: invalid)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: desktop)
+        XCTAssertEqual(Darwin.mkfifo(fifo.path, 0o600), 0)
 
         let result = try await transport.readOtherDeviceFiles(bookmarkData: bookmark,
                                                               excludingDeviceID: "phone123")
@@ -45,6 +48,7 @@ final class ListeningPlacesFileTransportTests: XCTestCase {
         XCTAssertTrue(result.skipped.contains { $0.fileName == "oversized.json" && $0.reason == .tooLarge })
         XCTAssertTrue(result.skipped.contains { $0.fileName == "directory.json" && $0.reason == .notRegularFile })
         XCTAssertTrue(result.skipped.contains { $0.fileName == "link.json" && $0.reason == .notRegularFile })
+        XCTAssertTrue(result.skipped.contains { $0.fileName == "fifo.json" && $0.reason == .notRegularFile })
         XCTAssertTrue(result.skipped.contains { $0.fileName == nil && $0.reason == .invalidName })
         XCTAssertFalse(result.files.contains { $0.fileName == "phone123.json" })
         XCTAssertEqual(try Data(contentsOf: own), ownBytes)
