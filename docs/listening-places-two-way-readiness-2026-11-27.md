@@ -47,6 +47,12 @@ it is not a claim that two-way sync or subscriptions are available in 335.
    candidate branch; its failing diagnostic is retained locally. A clock
    needs enforced coverage of every producer or an atomic persisted revision,
    not just a signature comparison.
+   The current write audit includes explicit and throttled PlayerService
+   checkpoint saves, seek and handoff application, natural completion,
+   Quick Actions, Inbox and podcast bulk Played/Unplayed, Queue mutations,
+   identity repair, and CloudProjection import. `Episode.playedAt` records
+   only a played transition; it is not a position/reset clock. Capturing a
+   timestamp at one UI entry point would leave other saved changes untimed.
 2. **Latest-event position.** A deliberate newer backward seek must win. The
    current iCloud projection normally takes the maximum eligible position,
    so passing a desktop record into it unchanged would not implement this
@@ -64,11 +70,20 @@ it is not a claim that two-way sync or subscriptions are available in 335.
    Earshot folder membership, `sortOrder`, and Earshot `app_private` metadata
    on re-export; Earshot's round trip must preserve them too. No remote
    subscription mutation is enabled by a parser.
+   Marking a Podcast `catalogOnly` can preserve its rows locally, but the
+   current CloudProjection import can re-promote an active iCloud subscription,
+   while its local publication can treat the absent follow as an iCloud
+   unfollow. A Listening Places remote-unfollow path must suppress both effects
+   with a durable device-local source/ownership rule before it can be called.
 4. **Privacy.** A device-local "keep here" choice must suppress that show's
    subscription, folders, episode places and incoming changes without emitting
    an unfollow tombstone. Private feed URLs and authentication must never enter
    the plain shared file. Existing written records need careful treatment so
    a policy change does not leave or recreate private rows.
+   The current writer can retain an older hashed place even after an episode
+   is no longer in the local catalog. Excluding only currently known private
+   feeds would therefore not prove that all previously shared private places
+   were purged; a reviewed rewrite/purge rule is required before claiming S8/S15.
 5. **Input and scale.** Before applying anything, cap coordinated reads, parse
    valid rows independently of malformed/unknown ones, normalize time to UTC,
    validate IDs, clamp positions, ignore stale devices, and index a large local
@@ -84,7 +99,14 @@ two-way sync. Personal Audio import exists in Earshot, but the current places
 writer does not exchange local-file IDs; adding that identity is separate work.
 
 The isolated foundation branch adds a bounded, read-only peer-file transport,
-tolerant episode/tombstone parser, and conservative subscription identity helper.
+tolerant episode/tombstone parser, conservative subscription identity helper,
+and a pure per-episode merge planner. The planner's initial seven focused tests cover
+newer backward seeks, older/newer resets, loaded-episode deferral, remote ties,
+unknown legacy time, guarded future clocks, and conflicting same-device rows.
+An eighth fail-before/pass-after regression keeps a repeated, already-applied
+peer event from triggering another application. The final eight-test planner
+run passed on iOS 26.5 (`EarshotLPIdempotenceAfter20261127.xcresult`); its
+pre-fix run failed exactly that repeat-import assertion.
 It does not invoke the reader from the app or apply remote state. Its combined
 iOS 26.5 focused run on November 27 passed 24 tests with no failures or skips
 on final code (`EarshotLPFinalFocused20261127.xcresult` in local verification

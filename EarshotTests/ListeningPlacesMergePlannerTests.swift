@@ -60,6 +60,12 @@ final class ListeningPlacesMergePlannerTests: XCTestCase {
         XCTAssertEqual(decide(.knownNoEvent, [second, first]), .keepLocal)
     }
 
+    func testReimportOfAlreadyAppliedRemoteEventIsIdempotent() {
+        let incoming = remote(position: 120, time: 30, device: "desktop")
+        let applied = event(position: 120, time: 30, device: "desktop")
+        XCTAssertEqual(decide(.event(applied), [incoming]), .keepLocal)
+    }
+
     private func decide(_ local: ListeningPlacesLocalPlace, _ remotes: [ListeningPlacesRemoteEvent],
                         loaded: Bool = false) -> ListeningPlacesMergeDecision {
         ListeningPlacesMergePlanner.decide(id: id, local: local, remote: remotes, isLoaded: loaded)

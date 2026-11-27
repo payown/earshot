@@ -64,8 +64,12 @@ enum ListeningPlacesMergePlanner {
             $0.sourceDeviceID == newest.sourceDeviceID
                 && $0.updatedAt == newest.updatedAt && $0 != newest
         }) else { return .keepLocal }
-        if case .event(let current) = local, newest.updatedAt < current.updatedAt {
-            return .keepLocal
+        if case .event(let current) = local {
+            // Re-reading the same peer file must not reapply an unchanged place.
+            // A different peer with an equal clock still follows the tie rule.
+            if newest == current || newest.updatedAt < current.updatedAt {
+                return .keepLocal
+            }
         }
         return isLoaded ? .deferLoaded(newest) : .apply(newest)
     }
