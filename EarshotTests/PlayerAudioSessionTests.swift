@@ -219,6 +219,41 @@ final class PlayerAudioSessionTests: XCTestCase {
         XCTAssertFalse(player.isPlaying)
     }
 
+    func testRemovingInterruptedQueueEpisodeDoesNotResumeAnotherEpisode() async throws {
+        let session = MockPlayerAudioSession()
+        let player = PlayerService(audioSession: session)
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        let podcast = Podcast(feedURL: "https://example.invalid/interruption", title: "Disposable")
+        let loaded = Episode(guid: "loaded", title: "Loaded", audioURL: audioURL.absoluteString)
+        let survivor = Episode(guid: "survivor", title: "Survivor", audioURL: audioURL.absoluteString)
+        loaded.podcast = podcast
+        survivor.podcast = podcast
+        context.insert(podcast)
+        context.insert(loaded)
+        context.insert(survivor)
+        try context.save()
+        let queue = QueueRepository(context: context)
+        queue.add([loaded, survivor])
+        player.configure(context: context)
+        player.play(loaded)
+        XCTAssertTrue(player.hasActivePlaybackRequest)
+
+        postInterruption(.began, session: session)
+        try await pollUntil { !player.isPlaying }
+        XCTAssertFalse(player.hasActivePlaybackRequest)
+        player.removeFromQueue(loaded, context: context, keepDownload: true)
+        postInterruption(.ended, options: .shouldResume, session: session)
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(player.nowPlayingEpisodeID, survivor.persistentModelID)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(queue.queue().map(\.persistentModelID), [survivor.persistentModelID])
+        player.stopAndUnload()
+    }
+
     func testInterruptionEndWithoutResumeOptionsConsumesPendingResume() async throws {
         let session = MockPlayerAudioSession()
         let player = PlayerService(audioSession: session)

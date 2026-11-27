@@ -630,6 +630,55 @@ final class EarshotUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Close player"].exists, "Selection must not start playback")
     }
 
+    func testQueuePausedLoadedSelectionRemovalDoesNotStartSurvivor() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
+                               "-uiTestQueueDetailsDisabled"]
+        app.launch()
+        let firstTitle = "#166 – If You Used a Passkey"
+        let siblingTitle = "#165 – No Excuses Left"
+        let survivorTitle = "Welcome to Our Perspective"
+        let first = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", firstTitle)).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        first.tap() // Ordinary touch opens Queue episode details.
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        app.buttons["episode.detail.play"].tap()
+        let close = app.buttons["Close player"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        let transport = app.buttons["player.playPause"].firstMatch
+        XCTAssertEqual(transport.label, "Pause")
+        transport.tap()
+        XCTAssertEqual(transport.label, "Play")
+        close.tap()
+        if app.buttons["Done"].exists { app.buttons["Done"].tap() }
+
+        app.buttons["Select episodes"].tap()
+        app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@ AND NOT label BEGINSWITH %@", firstTitle, "Mini player, "
+        )).firstMatch.tap()
+        app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@ AND NOT label BEGINSWITH %@", siblingTitle, "Mini player, "
+        )).firstMatch.tap()
+        app.buttons["Remove 2 episodes from Queue"].tap()
+
+        XCTAssertFalse(first.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", siblingTitle
+        )).firstMatch.exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", survivorTitle
+        )).firstMatch.exists)
+        let miniPlayer = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Mini player, "
+        )).firstMatch
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5))
+        XCTAssertTrue(miniPlayer.label.contains(survivorTitle),
+                      "Continue After may load the survivor but must not start audio")
+        miniPlayer.tap()
+        XCTAssertEqual(app.buttons["player.playPause"].firstMatch.label, "Play",
+                       "Removing a paused loaded Queue row must stay silent")
+    }
+
     func testQueueSelectionMarkPlayedHonorsQueueRetention() {
         for keep in [false, true] {
             let app = XCUIApplication()

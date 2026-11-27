@@ -181,6 +181,10 @@ final class PlayerService {
     /// episode or start audio after the user has paused again.
     @ObservationIgnored private var playbackHandoffTask: Task<Void, Never>?
     @ObservationIgnored private var playbackHandoffGeneration = 0
+    /// Only a pending resume of the loaded episode counts as continuation
+    /// intent when that episode is removed from Queue. A pending Play Now for a
+    /// different episode must not make the old loaded row auto-advance.
+    @ObservationIgnored private var pendingHandoffResumeEpisodeID: PersistentIdentifier?
     /// Generation-protected user seek. AVPlayer seeks asynchronously, so the
     /// periodic clock must not publish the pre-seek time while the request is in
     /// flight. Repeated skips replace the pending request while continuing to
@@ -1296,19 +1300,21 @@ final class PlayerService {
         beginHandoffOperation()
         let generation = playbackHandoffGeneration
         let episodeID = episode.persistentModelID
+        pendingHandoffResumeEpisodeID = episodeID
         playbackHandoffTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let fetched = await fetchPlaybackHandoff(identity: identity)
             guard !Task.isCancelled,
-                  playbackHandoffGeneration == generation,
-                  !releaseInvalidCurrentEpisodeIfNeeded(),
+                  playbackHandoffGeneration == generation else { return }
+            pendingHandoffResumeEpisodeID = nil
+            playbackHandoffTask = nil
+            guard !releaseInvalidCurrentEpisodeIfNeeded(),
                   nowPlayingEpisodeID == episodeID,
                   let episode = currentEpisode else { return }
             if followedPlaybackHandoffIdentity(for: episode) == identity,
                let fetched {
                 applyFetchedHandoff(fetched, to: episode)
             }
-            playbackHandoffTask = nil
             resumeImmediately(providesStartHaptic: providesStartHaptic)
         }
     }
@@ -2203,13 +2209,29 @@ final class PlayerService {
     /// from a `PlayerService` that hasn't been `configure(context:)`-ed, matching
     /// how `QuickActionBuildersTests` deliberately tests queue-action building in
     /// isolation from full playback setup.
-    func removeFromQueue(_ episode: Episode, context: ModelContext, keepDownload: Bool = false) {
-        let repo = QueueRepository(context: context)
+    func removeFromQueue(
+        _ episode: Episode,
+        context: ModelContext,
+        keepDownload: Bool = false,
+        saveQueueContext: ((ModelContext) throws -> Void)? = nil
+    ) {
+        let repo = QueueRepository(
+            context: context,
+            saveContext: saveQueueContext ?? { try $0.save() }
+        )
 
         guard nowPlayingEpisodeID == episode.persistentModelID else {
             repo.cancelFromQueue(episode, keepDownload: keepDownload)
             return
         }
+
+        // A loaded row may be paused (including a restored or interrupted
+        // episode). Removing it must not turn Continue After Episode into a new
+        // play request. Capture intent before the durable Queue mutation: the
+        // presentation flag alone can lag while AVPlayer buffers, whereas a
+        // stale transport `.playing` after pause is not permission to resume.
+        let shouldContinuePlayback = isPlaying || intendsToPlay
+            || pendingHandoffResumeEpisodeID == episode.persistentModelID
 
         // Resolve the next episode from the CURRENT queue, before removal --
         // exactly as markCurrentPlayedAndAdvance() does, so nextAdvanceID still
@@ -2225,13 +2247,30 @@ final class PlayerService {
         guard repo.cancelFromQueue(episode, keepDownload: keepDownload) else { return }
 
         guard let nextEpisode else {
-            // Nothing queued after this one: stop cleanly and hide the bar (#730).
+            // Nothing eligible follows this row: stop cleanly and hide the bar.
             pause(providesPauseHaptic: false)
             isPlaying = false
             clearNowPlayingPresentation()
             return
         }
 
+        if !shouldContinuePlayback {
+            // Preserve the existing next-episode selection for Queue and
+            // Shortcuts, but do not create a playback request from a paused or
+            // interrupted row. A fresh explicit Play can start this survivor.
+            pause(providesPauseHaptic: false)
+            clearNowPlayingPresentation()
+            clearPreload()
+            load(nextEpisode)
+            if nowPlayingEpisodeID == nextEpisode.persistentModelID {
+                persistLastPlayingEpisode(nextEpisode)
+            }
+            return
+        }
+
+        // A pending resume of the removed episode cannot later seek or restart
+        // it after the Queue has durably advanced to its survivor.
+        cancelHandoffOperation()
         let prepared = preloadedEpisode?.persistentModelID == nextEpisode.persistentModelID
             ? preloadedItem : nil
         preloadedItem = nil
@@ -2896,6 +2935,7 @@ final class PlayerService {
         playbackHandoffGeneration &+= 1
         playbackHandoffTask?.cancel()
         playbackHandoffTask = nil
+        pendingHandoffResumeEpisodeID = nil
     }
 
     private func cancelHandoffOperation() {
