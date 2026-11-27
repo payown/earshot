@@ -292,7 +292,7 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
             at: appRoot, includingPropertiesForKeys: nil
         ))
         let expression = try NSRegularExpression(
-            pattern: #"\b[A-Za-z_][A-Za-z_0-9]*\.(?:positionSeconds|isPlayed)\s*=(?!=)"#
+            pattern: #"\b[A-Za-z_][A-Za-z_0-9]*\.(?:positionSeconds|isPlayed|playedAt)\s*=(?!=)"#
         )
         var observed: [String: Int] = [:]
         for case let file as URL in enumerator where file.pathExtension == "swift" {
@@ -313,15 +313,15 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
         XCTAssertEqual(observed, [
             "Earshot/App/Screenshots/ScreenshotFixtures.swift": 4,
             "Earshot/Data/Models/Bookmark.swift": 1,
-            "Earshot/Data/Models/Episode.swift": 1,
-            "Earshot/Data/Models/PersonalAudioItem.swift": 2,
+            "Earshot/Data/Models/Episode.swift": 2,
+            "Earshot/Data/Models/PersonalAudioItem.swift": 3,
             "Earshot/Data/Persistence/CloudProjection.swift": 14,
-            "Earshot/Data/Persistence/EarshotSchema.swift": 8,
+            "Earshot/Data/Persistence/EarshotSchema.swift": 12,
             "Earshot/Data/Persistence/EarshotSchemaV1.swift": 1,
-            "Earshot/Data/Persistence/IdentityRepairService.swift": 1,
+            "Earshot/Data/Persistence/IdentityRepairService.swift": 2,
             "Earshot/Features/Inbox/Data/InboxRepository.swift": 1,
             "Earshot/Features/Player/Data/PlaybackHandoffClient.swift": 1,
-            "Earshot/Features/Player/Data/PlayerService.swift": 15,
+            "Earshot/Features/Player/Data/PlayerService.swift": 17,
             "Earshot/Features/Queue/Data/QueueRepository.swift": 1,
             "Earshot/Features/QuickActions/Domain/EpisodeActionsBuilder.swift": 1,
             "Earshot/Features/Subscriptions/Data/EpisodeRepository.swift": 2,

@@ -55,6 +55,39 @@ final class IdentityRepairServiceTests: XCTestCase {
     private let oldDate = Date(timeIntervalSince1970: 1_700_000_000)
     private let newDate = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testIdentityRepairInvalidatesOldPlaceEventAcrossLaterReturn() throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.com/repair", title: "Repair")
+        let survivor = Episode(guid: "shared", title: "Old",
+                               audioURL: "https://example.com/old.mp3",
+                               positionSeconds: 10, createdAt: oldDate)
+        let duplicate = Episode(guid: "shared", title: "New",
+                                audioURL: "https://example.com/new.mp3",
+                                positionSeconds: 20, createdAt: newDate)
+        survivor.podcast = podcast
+        duplicate.podcast = podcast
+        context.insert(podcast)
+        context.insert(survivor)
+        context.insert(duplicate)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: survivor, in: context, deviceID: "phone",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        try context.save()
+
+        _ = try IdentityRepairService(context: context).repairEpisodes(in: podcast)
+        XCTAssertEqual(survivor.positionSeconds, 20)
+        try context.save()
+        survivor.positionSeconds = 10 // Simulate a later unclassified repair.
+        try context.save()
+
+        let fresh = ModelContext(context.container)
+        let saved = try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertEqual(saved.positionSeconds, 10)
+        XCTAssertEqual(try ListeningPlacesEventJournal.read(for: saved, in: fresh),
+                       .unknownLegacy, "Repair must not let an old clock reappear")
+    }
+
     func testFeedURLCanonicalizationIsStableAndConservative() {
         XCTAssertEqual(
             FeedURLIdentity.canonical("  HTTPS://Example.COM:443/feed.xml#section  "),

@@ -3357,7 +3357,7 @@ actor CloudProjectionCoordinator: ModelActor {
             // Queue repositories already use immediate saves. Preserve unrelated
             // dirty UI edits by committing them; never roll them back as though
             // they belonged to remote queue application.
-            try context.save()
+            try saveQueuePlanContext(context)
         }
         if let checkpoint {
             let plannedKeys = Set(plan.entries.map(\.key))
@@ -3374,15 +3374,26 @@ actor CloudProjectionCoordinator: ModelActor {
 
         // The test hook can suspend. Save any work that arrived during it before
         // establishing the no-await transaction's rollback boundary.
-        if context.hasChanges { try context.save() }
+        if context.hasChanges { try saveQueuePlanContext(context) }
         do {
             let changed = try applyRemoteQueuePlanSynchronously(plan, in: context)
-            if context.hasChanges { try context.save() }
+            if context.hasChanges { try saveQueuePlanContext(context) }
             return changed
         } catch {
             context.rollback()
             throw error
         }
+    }
+
+    @MainActor
+    private static func saveQueuePlanContext(_ context: ModelContext) throws {
+        // These saves can also commit an unrelated dirty playback edit on the
+        // shared main context. Its origin is unknown here, so an old local
+        // Listening Places event must not regain authority after a return.
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: context, localDeviceID: nil
+        )
+        try context.save()
     }
 
     /// Re-fetch, decide, mutate, and save without an actor suspension. This is

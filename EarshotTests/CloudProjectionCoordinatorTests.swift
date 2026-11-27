@@ -3648,6 +3648,54 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(try PendingCloudQueueMutation.orderings(in: app.mainContext).isEmpty)
     }
 
+    func testRemoteQueueBoundaryDoesNotPreserveOldClockForDirtyPlaybackState() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "cloud-queue-place-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try makeOnDiskApplicationContainer(
+            applicationURL: root.appending(path: "application.store"),
+            localURL: root.appending(path: "local.store")
+        )
+        let projection = try makeOnDiskProjectionContainer(
+            at: root.appending(path: "projection.store")
+        )
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "queue-place", title: "Episode",
+                              audioURL: "https://example.com/place.mp3",
+                              status: .inQueue, positionSeconds: 10)
+        episode.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(episode)
+        app.mainContext.insert(QueueItem(episode: episode, position: 0))
+        try PendingCloudQueueMutation.markBootstrapCompleted(in: app.mainContext)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: app.mainContext, deviceID: "receiver",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        try app.mainContext.save()
+        projection.mainContext.insert(queueRow(
+            device: "remote", guid: episode.guid, queued: true, position: 0,
+            membershipUpdatedAt: 100, modifiedAt: 100
+        ))
+        try projection.mainContext.save()
+
+        // The queue coordinator commits pre-existing main-context UI work.
+        episode.positionSeconds = 20
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection,
+            center: NotificationCenter(), deviceID: "receiver"
+        )
+        try await coordinator.reconcile()
+        XCTAssertEqual(episode.positionSeconds, 20)
+        episode.positionSeconds = 10 // A later unclassified return.
+        try app.mainContext.save()
+        let fresh = ModelContext(app)
+        let saved = try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertEqual(try ListeningPlacesEventJournal.read(for: saved, in: fresh),
+                       .unknownLegacy)
+    }
+
     func testPlaybackCompletionDuringRemoteQueueApplyDoesNotResurrectFinishedEpisode() async throws {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "cloud-queue-race-\(UUID().uuidString)", directoryHint: .isDirectory)

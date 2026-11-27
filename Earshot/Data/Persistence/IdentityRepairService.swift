@@ -416,13 +416,23 @@ struct IdentityRepairService {
     func repairAll() throws -> IdentityRepairReport {
         var report = try repairPodcastGroups(matching: nil)
         report.add(try repairSettings())
+        // A deduplication may choose another row's position or Played state.
+        // It is not a fresh listener event, so clear stale provenance before
+        // the caller commits the repaired graph.
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: context, localDeviceID: nil
+        )
         return report
     }
 
     func repair(feedURLs: [String]) throws -> IdentityRepairReport {
         let keys = Set(feedURLs.map(FeedURLIdentity.canonical))
         guard !keys.isEmpty else { return .none }
-        return try repairPodcastGroups(matching: keys)
+        let report = try repairPodcastGroups(matching: keys)
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: context, localDeviceID: nil
+        )
+        return report
     }
 
     func repairEpisodes(
@@ -448,6 +458,9 @@ struct IdentityRepairService {
         }
         var report = IdentityRepairReport(episodesInspected: episodes.count)
         try repairEpisodeGroups(episodes, survivorPodcast: podcast, report: &report)
+        try ListeningPlacesEventJournal.stageChangedEpisodesBeforeSave(
+            in: context, localDeviceID: nil
+        )
         return report
     }
 
