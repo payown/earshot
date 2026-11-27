@@ -262,6 +262,12 @@ exchange suite passed 12/12 runnable tests; its two existing disposable
 coordinator opt-in tests skipped (`EarshotWriterSubscriptionAdjacent20261127.xcresult`).
 Broader release checks remain a gate. No release receiver or sharing scope
 was enabled by this change.
+Source audit found one normal episode-file writer: `ListeningPlacesService`
+through `writeSnapshot` and its injected owned-file replacement. The other
+`replaceDeviceFile` caller is `ListeningPlacesSubscriptionTestCoordinator`,
+which has no normal app caller and remains a disposable test path. Settings'
+“Share listening places” toggle calls `setEnabled`; native Settings VoiceOver
+timing and a real delayed provider remain unverified.
 
 Explicit `EpisodeRepository`, `InboxRepository`, `QueueRepository` and Quick
 Action saves now call one local journal helper. Feed-refresh saves invalidate
