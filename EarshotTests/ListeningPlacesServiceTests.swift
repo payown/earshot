@@ -1042,6 +1042,235 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertTrue(snapshot.records.isEmpty)
     }
 
+    func testJournalExportUsesLocalEventClockAndKeepsLegacyAndPrivacyWithdrawal() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let feed = "https://example.com/clocked-feed.xml"
+        let podcast = Podcast(feedURL: feed, title: "Clocked")
+        let clocked = Episode(guid: "clocked", title: "Clocked episode",
+                              audioURL: "https://example.com/clocked.mp3",
+                              positionSeconds: 15)
+        let legacy = Episode(guid: "legacy", title: "Legacy episode",
+                             audioURL: "https://example.com/legacy.mp3",
+                             positionSeconds: 22)
+        clocked.podcast = podcast
+        legacy.podcast = podcast
+        context.insert(podcast)
+        context.insert(clocked)
+        context.insert(legacy)
+        let firstTime = Date(timeIntervalSince1970: 1_000)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: clocked, in: context, deviceID: "1234abcd", now: firstTime
+        )
+        try context.save()
+        let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
+        let first = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: [], previousSignatures: [:], previousUpdatedAtByID: [:],
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 3_000)
+        )
+        let clockedID = ListeningPlacesFormat.episodeID(
+            guid: clocked.guid, enclosureURL: clocked.audioURL
+        )
+        let legacyID = ListeningPlacesFormat.episodeID(
+            guid: legacy.guid, enclosureURL: legacy.audioURL
+        )
+        XCTAssertEqual(first.records.first { $0.id == clockedID }?.updatedAt, firstTime)
+        XCTAssertEqual(first.records.first { $0.id == legacyID }?.updatedAt,
+                       Date(timeIntervalSince1970: 3_000))
+
+        clocked.positionSeconds = 25
+        let nextTime = Date(timeIntervalSince1970: 4_000)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: clocked, in: context, deviceID: "1234abcd", now: nextTime
+        )
+        try context.save()
+        let second = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: first.records, previousSignatures: first.signatures,
+            previousUpdatedAtByID: first.updatedAtByID,
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 5_000)
+        )
+        XCTAssertEqual(second.records.first { $0.id == clockedID }?.updatedAt, nextTime)
+        XCTAssertEqual(second.records.first { $0.id == legacyID }?.updatedAt,
+                       Date(timeIntervalSince1970: 3_000))
+
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(feedURL: feed, in: context)
+        try context.save()
+        let withdrawn = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: second.records, previousSignatures: second.signatures,
+            previousUpdatedAtByID: second.updatedAtByID,
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 6_000)
+        )
+        XCTAssertTrue(withdrawn.records.isEmpty)
+        try ListeningPlacesFeedPrivacy.clearForExplicitSharing(feedURL: feed, in: context)
+        try context.save()
+        let sharedAgain = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: withdrawn.records, previousSignatures: withdrawn.signatures,
+            previousUpdatedAtByID: withdrawn.updatedAtByID,
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 7_000)
+        )
+        XCTAssertEqual(sharedAgain.records.first { $0.id == clockedID }?.updatedAt, nextTime)
+        XCTAssertEqual(sharedAgain.records.first { $0.id == legacyID }?.updatedAt,
+                       Date(timeIntervalSince1970: 7_000),
+                       "unknown-time legacy state retains one-way compatibility")
+    }
+
+    func testNewLocalJournalDoesNotBackdateANewerLegacyOwnedRecord() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let podcast = Podcast(feedURL: "https://example.com/older-owned.xml", title: "Owned")
+        let episode = Episode(guid: "owned", title: "Episode",
+                              audioURL: "https://example.com/owned.mp3",
+                              positionSeconds: 25)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "1234abcd",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        try context.save()
+        let previous = ListeningPlaceRecord.episode(
+            guid: episode.guid, enclosureURL: episode.audioURL,
+            positionSeconds: 15, durationSeconds: nil, played: false,
+            updatedAt: Date(timeIntervalSince1970: 5_000)
+        )
+        let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
+        let legacyBytes = try ListeningPlacesFormat.encodedDeviceFile(
+            deviceID: "1234abcd", appVersion: "earshot/1.3.1",
+            writtenAt: Date(timeIntervalSince1970: 5_000), records: [previous]
+        )
+        let restored = try await loader.restore(data: legacyBytes)
+        let held = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: restored.records, previousSignatures: restored.signatures,
+            previousUpdatedAtByID: restored.updatedAtByID,
+            deviceID: "1234abcd", appVersion: "earshot/1.3.1",
+            now: Date(timeIntervalSince1970: 2_000)
+        )
+        XCTAssertEqual(held.records.first?.positionMilliseconds, 15_000)
+        XCTAssertEqual(held.records.first?.updatedAt, previous.updatedAt)
+
+        episode.positionSeconds = 35
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "1234abcd",
+            now: Date(timeIntervalSince1970: 6_000)
+        )
+        try context.save()
+        let later = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: held.records, previousSignatures: held.signatures,
+            previousUpdatedAtByID: held.updatedAtByID,
+            deviceID: "1234abcd", appVersion: "earshot/1.3.1",
+            now: Date(timeIntervalSince1970: 7_000)
+        )
+        XCTAssertEqual(later.records.first?.positionMilliseconds, 35_000)
+        XCTAssertEqual(later.records.first?.updatedAt, Date(timeIntervalSince1970: 6_000))
+    }
+
+    func testUnstagedChangedEpisodeCannotAcquireANewExportClock() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let podcast = Podcast(feedURL: "https://example.com/unstaged.xml", title: "Unstaged")
+        let episode = Episode(guid: "unstaged", title: "Episode",
+                              audioURL: "https://example.com/unstaged.mp3",
+                              positionSeconds: 10)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        let eventTime = Date(timeIntervalSince1970: 1_000)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "1234abcd", now: eventTime
+        )
+        try context.save()
+        let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
+        let first = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: [], previousSignatures: [:], previousUpdatedAtByID: [:],
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 2_000)
+        )
+        XCTAssertEqual(first.records.first?.positionMilliseconds, 10_000)
+        XCTAssertEqual(first.records.first?.updatedAt, eventTime)
+        // Simulate an unclassified repair/import writer outside the journal
+        // boundary. The stale key is present, so this is not legacy absence.
+        episode.positionSeconds = 30
+        try context.save()
+        let second = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: first.records, previousSignatures: first.signatures,
+            previousUpdatedAtByID: first.updatedAtByID,
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 3_000)
+        )
+        XCTAssertEqual(second.records.first?.positionMilliseconds, 10_000)
+        XCTAssertEqual(second.records.first?.updatedAt, eventTime)
+        XCTAssertNil(second.data)
+    }
+
+    func testDeviceOnlyWithdrawalWinsAfterHeldJournalExportWrite() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-journal-privacy-race-\(UUID().uuidString)",
+                       directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let context = container.mainContext
+        let feed = "https://example.com/held-public.xml"
+        let podcast = Podcast(feedURL: feed, title: "Public")
+        let episode = Episode(guid: "held-journal", title: "Episode",
+                              audioURL: "https://example.com/held.mp3",
+                              positionSeconds: 60)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try context.save()
+        let writer = SuspendedObservedListeningPlacesWriter()
+        let service = ListeningPlacesService(replaceObservedDeviceFile: {
+            bookmark, deviceID, expected, data in
+            try await writer.replace(bookmark: bookmark, deviceID: deviceID,
+                                     expected: expected, data: data)
+        })
+        service.configure(context: context)
+        await service.chooseFolder(directory)
+        let deviceID = try XCTUnwrap(AppSettingsStore(context: context).rawValue(
+            SettingsKey.listeningPlacesDeviceID
+        ))
+        episode.positionSeconds = 70
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: deviceID,
+            now: .now.addingTimeInterval(10)
+        )
+        try context.save()
+        await writer.holdNextWrite()
+        let older = Task { await service.writeNow() }
+        for _ in 0..<100 where !(await writer.isSuspended()) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard await writer.isSuspended() else {
+            await older.value
+            return XCTFail("newer local event did not reach the held file write")
+        }
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(feedURL: feed, in: context)
+        try context.save()
+        let withdrawal = Task { await service.writeNow() }
+        await writer.resumeWrite()
+        await older.value
+        await withdrawal.value
+        let file = try deviceFile(in: directory)
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertFalse(contents.contains("episode:"))
+        XCTAssertEqual(episode.positionSeconds, 70)
+        service.releasePersistence()
+    }
+
     func testDeviceOnlyScrubRewritesOwnedFileWithoutTouchingPeerFileOrEpisode() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "places-scrub-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -1866,6 +2095,8 @@ private actor SuspendedObservedListeningPlacesWriter {
     private var resumeContinuation: CheckedContinuation<Void, Never>?
 
     func holdNextWrite() { holdNext = true }
+
+    func isSuspended() -> Bool { suspended }
 
     func waitUntilSuspended() async {
         if suspended { return }

@@ -35,9 +35,11 @@ it is not a claim that two-way sync or subscriptions are available in 335.
 
 ## Data-safety gates before applying remote state
 
-1. **Real event time.** The current writer stamps changed episode state when
-   it exports (`ListeningPlacesSnapshotLoader.addRecord`), which can happen
-   after a newer desktop event. `Episode` has no durable general position or
+1. **Real event time.** The signed-335 writer stamped changed episode state when
+   it exported (`ListeningPlacesSnapshotLoader.addRecord`), which could happen
+   after a newer desktop event. The isolated candidate now uses durable journal
+   time for classified local events and does not restamp peer imports; release
+   still requires the other gates below. `Episode` has no durable general position or
    reset time when iCloud is off. Legacy unknown-time state must not gain an
    invented timestamp. Any new clock needs crash-between-saves and relaunch
    tests before an import is enabled. A device-local sidecar prototype did
@@ -392,6 +394,17 @@ fixture with identity, membership, restart and rollback assertions before it
 can be considered for production. No folder receiver activation or build 336
 is justified by the current evidence.
 
+For a direct compatibility check, a separate disposable checkout at exact
+signed-335 source `35f90ead6c5d513090610f034602d0f10b695fee` generated a
+fresh V14 split store with two distinct same-name folders and ordered
+memberships (`EarshotExact335V14FixtureForwarded20261127.xcresult`, 1/1).
+The isolated Listening Places candidate copied that fixture, opened it through
+`StoreMigration.openOrMigrate`, then reopened it; both identities, memberships
+and sort orders survived (`EarshotCandidateExact335FolderOpen20261127.xcresult`,
+1/1). This checks the candidate's unchanged V14 path against actual 335 input.
+It does not establish a V15 schema or migrate any external folder identity;
+the unsafe optional-field probe stays separate and unmerged.
+
 ### Playback round-trip boundary
 
 A disposable test now composes a peer file, parses it, decides a newer
@@ -447,11 +460,23 @@ independent of subscription sharing. The same adjacent suites passed again
 109/109 with zero failures/skips on that exact local source
 (`EarshotLPReceiverReviewed20261127.xcresult`).
 
-Release still blocks: the ordinary `ListeningPlacesSnapshotLoader.addRecord`
-uses snapshot time and prior in-memory signatures rather than the durable
-journal. A later normal export could restamp or echo an imported peer place.
-The gated test coordinator instead composes from its observed owned file,
-which is why its no-echo assertion passes. The real exporter must be
-reconciled with journal source/time and tested across restart before this
-receiver can become user-accessible. The folder migration and off-URL
-credential-classification gates above also remain.
+The normal off-main exporter now reads journal values in one bounded settings
+fetch and uses the durable clock for local events. Peer-origin imports are not
+republished in Earshot's owned file; a genuinely absent legacy key retains the
+shipped one-way behavior, while a present stale/corrupt/duplicate key cannot
+receive a fresh clock. A newer legacy owned row is preserved until a genuinely
+newer local event can replace it. The direct-coordinator import followed by the
+actual normal export, restart and repeat passed, including unrelated legacy
+row preservation (`EarshotLPNormalExportTargeted20261127.xcresult`). Focused
+local clock, legacy, stale unstaged state and held-write device-only withdrawal
+tests passed; the final adjacent Listening Places suites passed 114/114 with
+zero failures/skips (`EarshotLPExportAdjacentFinal20261127.xcresult`). These
+are disposable simulator results, not real provider or playback acceptance.
+The final regression also applies a newer local seek/Played event after a peer
+reset and checks the exported position, Played value and original event time;
+its exact-source result is recorded with the candidate migration check below.
+The combined final run passed 115/115 with zero failures or skips on the
+isolated candidate (`EarshotLPExportAnd335MigrationFinal20261127.xcresult`).
+The folder identity migration and off-URL credential-classification gates
+above remain. Incoming application stays behind the Debug-only gate; no 336
+build or normal-user receiver is enabled.

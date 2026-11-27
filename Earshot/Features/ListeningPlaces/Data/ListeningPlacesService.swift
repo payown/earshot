@@ -110,6 +110,7 @@ actor ListeningPlacesSnapshotLoader {
         var signatures = previousSignatures
         var updatedAtByID = previousUpdatedAtByID
         var recordsByID: [String: ListeningPlaceRecord] = [:]
+        let journalValues = try ListeningPlacesEventJournal.snapshotRawValues(in: modelContext)
         let excludedPodcastIDs = try excludedPodcasts()
         // The old owned file carries hashed episode IDs, not feed IDs. Resolve
         // locally known excluded IDs before retaining any old zero/reset row.
@@ -171,8 +172,10 @@ actor ListeningPlacesSnapshotLoader {
                       !excludedRecordIDs.contains(ListeningPlacesFormat.episodeID(
                         guid: episode.guid, enclosureURL: episode.audioURL
                       )) else { continue }
-                Self.addRecord(
+                addRecord(
                     for: episode,
+                    deviceID: deviceID,
+                    journalValues: journalValues,
                     includeLabels: includeLabels,
                     now: now,
                     signatures: &signatures,
@@ -199,8 +202,10 @@ actor ListeningPlacesSnapshotLoader {
                     guid: episode.guid, enclosureURL: episode.audioURL
                   )) else { continue }
             inspectedCount += 1
-            Self.addRecord(
+            addRecord(
                 for: episode,
+                deviceID: deviceID,
+                journalValues: journalValues,
                 includeLabels: includeLabels,
                 now: now,
                 signatures: &signatures,
@@ -270,8 +275,10 @@ actor ListeningPlacesSnapshotLoader {
         return excluded
     }
 
-    private static func addRecord(
+    private func addRecord(
         for episode: Episode,
+        deviceID: String,
+        journalValues: [String: String],
         includeLabels: Bool,
         now: Date,
         signatures: inout [String: ListeningPlaceRecordSignature],
@@ -297,14 +304,39 @@ actor ListeningPlacesSnapshotLoader {
             label: label
         )
         let updatedAt: Date
-        if let previous = signatures[id],
-           previous.positionMilliseconds == candidate.positionMilliseconds,
-           previous.played == candidate.played {
-            updatedAt = updatedAtByID[id] ?? now
-        } else if let previous = updatedAtByID[id] {
-            updatedAt = max(now, previous.addingTimeInterval(1))
-        } else {
-            updatedAt = now
+        switch ListeningPlacesEventJournal.read(
+            for: episode, snapshotRawValues: journalValues
+        ) {
+        case .event(let event):
+            // A peer-imported place is never republished as a new local
+            // event. An existing owned row stays intact for older clients;
+            // the peer's own file already carries the newer fact.
+            guard event.sourceDeviceID == deviceID else { return }
+            // An older one-way file may have been stamped later than this
+            // durable event. Do not invent a still-later clock or replace
+            // that legacy row with an event that cannot outrank it safely.
+            if let previous = recordsByID[id], previous.updatedAt > event.updatedAt {
+                return
+            }
+            updatedAt = event.updatedAt
+        case .knownNoEvent:
+            return
+        case .unknownLegacy:
+            // A present but corrupt/stale/duplicate journal is unknown-origin
+            // and must not acquire a fresh export clock. Only a genuinely
+            // absent key retains the shipped one-way compatibility behavior.
+            guard !ListeningPlacesEventJournal.hasSnapshotValue(
+                for: episode, snapshotRawValues: journalValues
+            ) else { return }
+            if let previous = signatures[id],
+               previous.positionMilliseconds == candidate.positionMilliseconds,
+               previous.played == candidate.played {
+                updatedAt = updatedAtByID[id] ?? now
+            } else if let previous = updatedAtByID[id] {
+                updatedAt = max(now, previous.addingTimeInterval(1))
+            } else {
+                updatedAt = now
+            }
         }
         signatures[id] = candidate
         updatedAtByID[id] = updatedAt

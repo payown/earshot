@@ -9,6 +9,37 @@ import CryptoKit
 @MainActor
 final class SchemaDriftTests: XCTestCase {
 
+    /// Opens an untouched disposable store written by the exact signed build 335
+    /// schema through this candidate's normal migration path. The fixture lives
+    /// outside both the app container and any real library.
+    func testExact335FolderFixtureSurvivesCandidateOpenAndRestart() throws {
+        guard let raw = ProcessInfo.processInfo.environment["EXACT_335_FOLDER_FIXTURE_ROOT"]
+        else { throw XCTSkip("Exact-335 disposable fixture only") }
+        let source = URL(fileURLWithPath: raw, isDirectory: true)
+        let destination = FileManager.default.temporaryDirectory
+            .appending(path: "signed-335-folder-reopen-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        for file in try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) {
+            try FileManager.default.copyItem(at: file, to: destination.appending(path: file.lastPathComponent))
+        }
+        let store = destination.appending(path: "default.store")
+        func verify(_ container: ModelContainer) throws {
+            let context = ModelContext(container)
+            let folders = try context.fetch(FetchDescriptor<PodcastFolder>())
+            XCTAssertEqual(folders.count, 2)
+            XCTAssertEqual(Set(folders.map(\.name)), ["Same name"])
+            XCTAssertEqual(folders.map(\.sortOrder).sorted(), [1, 2])
+            XCTAssertEqual(folders.map { $0.memberships?.count ?? 0 }.sorted(), [1, 1])
+            XCTAssertEqual(
+                folders.flatMap { $0.memberships ?? [] }.map(\.sortOrder).sorted(),
+                [1, 2]
+            )
+        }
+        try autoreleasepool { try verify(StoreMigration.openOrMigrate(at: store)) }
+        try autoreleasepool { try verify(StoreMigration.openOrMigrate(at: store)) }
+    }
+
     /// The live model graph, kept in lockstep with the current V14 model lists.
     private static let liveModels: [any PersistentModel.Type] = [
         Podcast.self,

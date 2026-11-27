@@ -24,8 +24,49 @@ enum ListeningPlacesEventJournal {
 
     /// Missing or unreadable provenance is unknown, never assigned export time.
     static func read(for episode: Episode, in context: ModelContext) throws -> ListeningPlacesLocalPlace {
-        guard let key = key(for: episode),
-              let raw = try AppSettingIdentity.valueThrowing(for: key, in: context),
+        guard let key = key(for: episode) else { return .unknownLegacy }
+        let rows = try AppSettingIdentity.rows(for: key, in: context)
+        guard rows.count == 1 else { return .unknownLegacy }
+        return read(for: episode, rawValue: rows[0].value)
+    }
+
+    /// One indexed scan for the off-main exporter, avoiding one settings fetch
+    /// per episode in a large library. A duplicate is retained as an invalid
+    /// sentinel so export cannot mistake it for a genuinely legacy missing key.
+    static func snapshotRawValues(in context: ModelContext) throws -> [String: String] {
+        let prefix = keyPrefix
+        let rows = try context.fetch(FetchDescriptor<AppSetting>(predicate: #Predicate {
+            $0.key.starts(with: prefix)
+        }))
+        var values: [String: String] = [:]
+        var ambiguous = Set<String>()
+        for row in rows {
+            if values.updateValue(row.value, forKey: row.key) != nil {
+                ambiguous.insert(row.key)
+            }
+        }
+        for key in ambiguous { values[key] = "" }
+        return values
+    }
+
+    static func hasSnapshotValue(
+        for episode: Episode, snapshotRawValues: [String: String]
+    ) -> Bool {
+        guard let key = key(for: episode) else { return false }
+        return snapshotRawValues[key] != nil
+    }
+
+    static func read(
+        for episode: Episode, snapshotRawValues: [String: String]
+    ) -> ListeningPlacesLocalPlace {
+        guard let key = key(for: episode) else { return .unknownLegacy }
+        return read(for: episode, rawValue: snapshotRawValues[key])
+    }
+
+    private static func read(
+        for episode: Episode, rawValue: String?
+    ) -> ListeningPlacesLocalPlace {
+        guard let raw = rawValue,
               let stored = decode(raw) else { return .unknownLegacy }
         let currentPosition = ListeningPlacesFormat.milliseconds(episode.positionSeconds)
         guard stored.positionMilliseconds == currentPosition,

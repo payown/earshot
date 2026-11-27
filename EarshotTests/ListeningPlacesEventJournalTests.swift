@@ -104,6 +104,31 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
                        .unknownLegacy)
     }
 
+    func testBulkSnapshotTreatsDuplicateJournalKeysAsUnknown() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = ModelContext(container)
+        let (podcast, episode) = makeEpisode(position: 10)
+        context.insert(podcast)
+        context.insert(episode)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "1234abcd",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        try context.save()
+        let original = try XCTUnwrap(context.fetch(FetchDescriptor<AppSetting>()).first {
+            $0.key.hasPrefix("listening_places_event_v1:")
+        })
+        context.insert(AppSetting(key: original.key, value: "conflicting provenance"))
+        try context.save()
+        let values = try ListeningPlacesEventJournal.snapshotRawValues(in: context)
+        XCTAssertEqual(values[original.key], "")
+        XCTAssertEqual(ListeningPlacesEventJournal.read(
+            for: episode, snapshotRawValues: values
+        ), .unknownLegacy)
+        XCTAssertEqual(try ListeningPlacesEventJournal.read(for: episode, in: context),
+                       .unknownLegacy)
+    }
+
     func testPreSaveChangeInventorySeparatesMetadataFromPlaceMutation() throws {
         let container = try ModelContainerFactory.makeInMemory()
         let writer = ModelContext(container)
