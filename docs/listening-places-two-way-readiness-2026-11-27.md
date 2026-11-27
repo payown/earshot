@@ -81,7 +81,8 @@ The isolated foundation branch adds a bounded, read-only peer-file transport,
 tolerant episode/tombstone parser, and conservative subscription identity helper.
 It does not invoke the reader from the app or apply remote state. Its combined
 iOS 26.5 focused run on November 27 passed 24 tests with no failures or skips
-(`EarshotLPCombinedFocused20261127.xcresult` in local verification artifacts).
+on final code (`EarshotLPFinalFocused20261127.xcresult` in local verification
+artifacts).
 That result covers synthetic files and fixture agreement, not a 336 release.
 
 ## Verification before an internal two-way candidate
