@@ -108,9 +108,9 @@ peer event from triggering another application. The final eight-test planner
 run passed on iOS 26.5 (`EarshotLPIdempotenceAfter20261127.xcresult`); its
 pre-fix run failed exactly that repeat-import assertion.
 It does not invoke the reader from the app or apply remote state. Its combined
-iOS 26.5 focused run on November 27 passed 24 tests with no failures or skips
-on final code (`EarshotLPFinalFocused20261127.xcresult` in local verification
-artifacts).
+iOS 26.5 focused run on November 27 passed 32 tests with no failures or skips
+on final code (`EarshotLPFoundationFinal20261127.xcresult` in local verification
+artifacts). The earlier 24-test run preceded the idempotence addition.
 That result covers synthetic files and fixture agreement, not a 336 release.
 
 ## Verification before an internal two-way candidate
