@@ -105,4 +105,20 @@ final class ListeningPlacesFileTransportTests: XCTestCase {
                            Data("outside".utf8))
         }
     }
+
+    func testOtherDeviceReadExcludesExactOwnFileAcrossCaseVariants() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let devices = root.appending(path: "Listening Places/devices")
+        try FileManager.default.createDirectory(at: devices, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("own".utf8).write(to: devices.appending(path: "PHONE123.json"))
+        try Data("peer".utf8).write(to: devices.appending(path: "phone123-other.json"))
+        let bookmark = try root.bookmarkData(options: .minimalBookmark,
+                                             includingResourceValuesForKeys: nil, relativeTo: nil)
+        let result = try await ListeningPlacesFileTransport().readOtherDeviceFiles(
+            bookmarkData: bookmark, excludingDeviceID: "phone123"
+        )
+        XCTAssertEqual(result.files.map(\.fileName), ["phone123-other.json"],
+                       "Only the same whole device filename is excluded, not similarly prefixed peers")
+    }
 }

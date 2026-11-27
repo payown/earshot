@@ -127,7 +127,8 @@ actor ListeningPlacesFileTransport {
             for url in candidates.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                 try Task.checkCancellation()
                 let name = url.lastPathComponent
-                guard name.hasSuffix(".json"), name != "\(ownDeviceID).json" else { continue }
+                guard name.hasSuffix(".json"),
+                      name.caseInsensitiveCompare("\(ownDeviceID).json") != .orderedSame else { continue }
                 guard Self.safeDeviceFileName(name) else {
                     skipped.append(.init(fileName: nil, reason: .invalidName))
                     continue
@@ -187,7 +188,7 @@ actor ListeningPlacesFileTransport {
                 // between enumeration and the coordinated read.
                 let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
                 guard values.isSymbolicLink != true, values.isDirectory != true else { return }
-                let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+                let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
                 guard descriptor >= 0 else { return }
                 let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
                 defer { try? handle.close() }
