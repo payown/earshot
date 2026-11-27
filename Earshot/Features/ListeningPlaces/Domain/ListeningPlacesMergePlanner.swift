@@ -58,6 +58,12 @@ enum ListeningPlacesMergePlanner {
             )
         }
         guard let newest = candidates.max(by: precedes) else { return .keepLocal }
+        // One device must not publish two incompatible facts for the same ID
+        // and event time. A file-order choice here could delete a valid place.
+        guard !candidates.contains(where: {
+            $0.sourceDeviceID == newest.sourceDeviceID
+                && $0.updatedAt == newest.updatedAt && $0 != newest
+        }) else { return .keepLocal }
         if case .event(let current) = local, newest.updatedAt < current.updatedAt {
             return .keepLocal
         }

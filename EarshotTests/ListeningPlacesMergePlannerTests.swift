@@ -53,6 +53,13 @@ final class ListeningPlacesMergePlannerTests: XCTestCase {
         XCTAssertEqual(decide(.event(local), [incoming]), .keepLocal)
     }
 
+    func testConflictingSameDeviceSameTimeRowsFailClosed() {
+        let first = remote(position: 100, time: 20, device: "desktop")
+        let second = remote(position: 200, time: 20, device: "desktop")
+        XCTAssertEqual(decide(.knownNoEvent, [first, second]), .keepLocal)
+        XCTAssertEqual(decide(.knownNoEvent, [second, first]), .keepLocal)
+    }
+
     private func decide(_ local: ListeningPlacesLocalPlace, _ remotes: [ListeningPlacesRemoteEvent],
                         loaded: Bool = false) -> ListeningPlacesMergeDecision {
         ListeningPlacesMergePlanner.decide(id: id, local: local, remote: remotes, isLoaded: loaded)

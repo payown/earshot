@@ -40,7 +40,13 @@ it is not a claim that two-way sync or subscriptions are available in 335.
    after a newer desktop event. `Episode` has no durable general position or
    reset time when iCloud is off. Legacy unknown-time state must not gain an
    invented timestamp. Any new clock needs crash-between-saves and relaunch
-   tests before an import is enabled.
+   tests before an import is enabled. A device-local sidecar prototype did
+   survive relaunch and reject a single missed update, but a disposable
+   A → B → A test showed its state signature could match an old timestamp
+   again after two missed updates. The prototype was removed from the
+   candidate branch; its failing diagnostic is retained locally. A clock
+   needs enforced coverage of every producer or an atomic persisted revision,
+   not just a signature comparison.
 2. **Latest-event position.** A deliberate newer backward seek must win. The
    current iCloud projection normally takes the maximum eligible position,
    so passing a desktop record into it unchanged would not implement this
