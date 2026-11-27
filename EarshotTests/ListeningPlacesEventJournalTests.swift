@@ -382,6 +382,74 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
         XCTAssertEqual(event(in: context, episode: episode), peer)
     }
 
+    func testParsedPeerBackwardSeekDefersLoadedRowThenPersistsOriginalClock() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = ModelContext(container)
+        let (podcast, episode) = makeEpisode(position: 60)
+        let other = Episode(guid: "unrelated", title: "Other",
+                            audioURL: "https://example.com/other.mp3",
+                            positionSeconds: 31)
+        other.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        context.insert(other)
+        let localTime = Date(timeIntervalSince1970: 1_000)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "phone", now: localTime
+        )
+        try context.save()
+        let id = ListeningPlacesFormat.episodeID(
+            guid: episode.guid, enclosureURL: episode.audioURL
+        )
+        let peerTime = Date(timeIntervalSince1970: 1_200)
+        let file = try ListeningPlacesFormat.encodedDeviceFile(
+            deviceID: "desktop", appVersion: "quill/test", writtenAt: peerTime,
+            records: [ListeningPlaceRecord(
+                id: id, kind: "episode", positionMilliseconds: 12_000,
+                durationMilliseconds: nil, played: false, updatedAt: peerTime,
+                label: nil, feed: nil, deleted: nil
+            )]
+        )
+        let parsed = try ListeningPlacesInboundParser.parse(
+            data: file, now: peerTime.addingTimeInterval(1)
+        )
+        let remote = parsed.entries.map {
+            ListeningPlacesRemoteEvent(deviceID: parsed.deviceID, entry: $0)
+        }
+        let local = try ListeningPlacesEventJournal.read(for: episode, in: context)
+        let held = ListeningPlacesMergePlanner.decide(
+            id: id, local: local, remote: remote, isLoaded: true
+        )
+        guard case .deferLoaded(let event) = held else {
+            return XCTFail("loaded episode must not be mutated")
+        }
+        XCTAssertEqual(episode.positionSeconds, 60)
+        XCTAssertEqual(event.updatedAt, peerTime)
+        let released = ListeningPlacesMergePlanner.decide(
+            id: id, local: local, remote: remote, isLoaded: false
+        )
+        XCTAssertEqual(released, .apply(event))
+        episode.positionSeconds = event.positionMilliseconds / 1_000
+        episode.isPlayed = event.played
+        try ListeningPlacesEventJournal.stagePeerEvent(event, for: episode, in: context)
+        try context.save()
+
+        let fresh = ModelContext(container)
+        let saved = try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first {
+            $0.guid == "episode-1"
+        })
+        XCTAssertEqual(saved.positionSeconds, 12)
+        XCTAssertEqual(try ListeningPlacesEventJournal.read(for: saved, in: fresh),
+                       .event(event))
+        let unrelated = try fresh.fetch(FetchDescriptor<Episode>()).first {
+            $0.guid == "unrelated"
+        }
+        XCTAssertEqual(unrelated?.positionSeconds, 31)
+        XCTAssertEqual(ListeningPlacesMergePlanner.decide(
+            id: id, local: .event(event), remote: remote, isLoaded: false
+        ), .keepLocal)
+    }
+
     func testRapidMutationsAdvanceClockWithinOneSecond() throws {
         let container = try ModelContainerFactory.makeInMemory()
         let context = ModelContext(container)

@@ -384,3 +384,20 @@ graph, create a new versioned model, and migrate a copy of this disposable
 fixture with identity, membership, restart and rollback assertions before it
 can be considered for production. No folder receiver activation or build 336
 is justified by the current evidence.
+
+### Playback round-trip boundary
+
+A disposable test now composes a peer file, parses it, decides a newer
+backward seek, defers while the target episode is loaded, and then stages
+the peer position and original event clock in the same local save. A fresh
+context reads the original clock and position, an unrelated episode remains
+unchanged, and replaying the same peer row is idempotent. The focused test
+passed 1/1 (`EarshotLPParsedPeerAtomic20261127.xcresult`). The test explicitly
+performs the apply step after releasing the loaded row; no normal app
+coordinator calls this path yet. It therefore tests the proposed persistence
+boundary, not physical playback, provider delivery, or receiver activation.
+An initial whole-suite run exposed nondeterministic fetch order in this new
+test's two-episode fixture (`EarshotLPJournalPeerRoundtrip20261127.xcresult`).
+The lookup now selects the target GUID explicitly; the corrected full
+event-journal suite passed 17/17, zero skips or failures
+(`EarshotLPJournalPeerRoundtripFixed20261127.xcresult`).
