@@ -615,4 +615,58 @@ that limitation and any failure to be clearly communicated. Its new status
 text is still Debug-only and requires spoken-semantics approval before use in
 Settings. The adjacent suite and pinned cross-app fixture results are
 recorded separately from migration because the branches are not integrated.
-This Debug-only experiment is on local head `dd3c7c02`.
+The initial scrub experiment was `dd3c7c02`; the subsequent pending-status
+test and presentation are on local head `2fd32924`.
+
+### Split-store, iCloud, and stopping-sharing review
+
+Source review confirmed the production application store uses two local
+SwiftData configurations, even when the signed app enables iCloud Sync:
+`CloudKitLaunchPolicy.mirroredDatabase()` returns `.none`. A separate compact
+`CloudProjection` configuration uses the private iCloud container. The first
+V15 CloudProjection probe crashed because its disposable app-store helpers
+still constructed the frozen V14 graph while inserting live V15 model types;
+SwiftData reported failed casts for `Episode` and `PodcastFolder`. Updating
+both in-memory and on-disk current-schema test helpers to V15 removed that
+test-container mismatch. On the revised isolated V15 source, historical
+schema fingerprints, copied signed-335 normal open/restart, V6/V11/V12/V13
+upgrade routes, CloudKit launch policy and nested/cyclic folder projection
+checks passed together **19/19**, no skips or failures
+(`EarshotV15FinalFocused20261127.xcresult`, local head `2023b1c1`). The failing diagnostics remain
+as evidence and are not counted as passes.
+
+This does not establish cross-device folder identity. The separate
+`CloudFolderProjection.folderID` is already a stable UUID, but current
+reconciliation associates local folders by creation time and does not map that
+cloud UUID to the proposed `PodcastFolder.listeningPlacesExternalID`. A
+second Earshot device could therefore choose a different external ID for the
+same iCloud folder. The local migration probe remains separate until a
+reviewed identity rule, full migration/interruption and projection regression,
+and actual signed-configuration tests pass. No migration or folder importer
+has been added to the 336 candidate.
+
+For an explicit **Stop Sharing and Remove This Device** request, the existing
+service invalidates new writes before awaiting an older write and then
+removes only its owned file. The Debug-only lifecycle probe now displays
+“Stopping sharing. Removing only this device's file.” through the existing
+VoiceOver status label while that operation is held, and disables duplicate
+Stop/Write Now controls until it finishes. Successful removal becomes the
+existing unconfigured state; an external file change still fails without
+overwriting it. The focused held-write and late-revocation tests passed 2/2
+(`EarshotLPStoppingSharingStatus20261127.xcresult`). Its final adjacent
+service/exchange suite, including the pinned QUILL peer cases, passed 68/68
+without skips or failures (`EarshotLPStoppingSharingFinal20261127.xcresult`).
+The late provider-write
+CAS path keeps a failure visible if an owned-only scrub cannot complete; it
+never overwrites another own-file edit or touches a peer file. The precise
+new spoken pending wording needs Michael's sign-off before product use, and
+the normal app still has no two-way subscription caller or per-feed consent UI.
+
+**Safe morning handoff:** the copied-335 fixture test demonstrates two
+same-name folders retaining distinct external IDs and order after normal
+V15 open/restart; the pinned QUILL fixture tests demonstrate synthetic
+follow/unfollow, folder metadata preservation, owned-file-only edits and
+late privacy withdrawal. These are executable data-layer demonstrations,
+not a VoiceOver app flow or an installable two-way build. Do not reset or
+reinstall a real library to show them. Keep signed 335 available; 336 remains
+unbuilt until the full safety matrix and physical provider checks pass.
