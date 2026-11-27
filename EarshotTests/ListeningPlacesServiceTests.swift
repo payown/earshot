@@ -1016,6 +1016,8 @@ final class ListeningPlacesServiceTests: XCTestCase {
         episode.podcast = podcast
         context.insert(podcast)
         context.insert(episode)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: podcast.feedURL, in: context)
         try context.save()
 
         let service = ListeningPlacesService()
@@ -1053,6 +1055,91 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertEqual(LocalAppSettingIdentity.value(
             for: "listening_places_disposable_stop_pending_v1", in: ModelContext(container)
         ), "false")
+        reopened.releasePersistence()
+    }
+
+    func testDisposableStopIntentSurvivesHeldProviderAndFreshContext() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-held-stop-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mirroredURL = directory.appending(path: "synthetic-app.sqlite")
+        let localURL = directory.appending(path: "synthetic-local.sqlite")
+        func openStore() throws -> ModelContainer {
+            try ModelContainer(
+                for: Schema(versionedSchema: EarshotSchemaV14.self),
+                configurations:
+                    ModelConfiguration("FutureMirrored",
+                        schema: Schema(EarshotSchemaV14.mirroredModels),
+                        url: mirroredURL, cloudKitDatabase: .none),
+                    ModelConfiguration("DeviceLocal",
+                        schema: Schema(EarshotSchemaV14.localModels),
+                        url: localURL, cloudKitDatabase: .none)
+            )
+        }
+        let container = try openStore()
+        let context = container.mainContext
+        let podcast = Podcast(feedURL: "https://example.invalid/held.xml", title: "Synthetic")
+        let episode = Episode(guid: "held", title: "Synthetic episode",
+            audioURL: "https://example.invalid/held.mp3", positionSeconds: 42)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: podcast.feedURL, in: context)
+        try context.save()
+        let writer = SuspendedObservedListeningPlacesWriter()
+        let service = ListeningPlacesService(replaceObservedDeviceFile: {
+            bookmark, deviceID, expected, data in
+            try await writer.replace(bookmark: bookmark, deviceID: deviceID,
+                expected: expected, data: data)
+        })
+        service.useDisposablePlaybackDemoForTesting()
+        service.configure(context: context)
+        await service.chooseFolder(directory)
+        let peerPath = directory.appending(path: "Listening Places/devices/desktopfixture.json")
+        let peer = Data("synthetic peer unchanged".utf8)
+        try peer.write(to: peerPath)
+
+        await writer.holdNextWrite()
+        let write = Task { await service.setIncludeLabels(true) }
+        await writer.waitUntilSuspended()
+        let disabling = Task { await service.setEnabled(false) }
+        for _ in 0..<100 where !service.isSharingStopPendingForTesting {
+            await Task.yield()
+        }
+        XCTAssertTrue(service.isSharingStopPendingForTesting)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: SettingsKey.listeningPlacesEnabled, in: ModelContext(container)
+        ), "false", "The stop intent must precede a delayed provider replacement")
+
+        let reopenedStore = try openStore()
+        let freshContext = ModelContext(reopenedStore)
+        let reopened = ListeningPlacesService()
+        reopened.useDisposablePlaybackDemoForTesting()
+        reopened.configure(context: freshContext)
+        XCTAssertFalse(reopened.enabled)
+        XCTAssertTrue(reopened.isSharingStopPendingForTesting)
+        guard case .failed = reopened.status else {
+            return XCTFail("A fresh context must expose pending cleanup")
+        }
+        await reopened.setEnabled(true)
+        XCTAssertFalse(reopened.enabled)
+
+        // Model an interrupted app owner: its already-started provider write
+        // completes, but its generation can no longer acknowledge Off. The
+        // fresh owner scrubs only its file and clears the durable marker.
+        service.releasePersistence()
+        await writer.resumeWrite()
+        await write.value
+        await disabling.value
+        await reopened.setEnabled(false)
+        XCTAssertEqual(reopened.status, .off)
+        XCTAssertFalse(reopened.isSharingStopPendingForTesting)
+        let owned = try Data(contentsOf: deviceFile(in: directory))
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: owned) as? [String: Any])
+        XCTAssertTrue(try XCTUnwrap(root["records"] as? [[String: Any]]).isEmpty)
+        XCTAssertEqual(try Data(contentsOf: peerPath), peer)
         reopened.releasePersistence()
     }
 
@@ -1202,11 +1289,13 @@ final class ListeningPlacesServiceTests: XCTestCase {
             context.insert(episode)
             episodes.append(episode)
         }
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
             for: feeds[0], in: context)
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
             for: feeds[4], in: context)
         try ListeningPlacesFeedPrivacy.stageDeviceOnly(feedURL: feeds[4], in: context)
+        try LocalAppSettingIdentity.setValue("approved",
+            for: ListeningPlacesPublicFeedApproval.key(feeds[1]), in: context)
         try context.save()
         let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
         let prepared = try await loader.prepare(
@@ -1220,6 +1309,35 @@ final class ListeningPlacesServiceTests: XCTestCase {
         )])
         XCTAssertEqual(episodes.map(\.positionSeconds), [10, 10, 10, 10, 10],
             "Fail-closed staging must not mutate the local library")
+    }
+
+    func testNativeWriterFailsClosedWithoutPublicProvenance() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-native-provenance-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let context = container.mainContext
+        let podcast = Podcast(feedURL: "https://example.invalid/unknown.xml", title: "Synthetic")
+        let episode = Episode(guid: "native-unknown", title: "Synthetic episode",
+            audioURL: "https://example.invalid/unknown.mp3", positionSeconds: 25)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try context.save()
+
+        let service = ListeningPlacesService()
+        service.configure(context: context)
+        await service.chooseFolder(directory)
+        await service.writeNow()
+        let devices = directory.appending(path: "Listening Places/devices", directoryHint: .isDirectory)
+        let files = try FileManager.default.contentsOfDirectory(
+            at: devices, includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+        XCTAssertTrue(files.isEmpty,
+            "Without public proof, the native writer must not create a shared episode file")
+        XCTAssertEqual(episode.positionSeconds, 25)
+        service.releasePersistence()
     }
 
     func testOwnedSnapshotNeverAddsCredentialBearingEpisodePlace() async throws {
@@ -1430,6 +1548,8 @@ final class ListeningPlacesServiceTests: XCTestCase {
         episode.podcast = podcast
         context.insert(podcast)
         context.insert(episode)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: feed, in: context)
         try context.save()
         let writer = SuspendedObservedListeningPlacesWriter()
         let service = ListeningPlacesService(replaceObservedDeviceFile: {
@@ -1529,7 +1649,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let container = try makeContainer()
-        let podcast = Podcast(feedURL: "https://private.example/feed", title: "Private Show")
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Private Show")
         let episode = Episode(
             guid: "episode-guid",
             title: "Private Episode",
@@ -1789,7 +1909,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let container = try makeContainer()
-        let podcast = Podcast(feedURL: "https://private.example/feed", title: "Private Show")
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Private Show")
         let episode = Episode(guid: "privacy-guid", title: "Private Episode",
                               audioURL: "https://private.example/audio.mp3",
                               durationSeconds: 600, positionSeconds: 60)
@@ -1886,7 +2006,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let container = try makeContainer()
-        let podcast = Podcast(feedURL: "https://private.example/feed", title: "Private Show")
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Private Show")
         let episode = Episode(guid: "feed-privacy-guid", title: "Episode",
                               audioURL: "https://private.example/audio.mp3",
                               durationSeconds: 600, positionSeconds: 60)
@@ -2137,7 +2257,7 @@ final class ListeningPlacesServiceTests: XCTestCase {
 
     private func makeContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV14.self)
-        return try ModelContainer(
+        let container = try ModelContainer(
             for: full,
             configurations:
                 ModelConfiguration(
@@ -2153,6 +2273,18 @@ final class ListeningPlacesServiceTests: XCTestCase {
                     cloudKitDatabase: .none
                 )
         )
+        // Existing writer/transport tests use this reserved feed as their
+        // public fixture. The app never infers approval from a URL alone.
+        for feed in [
+            "https://example.com/feed",
+            "https://example.com/local-show",
+            "https://example.com/foreign-guard",
+        ] {
+            try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+                for: feed, in: container.mainContext)
+        }
+        try container.mainContext.save()
+        return container
     }
 }
 

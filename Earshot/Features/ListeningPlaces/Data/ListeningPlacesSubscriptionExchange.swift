@@ -306,18 +306,69 @@ enum ListeningPlacesSubscriptionExchange {
     }
 }
 
-/// Until a product UI can obtain and revoke per-feed disclosure consent, a
-/// missing/ambiguous local approval keeps subscription URLs out of the plain
-/// shared file and prevents automatic follows of peer-provided addresses.
-/// This is device-local and carries only a hash, never a feed URL or password.
+/// A local eligibility marker requires a verified directory identity and an
+/// anonymous, non-redirected feed response for that exact URL. Current normal
+/// feed fetching does not retain this evidence, so no production path stages
+/// one. URL spelling, a generic successful fetch, and legacy approvals cannot
+/// turn sharing on. This local marker stores only a hash, never a feed URL.
 enum ListeningPlacesPublicFeedApproval {
-    private static let prefix = "listening_places_public_feed_approval_v1:"
+    private static let prefix = "listening_places_public_feed_approval_v2:"
+    private static let verifiedValue = "apple-directory-exact-anonymous-v2"
+
+    struct Evidence: Sendable {
+        enum Origin: Sendable { case appleITunesDirectory, userEntered, opml, genericFetch, unknown }
+        enum Access: Sendable { case provenAnonymous, usedCredentialsOrCookies, unknown }
+
+        let origin: Origin
+        let directoryResponseURL: String?
+        let directoryFeedURL: String?
+        let requestedFeedURL: String
+        let resolvedFeedURL: String?
+        let redirectCount: Int?
+        let access: Access
+        let hasStoredCredentials: Bool?
+        let deviceOnly: Bool
+    }
 
     static func key(_ feedURL: String) -> String {
-        let canonical = ListeningPlacesSubscriptionIdentity.canonicalURL(feedURL) ?? feedURL
-        let hash = SHA256.hash(data: Data(canonical.utf8))
+        // No canonical aliasing: an approved URL cannot grant a different
+        // trailing slash, query spelling, scheme or redirected destination.
+        let exact = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hash = SHA256.hash(data: Data(exact.utf8))
             .map { String(format: "%02x", $0) }.joined()
         return prefix + hash
+    }
+
+    static func eligibleFeedURL(_ evidence: Evidence) -> String? {
+        guard case .appleITunesDirectory = evidence.origin,
+              case .provenAnonymous = evidence.access,
+              evidence.hasStoredCredentials == false,
+              !evidence.deviceOnly,
+              evidence.redirectCount == 0,
+              let directoryResponseURL = evidence.directoryResponseURL,
+              let directoryFeedURL = evidence.directoryFeedURL,
+              let resolvedFeedURL = evidence.resolvedFeedURL,
+              let directory = URLComponents(string: directoryResponseURL),
+              directory.scheme?.lowercased() == "https",
+              directory.host?.lowercased() == "itunes.apple.com",
+              directory.port == nil || directory.port == 443,
+              directory.user == nil, directory.password == nil,
+              directory.path == "/search" || directory.path == "/lookup"
+        else { return nil }
+
+        let requested = evidence.requestedFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Require the directory, requested and *final response* identity to
+        // match byte-for-byte. A URLSession response alone does not reveal its
+        // redirect chain; absent redirect evidence remains ineligible.
+        guard !requested.isEmpty, directoryFeedURL == requested,
+              resolvedFeedURL == requested,
+              let feed = URLComponents(string: requested),
+              feed.scheme?.lowercased() == "https", feed.host != nil,
+              feed.user == nil, feed.password == nil,
+              feed.query == nil, feed.fragment == nil,
+              ListeningPlacesSubscriptionIdentity.shareableID(requested) != nil
+        else { return nil }
+        return requested
     }
 
     static func approvedKeys(in context: ModelContext) throws -> Set<String> {
@@ -327,16 +378,33 @@ enum ListeningPlacesPublicFeedApproval {
         }))
         let grouped = Dictionary(grouping: rows, by: \.key)
         return Set(grouped.compactMap { key, values in
-            values.count == 1 && values[0].value == "approved" ? key : nil
+            values.count == 1 && values[0].value == verifiedValue ? key : nil
         })
     }
 
     #if DEBUG
-    static func stageDisposableApproval(for feedURL: String, in context: ModelContext) throws {
-        guard ListeningPlacesSubscriptionIdentity.shareableID(feedURL) != nil else {
+    static func stageVerifiedDirectoryEvidence(_ evidence: Evidence, in context: ModelContext) throws {
+        guard let feedURL = eligibleFeedURL(evidence) else {
             throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
         }
-        try LocalAppSettingIdentity.setValue("approved", for: key(feedURL), in: context)
+        try LocalAppSettingIdentity.setValue(verifiedValue, for: key(feedURL), in: context)
+    }
+
+    /// XCTest and the isolated in-memory screen only. These reserved domains
+    /// never contact a directory or feed and cannot approve a live address.
+    static func stageSyntheticDirectoryFixture(for feedURL: String, in context: ModelContext) throws {
+        let host = URLComponents(string: feedURL)?.host?.lowercased()
+        guard host == "example.com" || host == "example.invalid" else {
+            throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+        }
+        try stageVerifiedDirectoryEvidence(Evidence(
+            origin: .appleITunesDirectory,
+            directoryResponseURL: "https://itunes.apple.com/search?media=podcast",
+            directoryFeedURL: feedURL, requestedFeedURL: feedURL,
+            resolvedFeedURL: feedURL, redirectCount: 0,
+            access: .provenAnonymous, hasStoredCredentials: false,
+            deviceOnly: false
+        ), in: context)
     }
     #endif
 }

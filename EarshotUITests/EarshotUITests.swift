@@ -23,6 +23,8 @@ final class EarshotUITests: XCTestCase {
         let ready = NSPredicate(format: "label CONTAINS %@", "Ready. Loaded rewind")
         expectation(for: ready, evaluatedWith: demoStatus)
         waitForExpectations(timeout: 15)
+        XCTAssertTrue(demoStatus.label.contains("Public places 2. Blocked sensitive or unverified places 4."),
+            demoStatus.label)
         let sync = app.buttons["Sync synthetic peer place"].firstMatch
         XCTAssertTrue(sync.waitForExistence(timeout: 15), app.debugDescription)
         sync.tap()

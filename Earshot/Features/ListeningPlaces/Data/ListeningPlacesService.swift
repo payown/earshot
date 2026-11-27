@@ -1045,11 +1045,6 @@ final class ListeningPlacesService {
             let loader = await ListeningPlacesSnapshotLoader.makeBackground(
                 modelContainer: context.container
             )
-            #if DEBUG
-            let requirePublicApproval = ScreenshotHarness.isListeningPlacesPlaybackDemo
-            #else
-            let requirePublicApproval = false
-            #endif
             let prepared = try await loader.prepare(
                 pendingZeroSnapshots: Array(capturedPendingZeroSnapshots.values),
                 includeLabels: capturedIncludeLabels,
@@ -1058,7 +1053,10 @@ final class ListeningPlacesService {
                 previousUpdatedAtByID: capturedUpdatedAtByID,
                 deviceID: capturedDeviceID,
                 appVersion: "earshot/\(AppInfo.version)",
-                requirePublicApproval: requirePublicApproval,
+                // Normal publishing has no trusted directory/anonymous-fetch
+                // provenance producer yet. Fail closed for every entry point,
+                // including manual Write Now and scheduled refreshes.
+                requirePublicApproval: true,
                 verifyLegacyRecordAttribution: !hasVerifiedPriorRecordAttribution
             )
             // Another waiter may have started a write while this snapshot was

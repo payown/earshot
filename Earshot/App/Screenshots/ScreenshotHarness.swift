@@ -262,6 +262,12 @@ actor FeedRetryScreenshotFeed: FeedFetching {
 struct ListeningPlacesPlaybackDemoControls: View {
     @MainActor private static var directory: URL?
     private static let feed = "https://example.invalid/playback-demo.xml"
+    private static let blockedFeeds: [(feed: String, guid: String)] = [
+        ("https://example.invalid/private.xml?token=synthetic", "synthetic-private"),
+        ("https://example.invalid/redirect.xml", "synthetic-redirect"),
+        ("https://example.invalid/unknown.xml", "synthetic-unknown"),
+        ("https://example.invalid/device-only.xml", "synthetic-device-only"),
+    ]
 
     @Environment(\.modelContext) private var context
     @Environment(ListeningPlacesService.self) private var service
@@ -324,8 +330,44 @@ struct ListeningPlacesPlaybackDemoControls: View {
                     of: loaded, in: context, deviceID: deviceID, now: earlier)
                 try ListeningPlacesEventJournal.stageLocalMutation(
                     of: idle, in: context, deviceID: deviceID, now: earlier)
-                try ListeningPlacesPublicFeedApproval.stageDisposableApproval(
+                try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
                     for: show.feedURL, in: context)
+                for fixture in Self.blockedFeeds {
+                    let blockedShow = Podcast(feedURL: fixture.feed, title: "Blocked synthetic feed")
+                    let blockedEpisode = Episode(guid: fixture.guid, title: "Blocked synthetic place",
+                        audioURL: "https://example.invalid/\(fixture.guid).mp3", positionSeconds: 10)
+                    blockedEpisode.podcast = blockedShow
+                    context.insert(blockedShow)
+                    context.insert(blockedEpisode)
+                }
+                let privateFeed = Self.blockedFeeds[0].feed
+                let redirectedFeed = Self.blockedFeeds[1].feed
+                let directoryURL = "https://itunes.apple.com/search?media=podcast"
+                guard ListeningPlacesPublicFeedApproval.eligibleFeedURL(.init(
+                    origin: .appleITunesDirectory, directoryResponseURL: directoryURL,
+                    directoryFeedURL: privateFeed, requestedFeedURL: privateFeed,
+                    resolvedFeedURL: privateFeed, redirectCount: 0,
+                    access: .provenAnonymous, hasStoredCredentials: false,
+                    deviceOnly: false
+                )) == nil,
+                ListeningPlacesPublicFeedApproval.eligibleFeedURL(.init(
+                    origin: .appleITunesDirectory, directoryResponseURL: directoryURL,
+                    directoryFeedURL: redirectedFeed, requestedFeedURL: redirectedFeed,
+                    resolvedFeedURL: "https://example.invalid/resolved.xml",
+                    redirectCount: 1, access: .provenAnonymous,
+                    hasStoredCredentials: false, deviceOnly: false
+                )) == nil else {
+                    throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+                }
+                // A formerly accepted marker cannot silently approve an
+                // unknown feed after the positive-provenance version change.
+                try LocalAppSettingIdentity.setValue("approved",
+                    for: ListeningPlacesPublicFeedApproval.key(Self.blockedFeeds[2].feed),
+                    in: context)
+                try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+                    for: Self.blockedFeeds[3].feed, in: context)
+                try ListeningPlacesFeedPrivacy.stageDeviceOnly(
+                    feedURL: Self.blockedFeeds[3].feed, in: context)
                 try ListeningPlacesSubscriptionTestCoordinator.stagePolicy(.init(), in: context)
                 try ListeningPlacesSubscriptionTestCoordinator.stageEpisodeImportForTesting(in: context)
                 try context.save()
@@ -339,8 +381,32 @@ struct ListeningPlacesPlaybackDemoControls: View {
             }
             guard let directory = Self.directory else { return }
             if service.folderName == nil { await service.chooseFolder(directory) }
+            if service.enabled {
+                let deviceID = AppSettingsStore(context: context).rawValue(
+                    SettingsKey.listeningPlacesDeviceID) ?? "phone123"
+                let bookmark = try directory.bookmarkData(options: .minimalBookmark,
+                    includingResourceValuesForKeys: nil, relativeTo: nil)
+                guard let own = try await service.disposableTransportForTesting.readDeviceFile(
+                    bookmarkData: bookmark, deviceID: deviceID),
+                      let root = try JSONSerialization.jsonObject(with: own) as? [String: Any],
+                      let records = root["records"] as? [[String: Any]] else {
+                    throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+                }
+                let ids = Set(records.compactMap { $0["id"] as? String })
+                let publicIDs = [loaded, idle].map {
+                    ListeningPlacesFormat.episodeID(guid: $0.guid, enclosureURL: $0.audioURL)
+                }
+                let blockedIDs = Self.blockedFeeds.map {
+                    ListeningPlacesFormat.episodeID(guid: $0.guid,
+                        enclosureURL: "https://example.invalid/\($0.guid).mp3")
+                }
+                guard publicIDs.allSatisfy(ids.contains),
+                      blockedIDs.allSatisfy({ !ids.contains($0) }) else {
+                    throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+                }
+            }
             status = service.enabled
-                ? "Ready. Loaded rewind stays at 12 seconds; idle progress starts at 20 seconds."
+                ? "Ready. Loaded rewind stays at 12 seconds; idle progress starts at 20 seconds. Public places 2. Blocked sensitive or unverified places 4."
                 : "Sharing is off. Turn on Share listening places to try the synthetic sync."
         } catch {
             context.rollback()

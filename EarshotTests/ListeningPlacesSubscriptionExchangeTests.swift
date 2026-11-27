@@ -9,6 +9,65 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
     private let older = Date(timeIntervalSince1970: 1_700_000_000)
     private let newer = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testPublicProvenanceRequiresExactAnonymousDirectoryResolution() throws {
+        typealias Evidence = ListeningPlacesPublicFeedApproval.Evidence
+        func evidence(
+            origin: Evidence.Origin = .appleITunesDirectory,
+            directoryResponseURL: String? = "https://itunes.apple.com/search?media=podcast",
+            directoryFeedURL: String? = "https://example.com/public.xml",
+            requestedFeedURL: String = "https://example.com/public.xml",
+            resolvedFeedURL: String? = "https://example.com/public.xml",
+            redirectCount: Int? = 0,
+            access: Evidence.Access = .provenAnonymous,
+            hasStoredCredentials: Bool? = false,
+            deviceOnly: Bool = false
+        ) -> Evidence {
+            Evidence(origin: origin, directoryResponseURL: directoryResponseURL,
+                directoryFeedURL: directoryFeedURL, requestedFeedURL: requestedFeedURL,
+                resolvedFeedURL: resolvedFeedURL, redirectCount: redirectCount,
+                access: access, hasStoredCredentials: hasStoredCredentials,
+                deviceOnly: deviceOnly)
+        }
+
+        XCTAssertEqual(ListeningPlacesPublicFeedApproval.eligibleFeedURL(evidence()), feed)
+        let rejected = [
+            evidence(origin: .userEntered), evidence(origin: .opml),
+            evidence(origin: .genericFetch), evidence(origin: .unknown),
+            evidence(directoryResponseURL: "https://other.example/search"),
+            evidence(directoryResponseURL: nil),
+            evidence(directoryFeedURL: nil),
+            evidence(directoryFeedURL: "https://example.com/alias.xml"),
+            evidence(requestedFeedURL: "https://example.com/public.xml/"),
+            evidence(resolvedFeedURL: "https://example.com/redirected.xml", redirectCount: 1),
+            evidence(resolvedFeedURL: nil), evidence(redirectCount: nil),
+            evidence(access: .usedCredentialsOrCookies), evidence(access: .unknown),
+            evidence(hasStoredCredentials: true), evidence(hasStoredCredentials: nil),
+            evidence(deviceOnly: true),
+            evidence(directoryFeedURL: "https://example.com/private.xml?token=synthetic",
+                requestedFeedURL: "https://example.com/private.xml?token=synthetic",
+                resolvedFeedURL: "https://example.com/private.xml?token=synthetic"),
+        ]
+        for item in rejected {
+            XCTAssertNil(ListeningPlacesPublicFeedApproval.eligibleFeedURL(item))
+        }
+
+        let context = TestStore.freshContext()
+        try LocalAppSettingIdentity.setValue("approved",
+            for: ListeningPlacesPublicFeedApproval.key(feed), in: context)
+        try LocalAppSettingIdentity.setValue("approved",
+            for: "listening_places_public_feed_approval_v1:synthetic", in: context)
+        try context.save()
+        XCTAssertTrue(try ListeningPlacesPublicFeedApproval.approvedKeys(in: context).isEmpty,
+            "Legacy and ambiguous markers must not become positive public proof")
+        try ListeningPlacesPublicFeedApproval.stageVerifiedDirectoryEvidence(evidence(), in: context)
+        try context.save()
+        XCTAssertEqual(try ListeningPlacesPublicFeedApproval.approvedKeys(in: context),
+            [ListeningPlacesPublicFeedApproval.key(feed)])
+        XCTAssertNotEqual(ListeningPlacesPublicFeedApproval.key(feed),
+            ListeningPlacesPublicFeedApproval.key(feed + "/"),
+            "An approved feed cannot grant a URL alias")
+    }
+
     private func emptyFile() throws -> Data {
         try ListeningPlacesFormat.encodedDeviceFile(
             deviceID: "phone123", appVersion: "earshot/1.3.1",
@@ -50,7 +109,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             episodeFile: original, context: context,
             policy: .init(shareSubscriptions: true)
         )).count, episodeRows.count, "Sharing without per-feed approval must fail closed")
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
             for: feed, in: context
         )
         try context.save()
@@ -109,7 +168,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         context.insert(podcast)
         context.insert(episode)
         try context.save()
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         try context.save()
         let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
         let before = try await loader.prepare(
@@ -176,7 +235,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
     func testPeerFollowAndUnfollowRetainLocalGraphAndDeviceOnlyWins() throws {
         let context = TestStore.freshContext()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         try context.save()
         let follow: [String: Any] = [
             "id": id, "kind": "subscription", "feed_url": feed,
@@ -274,7 +333,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
 
     func testMalformedSiblingDoesNotDiscardFractionalTimestampFollow() throws {
         let context = TestStore.freshContext()
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         try context.save()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
         let data = try JSONSerialization.data(withJSONObject: [
@@ -304,7 +363,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         context.insert(original)
         try context.save()
         let renamed = "https://example.com/renamed.xml"
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: renamed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: renamed, in: context)
         try context.save()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(renamed))
         let peer = try file(records: [[
@@ -329,7 +388,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         let original = Podcast(feedURL: feed, title: "Locally followed", createdAt: newer)
         context.insert(original)
         try context.save()
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         try context.save()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
         let peer = try file(records: [[
@@ -350,7 +409,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         let original = Podcast(feedURL: feed, title: "My follow", createdAt: older)
         context.insert(original)
         try context.save()
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         try context.save()
         let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
         let peer = try file(records: [[
@@ -372,7 +431,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
 
     func testPrivatePeerSubscriptionAndTokenFeedCannotBeFollowed() throws {
         let context = TestStore.freshContext()
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         try context.save()
         let publicID = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
         let peer = try file(records: [
@@ -442,7 +501,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         let peerPath = root.appending(path: "Listening Places/devices/\(peerID).json")
         try peer.write(to: peerPath)
         let context = TestStore.freshContext()
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         try context.save()
         try ListeningPlacesSubscriptionTestCoordinator.stagePolicy(.init(), in: context)
         try context.save()
@@ -616,7 +675,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             of: episode, in: context, deviceID: "aabb1234",
             now: peerTime.addingTimeInterval(-120)
         )
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         // Episode import is independently gated; no subscription sharing is
         // needed for a preexisting approved public local catalog episode.
         try ListeningPlacesSubscriptionTestCoordinator.stagePolicy(.init(), in: context)
@@ -786,8 +845,8 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         second.podcast = secondShow
         for model in [firstShow, secondShow] { context.insert(model) }
         for model in [first, second] { context.insert(model) }
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: secondFeed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: secondFeed, in: context)
         let localTime = Date(timeIntervalSince1970: 1_000)
         try ListeningPlacesEventJournal.stageLocalMutation(
             of: first, in: context, deviceID: "phone123", now: localTime
@@ -855,7 +914,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             of: privateEpisode, in: context, deviceID: "phone123",
             now: Date(timeIntervalSince1970: 1_000)
         )
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         try context.save()
         let peerTime = Date(timeIntervalSince1970: 1_200)
         let file = try ListeningPlacesFormat.encodedDeviceFile(
@@ -890,7 +949,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         episode.podcast = podcast
         context.insert(podcast)
         context.insert(episode)
-        try ListeningPlacesPublicFeedApproval.stageDisposableApproval(for: feed, in: context)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(for: feed, in: context)
         try ListeningPlacesEventJournal.stageLocalMutation(
             of: episode, in: context, deviceID: "phone123",
             now: Date(timeIntervalSince1970: 1_000)
