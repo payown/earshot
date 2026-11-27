@@ -407,6 +407,42 @@ and sort orders survived (`EarshotCandidateExact335FolderOpen20261127.xcresult`,
 It does not establish a V15 schema or migrate any external folder identity;
 the unsafe optional-field probe stays separate and unmerged.
 
+### Isolated V15 folder identity probe
+
+The exact signed-335 checkout generated a new synthetic split V14 store with
+two same-name folders, ordered memberships and an unrelated setting. Its
+generator passed 1/1 (`EarshotExact335V14MapInput20261127.xcresult`); the
+fixture is backed up outside the checkout. A separate experimental branch
+`experiment/folder-v15-map-20261127` at `36ba641a` attempted an additive V15
+mapping entity with an optional relationship to `PodcastFolder`, so a folder
+and its external UUID could be saved or rolled back together. Before opening
+the copied store the probe compared the stored V14 metadata and stable
+structural fingerprints of the signed-335 V12–V14 graphs. It deliberately
+excluded time-dependent default values from those fingerprints.
+
+This mapping is **not migration-safe yet**. SwiftData recursively includes the
+new relationship destination in the purported V14 graph even though V14's
+explicit model list does not name the mapping entity. A combined split-store
+plan and then a mirrored-only plan both raised `Duplicate version checksums
+detected`; the discriminating old-graph test confirmed recursive inclusion
+(`EarshotV15FolderMapOldGraphDiagnostic20261127.xcresult`, 0/1). The probe is
+committed and backed up locally as a failing diagnostic, not integrated into
+the app. A scalar mapping would avoid the relationship, but this SDK exposes
+no public `ModelContext.obtainPermanentIDs` operation: binding a newly
+inserted folder's temporary identifier in the same save is unproven. A full
+frozen relationship graph or another reviewed atomic stable-key design is
+required before V15 or external folder identity can ship. No real store was
+opened or altered by this experiment.
+
+On the unchanged isolated Listening Places source `98da2d64`, the complete
+iPhone simulator scheme passed 2,955 tests, skipped 59 and failed zero
+(`EarshotLP336FulliPhone20261127.xcresult`). The skips include conditional
+physical/VoiceOver and iPad UI cases plus expensive fixture diagnostics; this
+is not physical acceptance. The complete Watch simulator scheme on the same
+source passed 70/70 with zero skips or failures
+(`EarshotLP336FullWatch20261127.xcresult`). These scheme results do not
+validate the separate failing V15 experiment or physical paired devices.
+
 ### Playback round-trip boundary
 
 A disposable test now composes a peer file, parses it, decides a newer
