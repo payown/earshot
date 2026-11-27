@@ -7,7 +7,7 @@ import SwiftData
 /// Listening Places reader still does not apply peer episode places.
 @MainActor
 enum ListeningPlacesSubscriptionExchange {
-    struct Policy {
+    struct Policy: Codable, Equatable {
         var shareSubscriptions = false
         var acceptFollows = false
         var acceptUnfollows = false
@@ -272,6 +272,10 @@ enum ListeningPlacesSubscriptionExchange {
                         feedURL: canonical, title: String(title.prefix(256)),
                         createdAt: subscribedAt
                     )
+                    if let speed = (row["prefs"] as? [String: Any])?["speed"] as? Double,
+                       speed.isFinite, (0.5...4).contains(speed) {
+                        inserted.speedOverride = speed
+                    }
                     context.insert(inserted)
                     try LocalAppSettingIdentity.setValue(
                         timeString, for: importedClockPrefix + id, in: context
@@ -295,3 +299,101 @@ enum ListeningPlacesSubscriptionExchange {
         return result
     }
 }
+
+#if DEBUG
+/// Exercises the real coordinated file transport in disposable XCTest stores.
+/// There is no app/Settings caller. Release builds omit this coordinator, and
+/// the extra runner gate stays off even in ordinary Debug app launches.
+@MainActor
+enum ListeningPlacesSubscriptionTestCoordinator {
+    private static let policyKey = "listening_places_disposable_subscription_policy_v1"
+    private static let runnerGate = "EARSHOT_LP_DISPOSABLE_SYNC"
+
+    struct Result {
+        var applied = ListeningPlacesSubscriptionExchange.ApplyResult()
+        var wroteOwnedFile = false
+        var peerFilesRead = 0
+    }
+
+    enum CoordinatorError: Error {
+        case foreignOwnedFile
+        case policyChanged
+    }
+
+    static func stagePolicy(
+        _ policy: ListeningPlacesSubscriptionExchange.Policy, in context: ModelContext
+    ) throws {
+        let data = try JSONEncoder().encode(policy)
+        guard let raw = String(data: data, encoding: .utf8) else {
+            throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+        }
+        try LocalAppSettingIdentity.setValue(raw, for: policyKey, in: context)
+    }
+
+    private static func policy(in context: ModelContext)
+        -> ListeningPlacesSubscriptionExchange.Policy? {
+        guard ProcessInfo.processInfo.environment[runnerGate] == "1",
+              let raw = LocalAppSettingIdentity.value(for: policyKey, in: context)
+        else { return nil }
+        return try? JSONDecoder().decode(
+            ListeningPlacesSubscriptionExchange.Policy.self, from: Data(raw.utf8)
+        )
+    }
+
+    static func sync(
+        bookmarkData: Data, ownDeviceID: String, context: ModelContext,
+        transport: ListeningPlacesFileTransport = ListeningPlacesFileTransport(),
+        now: Date = .now
+    ) async throws -> Result {
+        guard let initialPolicy = policy(in: context), initialPolicy.shareSubscriptions
+        else { return Result() }
+        guard let observed = try await transport.readDeviceFile(
+            bookmarkData: bookmarkData, deviceID: ownDeviceID
+        ) else { return Result() }
+        guard let root = (try? JSONSerialization.jsonObject(with: observed)) as? [String: Any],
+              root["format"] as? String == ListeningPlacesFormat.identifier,
+              root["device"] as? String == ownDeviceID,
+              (root["app"] as? String)?.hasPrefix("earshot/") == true
+        else { throw CoordinatorError.foreignOwnedFile }
+
+        let peers = try await transport.readOtherDeviceFiles(
+            bookmarkData: bookmarkData, excludingDeviceID: ownDeviceID
+        )
+        var result = Result()
+        var carried: [[String: Any]] = []
+        for peer in peers.files {
+            try Task.checkCancellation()
+            guard policy(in: context) == initialPolicy else { throw CoordinatorError.policyChanged }
+            let peerID = String(peer.fileName.dropLast(5))
+            guard let parsed = (try? JSONSerialization.jsonObject(with: peer.data)) as? [String: Any],
+                  parsed["device"] as? String == peerID,
+                  let rawRows = parsed["records"] as? [Any]
+            else { continue }
+            let rows = rawRows.compactMap { $0 as? [String: Any] }
+            guard let applied = try? ListeningPlacesSubscriptionExchange.applyPeerFile(
+                peer.data, context: context, policy: initialPolicy,
+                expectedPeerID: peerID, ownDeviceID: ownDeviceID, now: now
+            ) else { continue }
+            result.applied.follows += applied.follows
+            result.applied.unfollows += applied.unfollows
+            result.applied.deferred += applied.deferred
+            result.applied.privateRows += applied.privateRows
+            result.peerFilesRead += 1
+            carried.append(contentsOf: rows.prefix(2_000))
+        }
+        guard policy(in: context) == initialPolicy else { throw CoordinatorError.policyChanged }
+        let composed = try ListeningPlacesSubscriptionExchange.exportOwnedFile(
+            episodeFile: observed, context: context,
+            policy: initialPolicy, carriedPeerRows: carried, now: now
+        )
+        if composed != observed {
+            try await transport.replaceDeviceFile(
+                bookmarkData: bookmarkData, deviceID: ownDeviceID,
+                expected: observed, with: composed
+            )
+            result.wroteOwnedFile = true
+        }
+        return result
+    }
+}
+#endif

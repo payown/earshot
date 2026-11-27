@@ -321,3 +321,19 @@ acceptance. In particular, local follow event provenance, local folder and
 preference application, explicit settings UI, file transport/CAS wiring,
 privacy classification of stored credentials, and the shared-context
 playback provenance gap still block receiver activation or a 336 build.
+
+An additional Debug-only disposable coordinator now requires an explicit
+local test policy **and** `TEST_RUNNER_EARSHOT_LP_DISPOSABLE_SYNC=1` to run. It
+uses the production bounded other-device reader and owned-file compare-and-
+replace transport. The pinned QUILL file is read through that transport;
+Earshot imports a public follow and speed override, carries three ordered
+folder IDs, withdraws its own row on device-only selection without touching
+QUILL's file, re-enters sharing, and applies a later peer tombstone without
+deleting Episode, Queue or ListeningSession rows or echoing a tombstone. The
+test uses a disposable folder and in-memory store; no normal app path calls
+this coordinator. Local folder creation/mapping remains intentionally absent:
+`PodcastFolder` has no durable external ID, so name matching or a two-save
+sidecar could duplicate folders after a crash. A migration-safe mapping and
+older-store test are required before applying peer folder structure. The
+coordinator's policy rechecks are not proof of full provider race safety, and
+stored HTTP credentials still need a conservative privacy classification.

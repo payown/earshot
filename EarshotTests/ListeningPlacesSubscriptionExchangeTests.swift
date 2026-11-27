@@ -350,6 +350,155 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         ))
     }
 
+    func testPrivatePeerSubscriptionAndTokenFeedCannotBeFollowed() throws {
+        let context = TestStore.freshContext()
+        let peer = try file(records: [
+            ["id": "sub:private", "kind": "subscription", "feed_url": feed,
+             "title": "Private", "private": true,
+             "subscribed_at": "2023-11-14T22:13:20Z",
+             "updated_at": "2023-11-14T22:13:20Z"],
+            ["id": "sub:token", "kind": "subscription",
+             "feed_url": "https://example.com/feed?token=synthetic",
+             "title": "Token feed", "private": false,
+             "subscribed_at": "2023-11-14T22:13:20Z",
+             "updated_at": "2023-11-14T22:13:20Z"],
+        ])
+        let result = try ListeningPlacesSubscriptionExchange.applyPeerFile(
+            peer, context: context,
+            policy: .init(shareSubscriptions: true, acceptFollows: true),
+            expectedPeerID: "peer1234", ownDeviceID: "phone123", now: newer
+        )
+        XCTAssertEqual(result.follows, 0)
+        XCTAssertEqual(result.privateRows, 2)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 0)
+    }
+
+    func testDisposableCoordinatorReadsPeerAndCASWritesOnlyOwnedFile() async throws {
+        guard ProcessInfo.processInfo.environment["EARSHOT_LP_DISPOSABLE_SYNC"] == "1",
+              let pinnedPeerPath = ProcessInfo.processInfo.environment["QUILL_PEER_FIXTURE_PATH"]
+        else { throw XCTSkip("Requires explicit disposable runner gate and pinned QUILL fixture") }
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "places-coordinator-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bookmark = try root.bookmarkData(options: .minimalBookmark,
+                                             includingResourceValuesForKeys: nil,
+                                             relativeTo: nil)
+        let transport = ListeningPlacesFileTransport()
+        try await transport.prepareFolder(bookmarkData: bookmark)
+        let own = try emptyFile()
+        try await transport.writeDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123", data: own
+        )
+        let peer = try Data(contentsOf: URL(fileURLWithPath: pinnedPeerPath))
+        let peerID = "desktop99"
+        let peerPath = root.appending(path: "Listening Places/devices/\(peerID).json")
+        try peer.write(to: peerPath)
+        let context = TestStore.freshContext()
+        try ListeningPlacesSubscriptionTestCoordinator.stagePolicy(.init(), in: context)
+        try context.save()
+        let off = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: context,
+            transport: transport, now: newer
+        )
+        XCTAssertEqual(off.applied.follows, 0)
+        XCTAssertFalse(off.wroteOwnedFile)
+        let unchangedOwn = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123"
+        )
+        XCTAssertEqual(unchangedOwn, own)
+
+        try ListeningPlacesSubscriptionTestCoordinator.stagePolicy(
+            .init(shareSubscriptions: true, acceptFollows: true, acceptUnfollows: true),
+            in: context
+        )
+        try context.save()
+        let followed = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: context,
+            transport: transport, now: newer
+        )
+        XCTAssertEqual(followed.peerFilesRead, 1)
+        XCTAssertEqual(followed.applied.follows, 1)
+        XCTAssertTrue(followed.wroteOwnedFile)
+        let podcast = try XCTUnwrap(context.fetch(FetchDescriptor<Podcast>()).first)
+        XCTAssertEqual(podcast.feedURL, feed)
+        XCTAssertEqual(podcast.speedOverride, 1.4)
+        let maybeOwnedFollow = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123"
+        )
+        let ownedFollow = try XCTUnwrap(maybeOwnedFollow)
+        let sub = try XCTUnwrap(try rows(ownedFollow).first {
+            $0["kind"] as? String == "subscription"
+        })
+        XCTAssertEqual((sub["folders"] as? [String])?.count, 3)
+        XCTAssertEqual(try Data(contentsOf: peerPath), peer)
+
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(feedURL: feed, in: context)
+        try context.save()
+        let withdrawn = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: context,
+            transport: transport, now: newer
+        )
+        XCTAssertEqual(withdrawn.applied.follows + withdrawn.applied.unfollows, 0)
+        let maybeWithdrawnBytes = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123"
+        )
+        let withdrawnBytes = try XCTUnwrap(maybeWithdrawnBytes)
+        XCTAssertTrue(try rows(withdrawnBytes).isEmpty)
+        XCTAssertTrue(podcast.isFollowed)
+        XCTAssertEqual(try Data(contentsOf: peerPath), peer)
+
+        try ListeningPlacesFeedPrivacy.clearForExplicitSharing(feedURL: feed, in: context)
+        try context.save()
+        let reentered = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: context,
+            transport: transport, now: newer
+        )
+        XCTAssertEqual(reentered.applied.follows, 0)
+        let maybeReenteredBytes = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123"
+        )
+        let reenteredBytes = try XCTUnwrap(maybeReenteredBytes)
+        XCTAssertEqual(try rows(reenteredBytes).filter {
+            $0["kind"] as? String == "subscription"
+        }.count, 1)
+        XCTAssertEqual(try Data(contentsOf: peerPath), peer)
+
+        let episode = Episode(guid: "retained", title: "Retained",
+                              audioURL: "https://example.com/retained.mp3",
+                              positionSeconds: 30)
+        episode.podcast = podcast
+        context.insert(episode)
+        context.insert(QueueItem(episode: episode, position: 0))
+        context.insert(ListeningSession(episode: episode, podcast: podcast,
+                                        durationSeconds: 10, date: older))
+        try context.save()
+        let id = try XCTUnwrap(ListeningPlacesSubscriptionIdentity.shareableID(feed))
+        let tombstone = try JSONSerialization.data(withJSONObject: [
+            "format": ListeningPlacesFormat.identifier,
+            "device": peerID, "app": "quill-cast/1.0.0",
+            "written_at": "2026-11-27T12:00:00Z",
+            "records": [["id": id, "deleted": true,
+                         "updated_at": "2026-11-27T12:00:00Z"]],
+        ])
+        try tombstone.write(to: peerPath, options: .atomic)
+        let unfollowed = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+            bookmarkData: bookmark, ownDeviceID: "phone123", context: context,
+            transport: transport, now: newer
+        )
+        XCTAssertEqual(unfollowed.applied.unfollows, 1)
+        XCTAssertTrue(podcast.isCatalogOnly)
+        let maybeOwnedAfter = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "phone123"
+        )
+        let ownedAfter = try XCTUnwrap(maybeOwnedAfter)
+        XCTAssertTrue(try rows(ownedAfter).isEmpty)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ListeningSession>()), 1)
+        XCTAssertEqual(try Data(contentsOf: peerPath), tombstone)
+    }
+
     private func file(records: [[String: Any]]) throws -> Data {
         try JSONSerialization.data(withJSONObject: [
             "format": ListeningPlacesFormat.identifier,
