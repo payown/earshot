@@ -38,6 +38,7 @@
 		0C2A18DAF1F1AC93A81C02C5 /* WatchNowPlayingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54667179D17A7CFE4EFF9260 /* WatchNowPlayingView.swift */; };
 		0C34726CCF898D3B224D7296 /* ShowNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2A7F38E26A61D91D5846A4 /* ShowNotesView.swift */; };
 		0C8F46F11AB8B3C6118CED00 /* MultiSelectBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60D9C962F88E9ED63F0A1DF /* MultiSelectBar.swift */; };
+		0D1727A2A913AB27590BBD02 /* ListeningPlacesEventJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DFEA874A21421E107C7DF61 /* ListeningPlacesEventJournal.swift */; };
 		0EA843CE44BDF92F60286C83 /* QuickActionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */; };
 		0EF6284395E00C7CCA166C44 /* FeedRefreshPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23C18264777CD2FA64FC2A58 /* FeedRefreshPolicyTests.swift */; };
 		0F598FF01FFD7FF9B1B5BB69 /* AppSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABEEC723E5C0BC90DFC057B2 /* AppSetting.swift */; };
@@ -382,6 +383,7 @@
 		B485218BA32829A9DC997E32 /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1908FA7002380BE2E52E7F8A /* FeedService.swift */; };
 		B54048D527D3165634DB3E83 /* EpisodeFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF332DCC8832014A641B66D7 /* EpisodeFilter.swift */; };
 		B5BDA997A7A521EFA326BE42 /* LocalState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D39D22FC661987D9B87331 /* LocalState.swift */; };
+		B65BC6E3632223E360B72AF2 /* ListeningPlacesSubscriptionRetention.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A17D6930D688040C26F1AA3 /* ListeningPlacesSubscriptionRetention.swift */; };
 		B6D0444F2A771E88438780DD /* FolderSyncConflictPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B492B3341CA73BD2C9021FD /* FolderSyncConflictPolicyTests.swift */; };
 		B77016B49167013804A83D5D /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446E3CD362BA5EC597F7DF75 /* TranscriptView.swift */; };
 		B7D982B1EFE8A2BB5F3EEBF5 /* TabBarBadgeApplierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B08F0BCE39D733BDAFA99B /* TabBarBadgeApplierTests.swift */; };
@@ -470,6 +472,7 @@
 		DAE5B17F783B9608A4E356A3 /* QuickActionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD6029A247CD01E7E6D06F1 /* QuickActionStore.swift */; };
 		DB3D47328E81FF28B9002E18 /* EarshotWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 57B581041041416B760895BB /* EarshotWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DC2DEAD1499DC1849661C3DB /* FolderDetailLabelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4638BF38BD5D15F30DD349BF /* FolderDetailLabelTests.swift */; };
+		DCF5D562FEB7C002C930E17D /* ListeningPlacesEventJournalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF4DAA8002B8B680EA3E331 /* ListeningPlacesEventJournalTests.swift */; };
 		DCF615FEA133899EEF5D2798 /* TranscriptViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3489F4131C5F01EEE8BC34C0 /* TranscriptViewModelTests.swift */; };
 		DD85373EE189A1D263322047 /* OPMLImportProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 682B36BB7BE40E963A213FAF /* OPMLImportProgressTests.swift */; };
 		DDC4E3E1E20C71FDDDF633E3 /* HTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C269D472A99E48313C640C1 /* HTTPClient.swift */; };
@@ -905,6 +908,7 @@
 		88C59BDCD41E5E02F5CF44E3 /* DownloadsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsSettingsView.swift; sourceTree = "<group>"; };
 		890516C8D3030E2827CD3AFA /* WatchWidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchWidgetSnapshot.swift; sourceTree = "<group>"; };
 		89379FE627FA4377E6C3222A /* ListeningPlacesFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningPlacesFormatTests.swift; sourceTree = "<group>"; };
+		8A17D6930D688040C26F1AA3 /* ListeningPlacesSubscriptionRetention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningPlacesSubscriptionRetention.swift; sourceTree = "<group>"; };
 		8AD443A7B8550154647AEBBC /* PlaybackServicesActivation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackServicesActivation.swift; sourceTree = "<group>"; };
 		8B33B797D18D19A801E2DD26 /* PlaybackHandoffClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackHandoffClient.swift; sourceTree = "<group>"; };
 		8B3BE83021D9D2D3FBC6E08B /* TabBarBadgeApplier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarBadgeApplier.swift; sourceTree = "<group>"; };
@@ -916,6 +920,7 @@
 		8D593C7355D8CEF192497648 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		8DBB0DBE3C822485265C03BA /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		8DC0518F8DC0C828FDCE3301 /* PlayerAudioSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerAudioSessionTests.swift; sourceTree = "<group>"; };
+		8DFEA874A21421E107C7DF61 /* ListeningPlacesEventJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningPlacesEventJournal.swift; sourceTree = "<group>"; };
 		8E048C063055A8B065E6DCD4 /* PodcastCapPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastCapPolicyTests.swift; sourceTree = "<group>"; };
 		8EC414F03B2203A2D9FC8456 /* PlaybackLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackLogic.swift; sourceTree = "<group>"; };
 		8EF91D5550CA3A786B0F6EAA /* AppIconBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconBadge.swift; sourceTree = "<group>"; };
@@ -988,6 +993,7 @@
 		ADC1DFD3FFD884A7FE8029F6 /* ActiveDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveDownload.swift; sourceTree = "<group>"; };
 		ADE5B0DBD401688FF5BF3C02 /* FeedRefreshSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedRefreshSettingsView.swift; sourceTree = "<group>"; };
 		ADEA1A20F44BB53D2F82E575 /* LibraryPodcastFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryPodcastFilterTests.swift; sourceTree = "<group>"; };
+		ADF4DAA8002B8B680EA3E331 /* ListeningPlacesEventJournalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningPlacesEventJournalTests.swift; sourceTree = "<group>"; };
 		AE1762C5AEBDF029E48BF6D2 /* SearchScopeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchScopeTests.swift; sourceTree = "<group>"; };
 		AE30E518A54052F8A08C7195 /* DirectoryPodcastDescriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryPodcastDescriptionService.swift; sourceTree = "<group>"; };
 		AE41691F0E4E9DEF6111C5CA /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
@@ -1372,8 +1378,10 @@
 		383F3A50F5E1627C1496C22A /* Data */ = {
 			isa = PBXGroup;
 			children = (
+				8DFEA874A21421E107C7DF61 /* ListeningPlacesEventJournal.swift */,
 				3288A7529EA4B38B7CBFE9C0 /* ListeningPlacesFileTransport.swift */,
 				D462CD510BD0C7B076819DD6 /* ListeningPlacesService.swift */,
+				8A17D6930D688040C26F1AA3 /* ListeningPlacesSubscriptionRetention.swift */,
 			);
 			path = Data;
 			sourceTree = "<group>";
@@ -1543,6 +1551,7 @@
 				C27CF4D211EF845D99883619 /* LibrarySortTests.swift */,
 				20EAB400C37E3685E9BEB4B7 /* ListDetailLayoutPolicyTests.swift */,
 				0A99DF10B897C115FDBF34CE /* ListeningDonationsTests.swift */,
+				ADF4DAA8002B8B680EA3E331 /* ListeningPlacesEventJournalTests.swift */,
 				F02161D31ED87221FBF2D9C8 /* ListeningPlacesFileTransportTests.swift */,
 				89379FE627FA4377E6C3222A /* ListeningPlacesFormatTests.swift */,
 				90473A8737A8A2260F57BE79 /* ListeningPlacesInboundParserTests.swift */,
@@ -2878,12 +2887,14 @@
 				219BE45322C2B7428A535278 /* LibrarySearchPresentation.swift in Sources */,
 				9C2E75E2A60C8669922D7B29 /* LibrarySort.swift in Sources */,
 				E9E7B8B2DD583E0D15F08721 /* ListeningDonations.swift in Sources */,
+				0D1727A2A913AB27590BBD02 /* ListeningPlacesEventJournal.swift in Sources */,
 				A326AB4854C3E9930515732C /* ListeningPlacesFileTransport.swift in Sources */,
 				94E348388F2E157F9D5F8B54 /* ListeningPlacesFormat.swift in Sources */,
 				2CD595968F1D3D857ECC198B /* ListeningPlacesInboundParser.swift in Sources */,
 				F57AE0E247F7EB4ED3A4D60C /* ListeningPlacesMergePlanner.swift in Sources */,
 				1EA75D3BC1873947406A7352 /* ListeningPlacesService.swift in Sources */,
 				C57AC0DA03D2CC53E03EBDDD /* ListeningPlacesSettingsView.swift in Sources */,
+				B65BC6E3632223E360B72AF2 /* ListeningPlacesSubscriptionRetention.swift in Sources */,
 				32BF15D8A033A13EA5B4F6C3 /* ListeningSession.swift in Sources */,
 				7B7EFB356E9B0CFD85245B6E /* ListeningWorkflowGuide.swift in Sources */,
 				9E1CA1084204BECCB26EB2A0 /* LocalSearchLoader.swift in Sources */,
@@ -3147,6 +3158,7 @@
 				C35D439E9E576F4A27BFD711 /* LibrarySortTests.swift in Sources */,
 				5F449986D108C144B6A845CF /* ListDetailLayoutPolicyTests.swift in Sources */,
 				0B413D931C4F5FEBE509B3F0 /* ListeningDonationsTests.swift in Sources */,
+				DCF5D562FEB7C002C930E17D /* ListeningPlacesEventJournalTests.swift in Sources */,
 				332A4FE36C1D9FF5E9DCE784 /* ListeningPlacesFileTransportTests.swift in Sources */,
 				79121AB785358A6AFEC1367E /* ListeningPlacesFormatTests.swift in Sources */,
 				7CF7C036748C5DB6251456B5 /* ListeningPlacesInboundParserTests.swift in Sources */,

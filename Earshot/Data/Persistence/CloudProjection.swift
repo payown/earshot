@@ -1111,6 +1111,9 @@ actor CloudProjectionCoordinator: ModelActor {
         guard try !PendingCloudUnfollowIntent.feedURLs(in: modelContext).contains(feed) else {
             return false
         }
+        guard try !ListeningPlacesSubscriptionRetention.isRetained(
+            feedURL: feed, in: modelContext
+        ) else { return false }
 
         // Destructive duplicate repair retains its established pre-delete
         // protocol and commits as a prerequisite. Promotion itself remains
@@ -2447,6 +2450,11 @@ actor CloudProjectionCoordinator: ModelActor {
             row.sourceDeviceID == deviceID && row.deletedAt == nil ? key : nil
         })
         for key in knownLocalFeedURLs.union(ownActiveFeedURLs).subtracting(localByFeed.keys) {
+            // A peer-file unfollow is local to this device. Do not translate
+            // the retained catalog shell into an iCloud subscription tombstone.
+            if try ListeningPlacesSubscriptionRetention.isRetained(
+                feedURL: key, in: appContext
+            ) { continue }
             guard let row = cloudByFeed[key] else { continue }
             row.deletedAt = now
             row.modifiedAt = now

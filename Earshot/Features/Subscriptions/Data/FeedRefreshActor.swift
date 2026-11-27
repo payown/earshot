@@ -1346,6 +1346,9 @@ actor FeedRefreshActor {
         }
         let podcast = resolved.podcast
         podcast.feedURL = canonical
+        try ListeningPlacesSubscriptionRetention.clearForExplicitFollow(
+            feedURL: canonical, in: modelContext
+        )
         podcast.subscriptionStateRaw = nil
         if !parsed.title.isEmpty { podcast.title = parsed.title }
         if let value = parsed.author { podcast.author = value }

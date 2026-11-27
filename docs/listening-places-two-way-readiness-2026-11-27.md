@@ -53,6 +53,21 @@ it is not a claim that two-way sync or subscriptions are available in 335.
    identity repair, and CloudProjection import. `Episode.playedAt` records
    only a played transition; it is not a position/reset clock. Capturing a
    timestamp at one UI entry point would leave other saved changes untimed.
+   A newer local prototype stages an event in `AppSetting` alongside `Episode`
+   in the same application SQLite configuration and commits both with one
+   `ModelContext.save()`. It needs no schema migration. Disposable A → B → A,
+   rollback, relaunch, no-op, legacy, peer-time and rapid same-second tests
+   passed 8/8 (`EarshotLPJournalFinal20261127.xcresult`). A disposable
+   pre-feature V14 file-store test confirms an old position stays unknown
+   through relaunch and metadata edit until a new saved mutation is staged.
+   With 2,880 synthetic settings
+   and 30 updates in memory, mean stage was 0.378 ms (max 0.505 ms) and mean
+   save was 0.329 ms on iOS 26.5 Simulator. This is not a physical player or
+   large-library measurement. The record is not yet staged by every writer:
+   two unstaged changes could still make A → B → A match an old event. Do not
+   enable the receiver or claim the clock complete on these tests alone.
+   An old store with no event remains unknown-time; V5–V13 migration routes
+   still need coverage before an enabled receiver.
 2. **Latest-event position.** A deliberate newer backward seek must win. The
    current iCloud projection normally takes the maximum eligible position,
    so passing a desktop record into it unchanged would not implement this
@@ -75,6 +90,17 @@ it is not a claim that two-way sync or subscriptions are available in 335.
    while its local publication can treat the absent follow as an iCloud
    unfollow. A Listening Places remote-unfollow path must suppress both effects
    with a durable device-local source/ownership rule before it can be called.
+   The local foundation now stages a hashed retention marker and `catalogOnly`
+   in the same application-store save. CloudProjection checks it before active
+   re-promotion and its bulk tombstone pass; explicit Subscribe removes it in
+   its successful save. Disposable tests passed for rollback/relaunch, retained
+   episode/Queue/bookmark/session/download state, CloudKit active-row
+   preservation, and failed-then-retried Subscribe
+   (`EarshotLPTransactionAndFollowFinal20261127.xcresult`, 11/11 with the
+   journal and established promotion regressions). The inbound parser still
+   ignores subscription rows, so these tests do not prove S1–S15 or an
+   end-to-end peer unfollow. Device-only policy and later local explicit
+   Unfollow need separate precedence tests before import is enabled.
 4. **Privacy.** A device-local "keep here" choice must suppress that show's
    subscription, folders, episode places and incoming changes without emitting
    an unfollow tombstone. Private feed URLs and authentication must never enter
@@ -109,8 +135,11 @@ run passed on iOS 26.5 (`EarshotLPIdempotenceAfter20261127.xcresult`); its
 pre-fix run failed exactly that repeat-import assertion.
 It does not invoke the reader from the app or apply remote state. Its combined
 iOS 26.5 focused run on November 27 passed 32 tests with no failures or skips
-on final code (`EarshotLPFoundationFinal20261127.xcresult` in local verification
-artifacts). The earlier 24-test run preceded the idempotence addition.
+on the read-only foundation source (`EarshotLPFoundationFinal20261127.xcresult`
+in local verification artifacts). The later transaction/subscription source
+passed 44 focused tests with no failures or skips before the rapid-clock test
+was added (`EarshotLPFoundationAndRetentionFinal20261127.xcresult`); the final
+eight-test journal suite passed separately as noted above.
 That result covers synthetic files and fixture agreement, not a 336 release.
 
 ## Verification before an internal two-way candidate
@@ -131,3 +160,19 @@ The proposed new status and spoken control wording requires the repository's
 accessibility-semantics sign-off before it is presented to users. Until these
 gates pass, a bounded read-only parser or file reader is infrastructure, not
 an enabled receiver or a reason to cut a Listening Places build.
+
+## Write origin audit for an enabled receiver
+
+| Origin | Current entry points | Clock rule before release |
+| --- | --- | --- |
+| Local playback | `PlayerService` seek, explicit and throttled checkpoint, handoff, natural completion and Folder Run finish | Stage the saved position/reset with the Episode transaction; no-op ticks and unrelated saves must not advance it. |
+| Local manual Played/Unplayed | `EpisodeActionsBuilder`, `EpisodeRepository`, `InboxRepository`, `QueueRepository`, and player commands | Preserve explicit reset/Played semantics and rollback together with the journal. Bulk operations need bounded per-row staging. |
+| Apple Watch | `WatchPlayer`/`WatchLibrary` own local place, while `WatchCloudSync` uses a separate compact projection | Preserve the Watch event source and time; do not stamp phone import time or assume the phone journal covers Watch writes. |
+| iCloud import | `CloudProjection` reconciles compact episode rows and can apply resets and Played reversals | Classify as peer/CloudKit import with its original event clock. Its maximum-position policy is not Listening Places latest-event policy. |
+| Metadata and repair | Feed refresh, identity repair and other model saves | Do not create a new listening event merely because a row was re-saved; a changed place without a staged event remains unknown-time. |
+
+This is a coverage inventory, not evidence that every route is instrumented.
+An unstaged A → B → A remains a release blocker even with a same-store journal.
+The source and precedence of a device-only choice, including whether it also
+affects private iCloud Follow status, need review before subscriptions and
+folders can round-trip safely.

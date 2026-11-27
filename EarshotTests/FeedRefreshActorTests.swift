@@ -1773,6 +1773,49 @@ final class FeedRefreshActorTests: XCTestCase {
 
     // MARK: subscribeAll (bulk OPML path)
 
+    func testExplicitSubscribeClearsPeerUnfollowMarkerOnlyAfterDurableSave() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/peer-retained.xml"
+        let seed = ModelContext(container)
+        let podcast = Podcast(feedURL: feedURL, title: "Retained")
+        let episode = Episode(guid: "kept", title: "Kept",
+                              audioURL: "https://x/kept.mp3", positionSeconds: 45)
+        episode.podcast = podcast
+        seed.insert(podcast)
+        seed.insert(episode)
+        try seed.save()
+        try ListeningPlacesSubscriptionRetention.stageRemoteUnfollow(podcast, in: seed)
+        try seed.save()
+
+        let actor = FeedRefreshActor(modelContainer: container)
+        await actor.forceNextSaveFailureForTesting()
+        do {
+            _ = try await actor.subscribe(
+                feedURL: feedURL,
+                feed: FakeFeed(parsedFeed([parsedEpisode("kept", d1)])),
+                inboxSeedCount: 1
+            )
+            XCTFail("Expected injected save failure")
+        } catch { }
+        var check = ModelContext(container)
+        XCTAssertFalse(try XCTUnwrap(check.fetch(FetchDescriptor<Podcast>()).first).isFollowed)
+        XCTAssertTrue(try ListeningPlacesSubscriptionRetention.isRetained(
+            feedURL: feedURL, in: check
+        ))
+
+        _ = try await actor.subscribe(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed([parsedEpisode("kept", d1)])),
+            inboxSeedCount: 1
+        )
+        check = ModelContext(container)
+        XCTAssertTrue(try XCTUnwrap(check.fetch(FetchDescriptor<Podcast>()).first).isFollowed)
+        XCTAssertFalse(try ListeningPlacesSubscriptionRetention.isRetained(
+            feedURL: feedURL, in: check
+        ))
+        XCTAssertEqual(try check.fetch(FetchDescriptor<Episode>()).first?.positionSeconds, 45)
+    }
+
     func testCatalogPromotionSaveFailureRollsBackAndRetryPreservesIdentity() async throws {
         let container = cleanContainer()
         let feedURL = "https://x/catalog-promotion.xml"

@@ -4916,6 +4916,112 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                        "Paired transport must not create duplicate CloudKit records")
     }
 
+    func testPeerUnfollowRetentionKeepsGraphWithoutICloudTombstoneOrRepromotion() async throws {
+        let app = try makeApplicationContainer()
+        let feed = "https://example.com/peer-unfollow"
+        let podcast = Podcast(feedURL: feed, title: "Retained show")
+        let episode = Episode(guid: "retained", title: "Retained episode",
+                              audioURL: "https://example.com/retained.mp3", positionSeconds: 25)
+        episode.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(episode)
+        app.mainContext.insert(QueueItem(episode: episode, position: 0))
+        app.mainContext.insert(Bookmark(episode: episode, positionSeconds: 10, note: "Keep"))
+        app.mainContext.insert(ListeningSession(episode: episode, podcast: podcast,
+                                                durationSeconds: 20))
+        app.mainContext.insert(LocalEpisodeState(
+            podcastFeedURL: feed, episodeGUID: "retained",
+            downloadStatus: .downloaded, downloadPath: "retained.mp3"
+        ))
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let cloud = CloudPodcastProjection()
+        cloud.feedURL = feed
+        cloud.title = "Retained show"
+        cloud.sourceDeviceID = "phone"
+        cloud.modifiedAt = Date(timeIntervalSince1970: 500)
+        projection.mainContext.insert(cloud)
+        try projection.mainContext.save()
+
+        XCTAssertTrue(try ListeningPlacesSubscriptionRetention.stageRemoteUnfollow(
+            podcast, in: app.mainContext
+        ))
+        try app.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, deviceID: "phone"
+        )
+        try await coordinator.reconcile()
+        try await coordinator.publishLocalSubscriptionChanges(now: Date(timeIntervalSince1970: 600))
+
+        let followContext = ModelContext(app)
+        let saved = try XCTUnwrap(followContext.fetch(FetchDescriptor<Podcast>()).first)
+        XCTAssertFalse(saved.isFollowed)
+        XCTAssertTrue(try ListeningPlacesSubscriptionRetention.isRetained(
+            feedURL: feed, in: ModelContext(app)
+        ))
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Episode>()), 1)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Bookmark>()), 1)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<ListeningSession>()), 1)
+        XCTAssertEqual(try ModelContext(app).fetch(FetchDescriptor<LocalEpisodeState>()).first?.downloadPath,
+                       "retained.mp3")
+        XCTAssertNil(try ModelContext(projection).fetch(FetchDescriptor<CloudPodcastProjection>()).first?.deletedAt)
+
+        // An explicit local Follow can remove this local-only marker in the
+        // same transaction as promotion; a later CloudKit pass may then import.
+        saved.subscriptionStateRaw = nil
+        try ListeningPlacesSubscriptionRetention.clearForExplicitFollow(
+            feedURL: feed, in: followContext
+        )
+        try followContext.save()
+        XCTAssertFalse(try ListeningPlacesSubscriptionRetention.isRetained(
+            feedURL: feed, in: ModelContext(app)
+        ))
+    }
+
+    func testPeerUnfollowMarkerRollbackAndReopenPreserveLocalScope() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "Earshot-peer-retention-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let primary = directory.appending(path: "app.store")
+        let local = directory.appending(path: "local.store")
+        let feed = "https://example.com/retained-on-disk"
+
+        do {
+            let app = try makeOnDiskApplicationContainer(applicationURL: primary, localURL: local)
+            let context = ModelContext(app)
+            let podcast = Podcast(feedURL: feed, title: "Keep locally")
+            let episode = Episode(guid: "keep", title: "Keep",
+                                  audioURL: "https://example.com/keep.mp3", positionSeconds: 30)
+            episode.podcast = podcast
+            context.insert(podcast)
+            context.insert(episode)
+            try context.save()
+            try ListeningPlacesSubscriptionRetention.stageRemoteUnfollow(podcast, in: context)
+            context.rollback()
+            let rolledBack = try XCTUnwrap(ModelContext(app).fetch(FetchDescriptor<Podcast>()).first)
+            XCTAssertTrue(rolledBack.isFollowed)
+            XCTAssertFalse(try ListeningPlacesSubscriptionRetention.isRetained(
+                feedURL: feed, in: ModelContext(app)
+            ))
+            let fresh = ModelContext(app)
+            let saved = try XCTUnwrap(fresh.fetch(FetchDescriptor<Podcast>()).first)
+            try ListeningPlacesSubscriptionRetention.stageRemoteUnfollow(saved, in: fresh)
+            try fresh.save()
+        }
+        do {
+            let app = try makeOnDiskApplicationContainer(applicationURL: primary, localURL: local)
+            let context = ModelContext(app)
+            XCTAssertFalse(try XCTUnwrap(context.fetch(FetchDescriptor<Podcast>()).first).isFollowed)
+            XCTAssertTrue(try ListeningPlacesSubscriptionRetention.isRetained(
+                feedURL: feed, in: context
+            ))
+            XCTAssertEqual(try context.fetch(FetchDescriptor<Episode>()).first?.positionSeconds, 30)
+        }
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV14.self)
         return try ModelContainer(
