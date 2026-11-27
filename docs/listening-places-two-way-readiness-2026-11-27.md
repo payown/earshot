@@ -285,11 +285,14 @@ scale skip (`EarshotLPProvenanceAppPaths20261127.xcresult`).
 
 The inventory now alarms on direct `positionSeconds`, `isPlayed` and
 `playedAt` assignments. It is a source review guard, not an interception
-mechanism. Other shared-context saves, including pre-unfollow UI state and
-settings saves, can still commit dirty Episode values made elsewhere. Until
-those boundaries are classified or a supported authoritative episode
-revision exists, arbitrary unstaged A→B→A remains a real application risk,
-not merely an artificial test case. The incoming receiver stays disconnected.
+mechanism. Other shared-context saves, including podcast settings saves, can
+commit a dirty Episode value made elsewhere. The player seek/checkpoint path
+stages its event and saves synchronously, and no concrete supported
+player/settings interleaving has been reproduced. The deliberately raw
+unstaged A→B→A case remains a diagnostic of the missing general guarantee,
+not proof that a current user action follows that ordering. The incoming
+receiver stays disconnected until the save boundaries are classified or a
+supported authoritative episode revision exists.
 
 ### Harness-only subscription exchange after the writer audit
 
