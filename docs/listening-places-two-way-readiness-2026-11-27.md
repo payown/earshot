@@ -16,6 +16,8 @@ it is not a claim that two-way sync or subscriptions are available in 335.
   fixtures are the useful comparison; its `listening-places-spec.md` prose is
   behind the implementation on subscription support, GUID trimming, and plain
   feed URLs in opt-in subscription records.
+- `git diff c11dda93..35f90ead -- Earshot/Features/ListeningPlaces` is empty:
+  the signed 335 writer itself has no later change in that feature directory.
 - The standalone QUILL Cast release host's Latest currently resolves to
   `v1.0.0`; that label does not prove an installed desktop build includes the
   subscription controls from the pinned source. Before S1–S15, confirm the
