@@ -3,6 +3,40 @@ import XCTest
 @testable import Earshot
 
 final class ListeningPlacesInboundParserTests: XCTestCase {
+    func testPeerTransportAndParserReadSharedFixtureWithoutChangingFiles() async throws {
+        let fixtureURL = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "device-desktop", withExtension: "json"
+        ))
+        let fixture = try Data(contentsOf: fixtureURL)
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let devices = root.appending(path: "Listening Places/devices")
+        try FileManager.default.createDirectory(at: devices, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let peer = devices.appending(path: "9b30d7f1.json")
+        let own = devices.appending(path: "phone123.json")
+        let ownBytes = Data("own-file-placeholder".utf8)
+        try fixture.write(to: peer)
+        try ownBytes.write(to: own)
+        let bookmark = try root.bookmarkData(options: .minimalBookmark,
+                                             includingResourceValuesForKeys: nil, relativeTo: nil)
+
+        let read = try await ListeningPlacesFileTransport().readOtherDeviceFiles(
+            bookmarkData: bookmark, excludingDeviceID: "phone123"
+        )
+        XCTAssertEqual(read.files.count, 1)
+        let bytes = try XCTUnwrap(read.files.first?.data)
+        let parsed = try ListeningPlacesInboundParser.parse(
+            data: bytes, now: date("2026-08-20T16:00:00Z")
+        )
+        XCTAssertEqual(read.files.first?.fileName, "\(parsed.deviceID).json")
+        XCTAssertEqual(parsed.entries.count, 3)
+        XCTAssertEqual(try Data(contentsOf: peer), fixture)
+        XCTAssertEqual(try Data(contentsOf: own), ownBytes)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: root.appending(path: "Listening Places/README.txt").path
+        ))
+    }
+
     func testCastDesktopFixtureKeepsAllEpisodePlaces() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(
             forResource: "device-desktop", withExtension: "json"
