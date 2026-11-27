@@ -9,6 +9,8 @@ private struct CorrectedMediaFeedStub: FeedFetching {
     func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
 }
 
+private enum QueueSaveFailureForTest: Error { case injected }
+
 /// Tests for the #373 advanced-playback engine state on ``PlayerService``:
 /// hold-to-fast-forward rate swap and chapter auto-skip toggling / guarding.
 ///
@@ -1049,6 +1051,220 @@ final class AdvancedPlaybackTests: XCTestCase {
     }
 
     // MARK: removeFromQueue stops/advances the current episode (#619)
+
+    func testSelectedQueueRemovalRespectsPausedStateAndContinuation() throws {
+        let source = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "PersonalAudioChapters", withExtension: "m4a"
+        ))
+        for (label, initiallyPlaying, continueAfter, includesLoaded) in [
+            ("paused-selected-continue", false, true, true),
+            ("restored-paused-selected-continue", false, true, true),
+            ("playing-selected-continue", true, true, true),
+            ("paused-selected-stop", false, false, true),
+            ("playing-selected-stop", true, false, true),
+            ("playing-inactive-only", true, true, false),
+        ] {
+            let ctx = TestStore.freshContext()
+            AppSettingsStore(context: ctx).setBool(continueAfter, for: SettingsKey.continueAfterEpisode)
+            AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+            let show = Podcast(feedURL: "https://example.invalid/\(label)", title: "Disposable")
+            ctx.insert(show)
+            let fileName = "earshot-diagnostic-\(UUID().uuidString).m4a"
+            let fileURL = try DownloadPaths.downloadsDirectory().appendingPathComponent(fileName)
+            try FileManager.default.copyItem(at: source, to: fileURL)
+            addTeardownBlock { try? FileManager.default.removeItem(at: fileURL) }
+            let siblingFileName = "earshot-diagnostic-\(UUID().uuidString).m4a"
+            let siblingFileURL = try DownloadPaths.downloadsDirectory().appendingPathComponent(siblingFileName)
+            try FileManager.default.copyItem(at: source, to: siblingFileURL)
+            addTeardownBlock { try? FileManager.default.removeItem(at: siblingFileURL) }
+            let survivorFileName = "earshot-diagnostic-\(UUID().uuidString).m4a"
+            let survivorFileURL = try DownloadPaths.downloadsDirectory().appendingPathComponent(survivorFileName)
+            try FileManager.default.copyItem(at: source, to: survivorFileURL)
+            addTeardownBlock { try? FileManager.default.removeItem(at: survivorFileURL) }
+            let loaded = Episode(
+                guid: "loaded", title: "Loaded", audioURL: "https://example.invalid/loaded.m4a",
+                downloadStatus: .downloaded, downloadPath: fileName
+            )
+            loaded.podcast = show
+            let removedSibling = Episode(
+                guid: "removed", title: "Selected sibling", audioURL: "https://example.invalid/removed.m4a",
+                downloadStatus: .downloaded, downloadPath: siblingFileName
+            )
+            removedSibling.podcast = show
+            let surviving = Episode(
+                guid: "surviving", title: "Surviving", audioURL: "https://example.invalid/surviving.m4a",
+                downloadStatus: .downloaded, downloadPath: survivorFileName
+            )
+            surviving.podcast = show
+            for episode in [loaded, removedSibling, surviving] { ctx.insert(episode) }
+            try ctx.save()
+            let repo = QueueRepository(context: ctx)
+            repo.add([loaded, removedSibling, surviving])
+            let player = PlayerService()
+            player.configure(context: ctx)
+            if label.hasPrefix("restored-paused") {
+                player.load(loaded)
+            } else {
+                player.play(loaded)
+                if !initiallyPlaying { player.pause() }
+            }
+            XCTAssertEqual(player.nowPlayingEpisodeID, loaded.persistentModelID, label)
+            XCTAssertEqual(player.isPlaying, initiallyPlaying, label)
+
+            // Same ordering as QueueScreen's selected-row handler: commit the
+            // selected nonloaded row first, then remove the loaded row last.
+            XCTAssertEqual(repo.cancelSelectedFromQueue([removedSibling]), 1, label)
+            if includesLoaded {
+                player.removeFromQueue(loaded, context: ctx, keepDownload: true)
+            }
+            let ids = repo.queue().map(\.persistentModelID)
+            XCTAssertFalse(ids.contains(removedSibling.persistentModelID), label)
+            XCTAssertTrue(ids.contains(surviving.persistentModelID), label)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path), label)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: siblingFileURL.path), label)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: survivorFileURL.path), label)
+            XCTAssertEqual(loaded.downloadStatus, .downloaded, label)
+            XCTAssertEqual(removedSibling.downloadStatus, .downloaded, label)
+            if includesLoaded && continueAfter {
+                XCTAssertEqual(player.nowPlayingEpisodeID, surviving.persistentModelID, label)
+                XCTAssertEqual(player.isPlaying, initiallyPlaying, label)
+            } else if includesLoaded {
+                XCTAssertNil(player.nowPlayingEpisodeID, label)
+                XCTAssertFalse(player.isPlaying, label)
+            } else {
+                XCTAssertEqual(player.nowPlayingEpisodeID, loaded.persistentModelID, label)
+                XCTAssertTrue(player.isPlaying, label)
+            }
+            player.stopAndUnload()
+        }
+    }
+
+    func testQueueRemovalFailedSaveKeepsLoadedStateAndDownload() throws {
+        let source = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "PersonalAudioChapters", withExtension: "m4a"
+        ))
+        for initiallyPlaying in [false, true] {
+            let ctx = TestStore.freshContext()
+            AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+            let show = Podcast(feedURL: "https://example.invalid/failed-save", title: "Disposable")
+            ctx.insert(show)
+            let name = "earshot-failed-save-\(UUID().uuidString).m4a"
+            let local = try DownloadPaths.downloadsDirectory().appendingPathComponent(name)
+            try FileManager.default.copyItem(at: source, to: local)
+            addTeardownBlock { try? FileManager.default.removeItem(at: local) }
+            let loaded = Episode(
+                guid: "loaded", title: "Loaded", audioURL: "https://example.invalid/loaded.m4a",
+                downloadStatus: .downloaded, downloadPath: name
+            )
+            loaded.podcast = show
+            let survivor = Episode(guid: "survivor", title: "Survivor", audioURL: "https://example.invalid/survivor.m4a")
+            survivor.podcast = show
+            ctx.insert(loaded)
+            ctx.insert(survivor)
+            try ctx.save()
+            let queue = QueueRepository(context: ctx)
+            queue.add([loaded, survivor])
+            let player = PlayerService()
+            player.configure(context: ctx)
+            player.play(loaded)
+            if !initiallyPlaying { player.pause() }
+            XCTAssertEqual(player.isPlaying, initiallyPlaying)
+
+            player.removeFromQueue(
+                loaded, context: ctx, keepDownload: true,
+                saveQueueContext: { _ in throw QueueSaveFailureForTest.injected }
+            )
+
+            XCTAssertEqual(player.nowPlayingEpisodeID, loaded.persistentModelID)
+            XCTAssertEqual(player.isPlaying, initiallyPlaying)
+            XCTAssertEqual(queue.queue().map(\.persistentModelID),
+                           [loaded.persistentModelID, survivor.persistentModelID])
+            XCTAssertEqual(loaded.downloadStatus, .downloaded)
+            XCTAssertEqual(loaded.downloadPath, name)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: local.path))
+            player.stopAndUnload()
+        }
+    }
+
+    func testQueueBulkNonloadedFailureLeavesSelectionAndPlaybackIntact() throws {
+        let ctx = TestStore.freshContext()
+        let show = Podcast(feedURL: "https://example.invalid/batch-fail", title: "Disposable")
+        ctx.insert(show)
+        let source = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "PersonalAudioChapters", withExtension: "m4a"
+        ))
+        let name = "earshot-batch-fail-\(UUID().uuidString).m4a"
+        let local = try DownloadPaths.downloadsDirectory().appendingPathComponent(name)
+        try FileManager.default.copyItem(at: source, to: local)
+        addTeardownBlock { try? FileManager.default.removeItem(at: local) }
+        let loaded = Episode(guid: "loaded", title: "Loaded", audioURL: "https://example.invalid/loaded.m4a")
+        loaded.podcast = show
+        let selectedSibling = Episode(
+            guid: "sibling", title: "Selected sibling", audioURL: "https://example.invalid/sibling.m4a",
+            downloadStatus: .downloaded, downloadPath: name
+        )
+        selectedSibling.podcast = show
+        ctx.insert(loaded)
+        ctx.insert(selectedSibling)
+        try ctx.save()
+        let queue = QueueRepository(context: ctx)
+        queue.add([loaded, selectedSibling])
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.load(loaded)
+
+        // QueueScreen aborts the batch when this first durable transaction
+        // returns zero, so it never removes the loaded row afterward.
+        let failingQueue = QueueRepository(
+            context: ctx, saveContext: { _ in throw QueueSaveFailureForTest.injected }
+        )
+        XCTAssertEqual(failingQueue.cancelSelectedFromQueue([selectedSibling]), 0)
+        XCTAssertEqual(queue.queue().map(\.persistentModelID),
+                       [loaded.persistentModelID, selectedSibling.persistentModelID])
+        XCTAssertEqual(player.nowPlayingEpisodeID, loaded.persistentModelID)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(selectedSibling.downloadStatus, .downloaded)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: local.path))
+        player.stopAndUnload()
+    }
+
+    func testRemoveFromQueuePausedLoadedEpisodeDoesNotStartNext() throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.continueAfterEpisode)
+        let show = Podcast(feedURL: "https://example.invalid/single", title: "Disposable")
+        ctx.insert(show)
+        let source = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "PersonalAudioChapters", withExtension: "m4a"
+        ))
+        let name = "earshot-single-paused-\(UUID().uuidString).m4a"
+        let local = try DownloadPaths.downloadsDirectory().appendingPathComponent(name)
+        try FileManager.default.copyItem(at: source, to: local)
+        addTeardownBlock { try? FileManager.default.removeItem(at: local) }
+        let loaded = Episode(
+            guid: "loaded", title: "Loaded", audioURL: "https://example.invalid/loaded.m4a",
+            downloadStatus: .downloaded, downloadPath: name
+        )
+        loaded.podcast = show
+        let next = Episode(guid: "next", title: "Next", audioURL: "https://example.invalid/next.m4a")
+        next.podcast = show
+        ctx.insert(loaded)
+        ctx.insert(next)
+        try ctx.save()
+        let queue = QueueRepository(context: ctx)
+        queue.add([loaded, next])
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.play(loaded)
+        player.pause()
+
+        player.removeFromQueue(loaded, context: ctx, keepDownload: true)
+
+        XCTAssertEqual(player.nowPlayingEpisodeID, next.persistentModelID)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(queue.queue().map(\.persistentModelID), [next.persistentModelID])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: local.path))
+        player.stopAndUnload()
+    }
 
     func test_removeFromQueue_currentEpisodeWithNextQueued_stopsAndAdvances() {
         let ctx = TestStore.freshContext()
