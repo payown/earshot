@@ -11,6 +11,109 @@ final class EarshotUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    func testDisposableListeningPlacesPlaybackUsesNativeSettingsAndDefersLoadedEpisode() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen",
+                               "listeningPlacesPlayback"]
+        app.launchEnvironment["EARSHOT_LP_DISPOSABLE_SYNC"] = "1"
+        app.launch()
+
+        let demoStatus = app.staticTexts["listeningPlacesPlaybackDemoStatus"].firstMatch
+        XCTAssertTrue(demoStatus.waitForExistence(timeout: 15), app.debugDescription)
+        let ready = NSPredicate(format: "label CONTAINS %@", "Ready. Loaded rewind")
+        expectation(for: ready, evaluatedWith: demoStatus)
+        waitForExpectations(timeout: 15)
+        let sync = app.buttons["Sync synthetic peer place"].firstMatch
+        XCTAssertTrue(sync.waitForExistence(timeout: 15), app.debugDescription)
+        sync.tap()
+        let applied = NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@",
+                                  "Applied 1", "Deferred while loaded 1")
+        expectation(for: applied, evaluatedWith: demoStatus)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(demoStatus.label.contains("Own file unchanged: yes"), demoStatus.label)
+
+        app.swipeUp()
+        let sharing = app.switches["Share listening places"].firstMatch
+        XCTAssertTrue(sharing.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(sharing.isEnabled, app.debugDescription)
+        XCTAssertEqual(sharing.value as? String, "1", "The fixture must begin with sharing on")
+        // SwiftUI exposes the entire row as the Switch element; its center is
+        // on the text, so touch the native switch control at the trailing edge.
+        sharing.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        app.swipeUp()
+        let off = NSPredicate(format: "label CONTAINS %@", "Sharing is off")
+        let nativeStatus = app.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Listening Places status:"
+        )).firstMatch
+        let offResult = XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: off, object: nativeStatus
+        )], timeout: 10)
+        XCTAssertEqual(offResult, .completed, nativeStatus.exists ? nativeStatus.label : app.debugDescription)
+    }
+
+    func testDisposableListeningPlacesStopFailureIsAccessibleAndRetryable() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen",
+                               "listeningPlacesPlayback"]
+        app.launchEnvironment["EARSHOT_LP_DISPOSABLE_SYNC"] = "1"
+        app.launch()
+
+        let demoStatus = app.staticTexts["listeningPlacesPlaybackDemoStatus"].firstMatch
+        XCTAssertTrue(demoStatus.waitForExistence(timeout: 15), app.debugDescription)
+        let ready = NSPredicate(format: "label CONTAINS %@", "Ready. Loaded rewind")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: ready, object: demoStatus
+        )], timeout: 15), .completed)
+
+        app.buttons["Sync synthetic peer place"].firstMatch.tap()
+        let applied = NSPredicate(format: "label CONTAINS %@", "Own file unchanged: yes")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: applied, object: demoStatus
+        )], timeout: 10), .completed)
+        app.buttons["Simulate disposable cleanup conflict"].firstMatch.tap()
+        let staged = NSPredicate(format: "label CONTAINS %@", "Disposable conflict staged")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: staged, object: demoStatus
+        )], timeout: 10), .completed)
+
+        app.swipeUp()
+        let sharing = app.switches["Share listening places"].firstMatch
+        XCTAssertTrue(sharing.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(sharing.value as? String, "1")
+        sharing.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        app.swipeUp()
+        let nativeStatus = app.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Listening Places status:"
+        )).firstMatch
+        let failed = NSPredicate(format: "label CONTAINS %@", "Could not finish disposable cleanup")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: failed, object: nativeStatus
+        )], timeout: 10), .completed,
+            nativeStatus.exists ? nativeStatus.label : app.debugDescription)
+        XCTAssertEqual(sharing.value as? String, "1", "A failed cleanup must remain pending")
+
+        app.swipeDown()
+        app.swipeDown()
+        let repair = app.buttons["Repair disposable owned file"].firstMatch
+        XCTAssertTrue(repair.waitForExistence(timeout: 5), app.debugDescription)
+        repair.tap()
+        let repaired = NSPredicate(format: "label CONTAINS %@", "Disposable file repaired")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: repaired, object: demoStatus
+        )], timeout: 10), .completed)
+        app.swipeUp()
+        app.swipeUp()
+        let retry = app.buttons["Retry disposable cleanup"].firstMatch
+        XCTAssertTrue(retry.waitForExistence(timeout: 5), app.debugDescription)
+        retry.tap()
+        app.swipeUp()
+        let off = NSPredicate(format: "label CONTAINS %@", "Sharing is off")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: off, object: nativeStatus
+        )], timeout: 10), .completed,
+            nativeStatus.exists ? nativeStatus.label : app.debugDescription)
+    }
+
     func testWatchDownloadPickerOpensTwiceWithoutCrashing() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]

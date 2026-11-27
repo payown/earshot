@@ -1,6 +1,7 @@
 #if DEBUG
 import Foundation
 import SwiftData
+import SwiftUI
 
 /// The six App Store screens the capture harness can boot directly into (#643).
 enum ScreenshotScreen: String {
@@ -12,6 +13,7 @@ enum ScreenshotScreen: String {
     case settings
     case downloads
     case feedRefresh
+    case listeningPlacesPlayback
 }
 
 /// DEBUG-only App Store screenshot harness (#643). Never compiled into a Release
@@ -27,6 +29,11 @@ enum ScreenshotHarness {
     static let feedRetryFetcher = FeedRetryScreenshotFeed()
 
     static var isFolderRunTest: Bool { isSeeding && CommandLine.arguments.contains("-folderRunTest") }
+
+    static var isListeningPlacesPlaybackDemo: Bool {
+        isSeeding && requestedScreen == .listeningPlacesPlayback
+            && ProcessInfo.processInfo.environment["EARSHOT_LP_DISPOSABLE_SYNC"] == "1"
+    }
 
     static var isSeeding: Bool {
         CommandLine.arguments.contains("-uiTestScreenshotSeed")
@@ -96,6 +103,9 @@ enum ScreenshotHarness {
                 failures: [FeedRefreshFailure(feedURL: podcast.feedURL, podcastTitle: podcast.title,
                                              reason: "Could not download or read this feed.")]
             ))
+            selectTab(.settings)
+        case .listeningPlacesPlayback:
+            guard isListeningPlacesPlaybackDemo else { return }
             selectTab(.settings)
         case .settings:
             // RootView renders DownloadsSettingsView as the Settings-tab root in
@@ -243,6 +253,196 @@ actor FeedRetryScreenshotFeed: FeedFetching {
             ParsedEpisode(guid: "existing", title: "Already downloaded", audioURL: "https://feed-retry.test/audio.mp3",
                           description: nil, pubDate: nil, durationSeconds: nil)
         ])
+    }
+}
+
+/// Native Settings rehearsal using only an in-memory library and a fresh
+/// temporary folder. The launch gate is absent from Release builds. It never
+/// reads the user's bookmark, account, library, or a network feed.
+struct ListeningPlacesPlaybackDemoControls: View {
+    @MainActor private static var directory: URL?
+    private static let feed = "https://example.invalid/playback-demo.xml"
+
+    @Environment(\.modelContext) private var context
+    @Environment(ListeningPlacesService.self) private var service
+    @Environment(PlayerService.self) private var player
+    @State private var isSyncing = false
+    @State private var ownedFileBeforeConflict: Data?
+    @State private var status = "Preparing disposable playback fixtures."
+
+    var body: some View {
+        Section("Disposable Playback test") {
+            Text("This Debug test uses synthetic episodes and a temporary folder. It does not use your library, iCloud, or a network feed.")
+            Button("Sync synthetic peer place") { Task { await syncNow() } }
+                .disabled(isSyncing || !service.enabled || service.isSharingStopPendingForTesting)
+            Button("Simulate disposable cleanup conflict") {
+                Task { await makeCleanupConflict() }
+            }
+            .disabled(isSyncing || ownedFileBeforeConflict != nil)
+            if ownedFileBeforeConflict != nil {
+                Button("Repair disposable owned file") {
+                    Task { await repairOwnedFile() }
+                }
+            }
+            Text(status)
+                .accessibilityLabel("Disposable Playback status: \(status)")
+                .accessibilityIdentifier("listeningPlacesPlaybackDemoStatus")
+        }
+        .task { await prepareFixture() }
+    }
+
+    private func prepareFixture() async {
+        guard ScreenshotHarness.isListeningPlacesPlaybackDemo else { return }
+        do {
+            service.configure(context: context)
+            let show: Podcast
+            let loaded: Episode
+            let idle: Episode
+            if let existing = try context.fetch(FetchDescriptor<Podcast>()).first(where: {
+                $0.feedURL == Self.feed
+            }), let episodes = existing.episodes,
+               let first = episodes.first(where: { $0.guid == "synthetic-loaded" }),
+               let second = episodes.first(where: { $0.guid == "synthetic-idle" }) {
+                show = existing
+                loaded = first
+                idle = second
+            } else {
+                show = Podcast(feedURL: Self.feed, title: "Synthetic playback demo")
+                loaded = Episode(guid: "synthetic-loaded", title: "Loaded rewind",
+                    audioURL: "https://example.invalid/loaded.mp3", positionSeconds: 12)
+                idle = Episode(guid: "synthetic-idle", title: "Idle progress",
+                    audioURL: "https://example.invalid/idle.mp3", positionSeconds: 20)
+                context.insert(show)
+                for episode in [loaded, idle] {
+                    episode.podcast = show
+                    context.insert(episode)
+                }
+                let deviceID = AppSettingsStore(context: context).rawValue(
+                    SettingsKey.listeningPlacesDeviceID) ?? "phone123"
+                let earlier = Date().addingTimeInterval(-3_600)
+                try ListeningPlacesEventJournal.stageLocalMutation(
+                    of: loaded, in: context, deviceID: deviceID, now: earlier)
+                try ListeningPlacesEventJournal.stageLocalMutation(
+                    of: idle, in: context, deviceID: deviceID, now: earlier)
+                try ListeningPlacesPublicFeedApproval.stageDisposableApproval(
+                    for: show.feedURL, in: context)
+                try ListeningPlacesSubscriptionTestCoordinator.stagePolicy(.init(), in: context)
+                try ListeningPlacesSubscriptionTestCoordinator.stageEpisodeImportForTesting(in: context)
+                try context.save()
+            }
+            player.load(loaded) // Loaded but never played or fetched.
+            if Self.directory == nil {
+                let root = FileManager.default.temporaryDirectory
+                    .appending(path: "places-playback-demo-\(UUID().uuidString)")
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                Self.directory = root
+            }
+            guard let directory = Self.directory else { return }
+            if service.folderName == nil { await service.chooseFolder(directory) }
+            status = service.enabled
+                ? "Ready. Loaded rewind stays at 12 seconds; idle progress starts at 20 seconds."
+                : "Sharing is off. Turn on Share listening places to try the synthetic sync."
+        } catch {
+            context.rollback()
+            status = "Could not prepare disposable fixtures. Reopen this Debug screen to retry."
+        }
+    }
+
+    private func syncNow() async {
+        guard !isSyncing, service.enabled, !service.isSharingStopPendingForTesting,
+              let directory = Self.directory else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        do {
+            let episodes = try context.fetch(FetchDescriptor<Episode>())
+            guard let loaded = episodes.first(where: { $0.guid == "synthetic-loaded" }),
+                  let idle = episodes.first(where: { $0.guid == "synthetic-idle" }),
+                  let deviceID = AppSettingsStore(context: context).rawValue(
+                    SettingsKey.listeningPlacesDeviceID) else {
+                status = "Synthetic episodes are unavailable. Reopen this Debug screen to retry."
+                return
+            }
+            let now = Date()
+            let peerRecords = [
+                ListeningPlaceRecord(id: ListeningPlacesFormat.episodeID(
+                    guid: loaded.guid, enclosureURL: loaded.audioURL), kind: "episode",
+                    positionMilliseconds: 5_000, durationMilliseconds: nil,
+                    played: false, updatedAt: now, label: nil, feed: nil, deleted: nil),
+                ListeningPlaceRecord(id: ListeningPlacesFormat.episodeID(
+                    guid: idle.guid, enclosureURL: idle.audioURL), kind: "episode",
+                    positionMilliseconds: 25_000, durationMilliseconds: nil,
+                    played: false, updatedAt: now, label: nil, feed: nil, deleted: nil),
+            ]
+            let peer = try ListeningPlacesFormat.encodedDeviceFile(
+                deviceID: "desktopfixture", appVersion: "quill-cast/synthetic-fixture",
+                writtenAt: now, records: peerRecords)
+            let peerPath = directory.appending(path: "Listening Places/devices/desktopfixture.json")
+            try peer.write(to: peerPath, options: .atomic)
+            let bookmark = try directory.bookmarkData(options: .minimalBookmark,
+                includingResourceValuesForKeys: nil, relativeTo: nil)
+            let before = try await service.disposableTransportForTesting.readDeviceFile(
+                bookmarkData: bookmark, deviceID: deviceID)
+            let result = try await ListeningPlacesSubscriptionTestCoordinator.sync(
+                bookmarkData: bookmark, ownDeviceID: deviceID, context: context,
+                transport: service.disposableTransportForTesting, now: now,
+                loadedEpisodeID: { player.nowPlayingEpisode?.persistentModelID },
+                isPlaybackEnabled: {
+                    service.enabled && !service.isSharingStopPendingForTesting
+                })
+            let after = try await service.disposableTransportForTesting.readDeviceFile(
+                bookmarkData: bookmark, deviceID: deviceID)
+            let applied = result.episodes.applied
+            let deferredLoaded = result.episodes.deferredLoaded
+            let deferredOther = result.episodes.deferred
+            let ownFileUnchanged = before == after ? "yes" : "no"
+            status = "Applied \(applied). Deferred while loaded \(deferredLoaded). "
+                + "Other deferred \(deferredOther). Idle progress is "
+                + "\(idle.positionSeconds) seconds. Own file unchanged: \(ownFileUnchanged)."
+        } catch {
+            status = "Disposable sync failed. Confirm sharing is on, then retry Sync synthetic peer place."
+        }
+    }
+
+    /// Mutates only the fresh temporary fixture's owned file. A foreign app
+    /// marker makes the actual native stop path fail closed until repaired.
+    private func makeCleanupConflict() async {
+        guard let directory = Self.directory, ownedFileBeforeConflict == nil else { return }
+        do {
+            let deviceID = AppSettingsStore(context: context).rawValue(
+                SettingsKey.listeningPlacesDeviceID) ?? "phone123"
+            let bookmark = try directory.bookmarkData(options: .minimalBookmark,
+                includingResourceValuesForKeys: nil, relativeTo: nil)
+            guard let original = try await service.disposableTransportForTesting.readDeviceFile(
+                bookmarkData: bookmark, deviceID: deviceID),
+                  var root = try JSONSerialization.jsonObject(with: original) as? [String: Any] else {
+                status = "No disposable owned file is ready. Sync the synthetic place first."
+                return
+            }
+            root["app"] = "other-app/synthetic-conflict"
+            let conflict = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
+            try await service.disposableTransportForTesting.writeDeviceFile(
+                bookmarkData: bookmark, deviceID: deviceID, data: conflict)
+            ownedFileBeforeConflict = original
+            status = "Disposable conflict staged. Turn off Share listening places to check the cleanup error."
+        } catch {
+            status = "Could not stage the disposable conflict. Retry in this Debug screen."
+        }
+    }
+
+    private func repairOwnedFile() async {
+        guard let directory = Self.directory, let original = ownedFileBeforeConflict else { return }
+        do {
+            let deviceID = AppSettingsStore(context: context).rawValue(
+                SettingsKey.listeningPlacesDeviceID) ?? "phone123"
+            let bookmark = try directory.bookmarkData(options: .minimalBookmark,
+                includingResourceValuesForKeys: nil, relativeTo: nil)
+            try await service.disposableTransportForTesting.writeDeviceFile(
+                bookmarkData: bookmark, deviceID: deviceID, data: original)
+            ownedFileBeforeConflict = nil
+            status = "Disposable file repaired. Turn off Share listening places again to retry cleanup."
+        } catch {
+            status = "Could not repair the disposable file. Retry repair before turning sharing off."
+        }
     }
 }
 #endif

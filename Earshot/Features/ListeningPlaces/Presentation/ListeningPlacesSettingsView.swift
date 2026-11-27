@@ -9,8 +9,21 @@ struct ListeningPlacesSettingsView: View {
 
     var body: some View {
         Form {
+            #if DEBUG
+            if ScreenshotHarness.isListeningPlacesPlaybackDemo {
+                ListeningPlacesPlaybackDemoControls()
+            }
+            #endif
             Section {
+                #if DEBUG
+                if ScreenshotHarness.isListeningPlacesPlaybackDemo {
+                    Text("Disposable Playback test: this Debug screen can import synthetic peer positions. Release builds do not import Listening Places files.")
+                } else {
+                    Text("Listening Places writes this device's episode positions and played state to a folder you choose. Other apps can use those files. Earshot does not import changes from other devices through this folder.")
+                }
+                #else
                 Text("Listening Places writes this device's episode positions and played state to a folder you choose. Other apps can use those files. Earshot does not import changes from other devices through this folder.")
+                #endif
                 Text("iCloud Sync separately syncs your Earshot library and listening progress between your devices through your private iCloud account. Listening Places does not require iCloud Sync or an Earshot account.")
             }
 
@@ -20,6 +33,10 @@ struct ListeningPlacesSettingsView: View {
                 Button(service.folderName == nil ? "Choose Folder" : "Choose a Different Folder") {
                     choosingFolder = true
                 }
+                #if DEBUG
+                .disabled(ScreenshotHarness.isListeningPlacesPlaybackDemo
+                    && service.isSharingStopPendingForTesting)
+                #endif
                 .accessibilityHint("Opens the folder picker. Earshot creates a Listening Places folder inside your selection.")
             }
 
@@ -29,6 +46,10 @@ struct ListeningPlacesSettingsView: View {
                     set: { value in Task { await service.setEnabled(value) } }
                 ))
                 .disabled(service.folderName == nil)
+                #if DEBUG
+                .disabled(ScreenshotHarness.isListeningPlacesPlaybackDemo
+                    && service.isSharingStopPendingForTesting)
+                #endif
                 .accessibilityHint("Writes this device's episode positions and played state to the selected folder")
 
                 Toggle("Include podcast and episode names", isOn: Binding(
@@ -47,6 +68,16 @@ struct ListeningPlacesSettingsView: View {
                 Text(statusText)
                     .accessibilityLabel("Listening Places status: \(statusText)")
 
+                #if DEBUG
+                if ScreenshotHarness.isListeningPlacesPlaybackDemo,
+                   service.isSharingStopPendingForTesting {
+                    Button("Retry disposable cleanup") {
+                        Task { await service.setEnabled(false) }
+                    }
+                    .accessibilityHint("Retries cleanup of only this Debug fixture's owned file")
+                }
+                #endif
+
                 Button("Write Now") {
                     Task { await service.writeNow() }
                 }
@@ -57,6 +88,10 @@ struct ListeningPlacesSettingsView: View {
                     Button("Stop Sharing and Remove This Device", role: .destructive) {
                         confirmingRemoval = true
                     }
+                    #if DEBUG
+                    .disabled(ScreenshotHarness.isListeningPlacesPlaybackDemo
+                        && service.isSharingStopPendingForTesting)
+                    #endif
                     .accessibilityHint("Removes only this device's Listening Places file and forgets the selected folder")
                 }
             }
@@ -103,9 +138,29 @@ struct ListeningPlacesSettingsView: View {
         case .notConfigured: "Choose a folder to begin."
         case .off: "Sharing is off."
         case .ready: "Ready. No listening changes need to be written."
-        case .writing: "Writing listening places."
+        case .writing:
+            #if DEBUG
+            if ScreenshotHarness.isListeningPlacesPlaybackDemo,
+               service.isSharingStopPendingForTesting {
+                "Stopping disposable sharing. Owned-file cleanup is pending."
+            } else {
+                "Writing listening places."
+            }
+            #else
+            "Writing listening places."
+            #endif
         case .lastWritten(let date): "Last written \(date.formatted(date: .abbreviated, time: .shortened))."
-        case .failed(let message): "Could not write listening places. \(message)"
+        case .failed(let message):
+            #if DEBUG
+            if ScreenshotHarness.isListeningPlacesPlaybackDemo,
+               service.isSharingStopPendingForTesting {
+                "Could not finish disposable cleanup. Retry cleanup; if the synthetic file changed, repair it first."
+            } else {
+                "Could not write listening places. \(message)"
+            }
+            #else
+            "Could not write listening places. \(message)"
+            #endif
         }
     }
 }

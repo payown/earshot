@@ -383,6 +383,8 @@ struct RootView: View {
                 // as the tab root in screenshot mode only. No production change.
                 if ScreenshotHarness.requestedScreen == .feedRefresh {
                     FeedRefreshSettingsView(feed: ScreenshotHarness.feedRetryFetcher)
+                } else if ScreenshotHarness.isListeningPlacesPlaybackDemo {
+                    ListeningPlacesSettingsView()
                 } else if ScreenshotHarness.requestedScreen == .settings {
                     DownloadsSettingsView()
                 } else {

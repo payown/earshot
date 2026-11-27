@@ -269,6 +269,75 @@ which has no normal app caller and remains a disposable test path. Settings'
 “Share listening places” toggle calls `setEnabled`; native Settings VoiceOver
 timing and a real delayed provider remain unverified.
 
+### Isolated Debug Playback-only staging, not a release feature
+
+An isolated Debug launch uses `-uiTestScreenshotSeed -screenshotScreen
+listeningPlacesPlayback` with `EARSHOT_LP_DISPOSABLE_SYNC=1`. It creates an
+in-memory library with two `example.invalid` episodes and a fresh temporary
+folder. The real Settings view, `ListeningPlacesService` writer, bounded
+transport, parser, merge planner, and Debug peer receiver are exercised. A
+synthetic peer advances the idle episode while the loaded episode's rewind is
+deferred; the owned file stays byte-identical after import. The native Share
+toggle waits for its in-flight write and then scrubs episode rows from only
+the disposable owned file before reporting Off. The Debug stop intent and
+cleanup-pending marker are saved together. A relaunch while cleanup is
+pending remains Off for export, reports a retryable status, and blocks new
+sharing or folder replacement until cleanup succeeds. Settings and the peer
+coordinator use the same file-transport actor for the consent boundary.
+Release still has no peer
+receiver, Debug screen, or new consent behavior.
+
+The Debug exporter additionally requires an explicit local approval marker
+for each synthetic feed. A test passes one approved fixture while deferring
+an unapproved user-entered URL, token-bearing URL, invalid URL, and marked
+device-only feed without changing their local positions. This marker is **not**
+proof that a real feed is public. Normal Add Feed accepts a typed URL; OPML
+imports URLs, and directory search supplies feed URLs. `FeedService.fetch`
+discards the final response URL; refresh retains it only as validator metadata.
+The shared URL session uses a default configuration with no explicit
+credential/cookie exclusion. `Podcast` has no stored-credential provenance.
+Redirects, private servers, and credentials held outside a URL therefore lack
+a reliable anonymous-public proof. The new two-way path remains unavailable
+for those feeds. Signed 335's existing one-way export still uses URL screening;
+this Debug slice does not claim to resolve that older classification gap.
+
+On the final isolated source, the native Settings/interop/fresh-context focus
+run passed 6/6 (`EarshotPlaybackFinalFocused20261127.xcresult`). Its two
+native Settings UI tests included
+loaded deferral, no echo, the actual trailing Share switch, and a disposable
+foreign-owned-file conflict. The latter showed an accessible cleanup error,
+kept sharing pending, then repaired only the synthetic owned file and used
+the explicit Retry control to reach Off. A fresh-context unit test confirms
+that the durable pending marker blocks re-enabling after an interrupted stop
+until the owned file is scrubbed. The final affected service, transport,
+parser, merge, exchange, format, and journal suites passed 117 tests with two
+opt-in QUILL fixture skips (`EarshotPlaybackFinalAffected20261127.xcresult`).
+Those two passed 2/2 separately with the populated three-folder QUILL peer
+from pinned revision `64651e5884b779b7cf75e3c5cc4125b77a983e82`
+(`EarshotPlaybackPinnedQuillThreeFoldersFreshFinal20261127.xcresult`). An
+older one-folder fixture and an empty three-folder intermediate file failed
+the expected three-folder/follow assertions; the populated fixture was
+verified before the passing run. No assertions were weakened.
+
+The earlier whole iPhone scheme, started before the final pending-state and
+shared-actor correction, passed 2,957, skipped 62, and failed one Folder
+Membership Picker UI case at its initial Podcast settings lookup
+(`EarshotPlaybackStageFulliPhone20261127.xcresult`). That same case passed on
+the same device/OS in the final-source six-test focus run. This first-pass
+failure is not counted as a clean full-suite result. No Watch source changed;
+the previous exact-base Watch scheme passed 70/70, but Watch was not rerun on
+this final Debug-only source.
+
+Runnable native acceptance entry point: launch the `Earshot` UI test
+`testDisposableListeningPlacesPlaybackUsesNativeSettingsAndDefersLoadedEpisode`
+or `testDisposableListeningPlacesStopFailureIsAccessibleAndRetryable` on a
+disposable iOS simulator. Each test sets the Debug launch arguments and
+environment, opens the actual Listening Places Settings view, and uses only
+in-memory `example.invalid` episodes and a fresh temporary folder.
+A real provider, physical VoiceOver, restart during a blocked provider,
+authenticated feed, and production-source release regression remain
+separate gates. No real library or shared folder was used.
+
 Explicit `EpisodeRepository`, `InboxRepository`, `QueueRepository` and Quick
 Action saves now call one local journal helper. Feed-refresh saves invalidate
 unknown-origin place changes. A batch Played→Unplayed regression through the
