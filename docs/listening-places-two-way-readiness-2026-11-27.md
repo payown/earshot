@@ -236,13 +236,32 @@ synthetic subscription file byte-for-byte. This is the owned-file withdrawal
 portion of S8/S11, not the complete cross-app round-trip.
 
 The format cannot identify a legacy hashed record whose episode is no longer
-in Earshot's catalog; it carries no feed mapping. This scrub cannot erase a
-copy another app already imported. Stored credentials outside the feed URL
-are not represented on `Podcast`, so URL checks do not establish complete
-private-feed classification. Earshot does not yet emit subscription or folder
-rows, and its inbound subscription parser remains disconnected. Therefore a
-QUILL follow imported from Earshot and subsequent incoming-precedence pass
-cannot yet be claimed.
+in Earshot's catalog; it carries no feed mapping. The isolated consent-gate
+candidate therefore retains a legacy row only if a current public catalog
+episode positively matches it. An unmatched row is omitted from a rewrite of
+**this device's file**; local playback state and peer files are not changed.
+A private match takes precedence over a public match for the same hashed ID.
+The full catalog attribution runs once after a folder bind; later checkpoints
+use the narrower device-only scrub. A synthetic copied-file test failed on the
+pre-change source and passed after this filter, with the public row retained,
+the unknown and device-only rows removed, and local episode positions intact.
+This cannot erase a copy another app already imported. Stored credentials
+outside the feed URL are not represented on `Podcast`, so URL checks do not
+establish complete private-feed classification. Earshot does not yet emit
+subscription or folder rows, and its inbound subscription parser remains
+disconnected. Therefore a QUILL follow imported from Earshot and subsequent
+incoming-precedence pass cannot yet be claimed.
+
+The same isolated candidate stages a durable local off preference before
+waiting for an in-flight owned-file replacement, prevents new writes during
+that wait, and reports Off only after it returns. The separate remove-own-file
+action retains its existing behavior. The optimized-source service suite
+passed 52/52 on a disposable iOS 26.5 simulator
+(`EarshotWriterLegacyOptimized20261127.xcresult`). The adjacent subscription
+exchange suite passed 12/12 runnable tests; its two existing disposable
+coordinator opt-in tests skipped (`EarshotWriterSubscriptionAdjacent20261127.xcresult`).
+Broader release checks remain a gate. No release receiver or sharing scope
+was enabled by this change.
 
 Explicit `EpisodeRepository`, `InboxRepository`, `QueueRepository` and Quick
 Action saves now call one local journal helper. Feed-refresh saves invalidate

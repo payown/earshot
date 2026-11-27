@@ -105,6 +105,7 @@ actor ListeningPlacesSnapshotLoader {
         previousUpdatedAtByID: [String: Date],
         deviceID: String,
         appVersion: String,
+        verifyLegacyRecordAttribution: Bool = true,
         now: Date = .now
     ) throws -> ListeningPlacesPreparedSnapshot {
         var signatures = previousSignatures
@@ -112,20 +113,34 @@ actor ListeningPlacesSnapshotLoader {
         var recordsByID: [String: ListeningPlaceRecord] = [:]
         let journalValues = try ListeningPlacesEventJournal.snapshotRawValues(in: modelContext)
         let excludedPodcastIDs = try excludedPodcasts()
-        // The old owned file carries hashed episode IDs, not feed IDs. Resolve
-        // locally known excluded IDs before retaining any old zero/reset row.
-        // This rewrites only our device file; it emits no peer tombstone.
-        let excludedRecordIDs = try excludedEpisodeRecordIDs(
-            podcastIDs: excludedPodcastIDs,
-            matching: Set(previousRecords.map(\.id))
-        )
+        // Old owned files carry hashed episode IDs without feed provenance.
+        // Retain a historical row only when the current catalog positively
+        // attributes it to a shareable show. Unknown rows cannot safely be
+        // re-exported; removing them rewrites only our file, never the local
+        // episode/history store or a peer file. A private match wins over a
+        // public match if two local episodes share the same record identity.
+        let priorIDs = Set(previousRecords.map(\.id))
+        let excludedRecordIDs: Set<String>
+        if verifyLegacyRecordAttribution {
+            let shareable = try attributablePriorRecordIDs(
+                matching: priorIDs, excludedPodcastIDs: excludedPodcastIDs
+            )
+            excludedRecordIDs = priorIDs.subtracting(shareable)
+        } else {
+            // Once the current owned file has been reconciled, avoid a full
+            // catalog pass on every playback checkpoint. Privacy withdrawal
+            // still resolves known IDs under newly excluded shows.
+            excludedRecordIDs = try excludedEpisodeRecordIDs(
+                podcastIDs: excludedPodcastIDs, matching: priorIDs
+            )
+        }
         for id in excludedRecordIDs {
             signatures.removeValue(forKey: id)
             updatedAtByID.removeValue(forKey: id)
         }
-        // Preserve historical records until a known local state replaces them.
-        // A missing record might be a reset made while sharing was off; its
-        // event time is unknown and must not be fabricated at export time.
+        // Preserve attributable historical records until a known local state
+        // replaces them. A reset made while sharing was off has unknown event
+        // time and must not be fabricated at export time.
         for record in previousRecords where record.deleted != true {
             guard !excludedRecordIDs.contains(record.id) else { continue }
             if record.feed != nil || (!includeLabels && record.label != nil) {
@@ -244,6 +259,38 @@ actor ListeningPlacesSnapshotLoader {
             }
         }
         return excluded
+    }
+
+    private func attributablePriorRecordIDs(
+        matching priorIDs: Set<String>, excludedPodcastIDs: Set<PersistentIdentifier>
+    ) throws -> Set<String> {
+        guard !priorIDs.isEmpty else { return [] }
+        var shareable = Set<String>()
+        var privateMatches = Set<String>()
+        var offset = 0
+        while true {
+            try Task.checkCancellation()
+            var descriptor = FetchDescriptor<Episode>()
+            descriptor.fetchOffset = offset
+            descriptor.fetchLimit = 256
+            let episodes = try modelContext.fetch(descriptor)
+            guard !episodes.isEmpty else { break }
+            for episode in episodes {
+                try Task.checkCancellation()
+                let id = ListeningPlacesFormat.episodeID(
+                    guid: episode.guid, enclosureURL: episode.audioURL
+                )
+                guard priorIDs.contains(id), let podcast = episode.podcast else { continue }
+                if excludedPodcastIDs.contains(podcast.persistentModelID) {
+                    privateMatches.insert(id)
+                } else {
+                    shareable.insert(id)
+                }
+            }
+            if episodes.count < 256 { break }
+            offset += episodes.count
+        }
+        return shareable.subtracting(privateMatches)
     }
 
     private func excludedEpisodeRecordIDs(
@@ -408,6 +455,10 @@ final class ListeningPlacesService {
     @ObservationIgnored private var inFlightFileWriteID: UUID?
     @ObservationIgnored private var diskMayDifferFromKnownSnapshot = false
     @ObservationIgnored private var removingDeviceFile = false
+    @ObservationIgnored private var hasVerifiedPriorRecordAttribution = false
+    // A switch-off is not acknowledged until the already-started owned-file
+    // replacement returns. No new snapshot may start while this is true.
+    @ObservationIgnored private var sharingStopPending = false
     @ObservationIgnored private var context: ModelContext?
     @ObservationIgnored private var store: AppSettingsStore?
     @ObservationIgnored private var bookmarkData: Data?
@@ -485,6 +536,8 @@ final class ListeningPlacesService {
         olderFileObservation = nil
         pendingOlderFileConfirmation = nil
         self.context = context
+        sharingStopPending = false
+        hasVerifiedPriorRecordAttribution = false
         let store = AppSettingsStore(context: context)
         self.store = store
         enabled = store.bool(SettingsKey.listeningPlacesEnabled, default: false)
@@ -543,11 +596,22 @@ final class ListeningPlacesService {
         pendingWriteTask?.cancel()
         pendingWriteTask = nil
         pendingZeroSnapshots = [:]
+        sharingStopPending = false
+        hasVerifiedPriorRecordAttribution = false
         status = .notConfigured
     }
 
     func chooseFolder(_ url: URL) async {
         pendingOlderFileConfirmation = nil
+        if sharingStopPending {
+            await waitForInFlightFileWrites()
+            if sharingStopPending {
+                enabled = false
+                sharingStopPending = false
+                store?.setBool(false, for: SettingsKey.listeningPlacesEnabled)
+                status = .off
+            }
+        }
         writeGeneration += 1
         let generation = writeGeneration
         let accessed = url.startAccessingSecurityScopedResource()
@@ -571,6 +635,7 @@ final class ListeningPlacesService {
             pendingOlderFileConfirmation = nil
             bookmarkData = bookmark
             folderName = url.lastPathComponent
+            sharingStopPending = false
             enabled = true
             store?.setRawValue(bookmark.base64EncodedString(), for: SettingsKey.listeningPlacesBookmark)
             store?.setRawValue(url.lastPathComponent, for: SettingsKey.listeningPlacesFolderName)
@@ -583,6 +648,7 @@ final class ListeningPlacesService {
             hasObservedDeviceFile = false
             announcedDeviceFileConflict = false
             pendingZeroSnapshots = [:]
+            hasVerifiedPriorRecordAttribution = false
             await restoreExistingAndWrite()
         } catch {
             if generation == writeGeneration { fail(error) }
@@ -597,23 +663,58 @@ final class ListeningPlacesService {
         pendingOlderFileConfirmation = nil
         guard bookmarkData != nil else {
             enabled = false
+            sharingStopPending = false
             olderFileObservation = nil
             status = .notConfigured
             return
         }
-        enabled = value
-        // Both directions supersede a pending write or removal. In particular,
-        // enabling sharing while removal is in flight must preserve the folder.
+        // Both directions supersede a pending snapshot. Keep the visible switch
+        // on while a prior coordinated write is still in flight; its completion
+        // linearizes before turning sharing off. This await does not block UI.
         writeGeneration += 1
-        store?.setBool(value, for: SettingsKey.listeningPlacesEnabled)
-        status = value ? .ready : .off
-        if value {
-            await writeSnapshot()
+        let generation = writeGeneration
+        if !value {
+            sharingStopPending = true
+            pendingWriteTask?.cancel()
+            pendingWriteTask = nil
+            // Persist the stop intent before waiting on a slow provider. A
+            // relaunch must not resume sharing if the app exits mid-wait.
+            do {
+                guard let context else {
+                    enabled = false
+                    sharingStopPending = false
+                    status = .notConfigured
+                    return
+                }
+                try LocalAppSettingIdentity.setValue(
+                    "false", for: SettingsKey.listeningPlacesEnabled, in: context
+                )
+                try context.save()
+            } catch {
+                fail(error)
+                return // Fail closed: pending remains true and blocks writes.
+            }
+            await waitForInFlightFileWrites()
+            guard generation == writeGeneration, sharingStopPending else { return }
+            enabled = false
+            sharingStopPending = false
+            status = .off
+            return
         }
+        sharingStopPending = false
+        enabled = true
+        store?.setBool(value, for: SettingsKey.listeningPlacesEnabled)
+        status = .ready
+        await writeSnapshot()
     }
 
     func setIncludeLabels(_ value: Bool) async {
         pendingOlderFileConfirmation = nil
+        if sharingStopPending {
+            includeLabels = value
+            store?.setBool(value, for: SettingsKey.listeningPlacesIncludeLabels)
+            return
+        }
         writeGeneration += 1
         includeLabels = value
         store?.setBool(value, for: SettingsKey.listeningPlacesIncludeLabels)
@@ -723,6 +824,7 @@ final class ListeningPlacesService {
                 return
             }
             enabled = false
+            sharingStopPending = false
             includeLabels = false
             folderName = nil
             self.bookmarkData = nil
@@ -738,6 +840,7 @@ final class ListeningPlacesService {
             hasRestoredExisting = false
             diskMayDifferFromKnownSnapshot = false
             pendingZeroSnapshots = [:]
+            hasVerifiedPriorRecordAttribution = false
             status = .notConfigured
         } catch {
             guard generation == writeGeneration,
@@ -817,12 +920,13 @@ final class ListeningPlacesService {
     }
 
     private func writeSnapshot() async {
-        guard enabled, !removingDeviceFile else { return }
+        guard enabled, !removingDeviceFile, !sharingStopPending else { return }
         // Wait for an older file write before deciding whether this snapshot
         // matches the file. A stale write can still complete after its owner
         // was superseded by a privacy setting change.
         await waitForInFlightFileWrites()
-        guard enabled, !removingDeviceFile, let context, let bookmarkData else { return }
+        guard enabled, !removingDeviceFile, !sharingStopPending,
+              let context, let bookmarkData else { return }
         if !hasRestoredExisting {
             await restoreExistingAndWrite()
             return
@@ -850,13 +954,15 @@ final class ListeningPlacesService {
                 previousSignatures: capturedSignatures,
                 previousUpdatedAtByID: capturedUpdatedAtByID,
                 deviceID: capturedDeviceID,
-                appVersion: "earshot/\(AppInfo.version)"
+                appVersion: "earshot/\(AppInfo.version)",
+                verifyLegacyRecordAttribution: !hasVerifiedPriorRecordAttribution
             )
             // Another waiter may have started a write while this snapshot was
             // being prepared. Recheck before comparing or replacing the file.
             await waitForInFlightFileWrites()
             try Task.checkCancellation()
-            guard generation == writeGeneration, enabled, self.bookmarkData == bookmarkData else {
+            guard generation == writeGeneration, enabled, !sharingStopPending,
+                  self.bookmarkData == bookmarkData else {
                 return
             }
             signatures = prepared.signatures
@@ -870,6 +976,7 @@ final class ListeningPlacesService {
                 ) : nil)
             guard let data else {
                 removeConsumedPendingZeros(capturedPendingZeroSnapshots)
+                hasVerifiedPriorRecordAttribution = true
                 status = .ready
                 return
             }
@@ -931,6 +1038,7 @@ final class ListeningPlacesService {
                 return
             }
             lastWrittenRecords = prepared.records
+            hasVerifiedPriorRecordAttribution = true
             observedDeviceFile = data
             hasObservedDeviceFile = true
             diskMayDifferFromKnownSnapshot = false
@@ -1086,6 +1194,7 @@ final class ListeningPlacesService {
 
 #if DEBUG
     var isRemovingDeviceFileForTesting: Bool { removingDeviceFile }
+    var isSharingStopPendingForTesting: Bool { sharingStopPending }
     var isOlderConfirmationInFlightForTesting: Bool { olderConfirmationInFlight != nil }
     @ObservationIgnored private(set) var olderConfirmationDeliveriesForTesting = 0
 #endif

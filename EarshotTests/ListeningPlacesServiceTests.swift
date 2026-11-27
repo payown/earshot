@@ -192,9 +192,21 @@ final class ListeningPlacesServiceTests: XCTestCase {
             await writer.holdNextWrite()
             let write = Task { await service.setIncludeLabels(true) }
             await writer.waitUntilHeld()
-            if cancel { write.cancel() } else { await service.setEnabled(false) }
+            let disabling: Task<Void, Never>?
+            if cancel {
+                write.cancel()
+                disabling = nil
+            } else {
+                disabling = Task { await service.setEnabled(false) }
+                for _ in 0..<100 where !service.isSharingStopPendingForTesting {
+                    await Task.yield()
+                }
+                XCTAssertTrue(service.isSharingStopPendingForTesting,
+                    "The stop intent must be staged before the held write completes")
+            }
             await writer.resumeWrite()
             await write.value
+            await disabling?.value
             let attempts = await confirmation.attempts()
             XCTAssertEqual(attempts, 0, "Canceled or superseded writes must not schedule confirmation")
             XCTAssertFalse(service.isOlderConfirmationInFlightForTesting)
@@ -942,6 +954,55 @@ final class ListeningPlacesServiceTests: XCTestCase {
         service.releasePersistence()
     }
 
+    func testShareSwitchWaitsForOwnedWriteBeforeReportingOff() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-share-off-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Synthetic show")
+        let episode = Episode(guid: "share-off", title: "Synthetic episode",
+            audioURL: "https://example.com/audio.mp3", positionSeconds: 42)
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        let writer = SuspendedObservedListeningPlacesWriter()
+        let service = ListeningPlacesService(replaceObservedDeviceFile: {
+            bookmark, deviceID, expected, data in
+            try await writer.replace(bookmark: bookmark, deviceID: deviceID,
+                expected: expected, data: data)
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory)
+        await writer.holdNextWrite()
+        let write = Task { await service.setIncludeLabels(true) }
+        await writer.waitUntilSuspended()
+        let disabling = Task { await service.setEnabled(false) }
+        for _ in 0..<100 where !service.isSharingStopPendingForTesting {
+            await Task.yield()
+        }
+        XCTAssertTrue(service.isSharingStopPendingForTesting)
+        XCTAssertTrue(service.enabled,
+            "A coordinated write already in progress precedes switch-off acknowledgement")
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: SettingsKey.listeningPlacesEnabled,
+            in: ModelContext(container)
+        ), "false", "A relaunch during the held write must keep sharing off")
+        await writer.resumeWrite()
+        await write.value
+        await disabling.value
+        XCTAssertFalse(service.enabled)
+        XCTAssertFalse(service.isSharingStopPendingForTesting)
+        XCTAssertEqual(service.status, .off)
+        let file = try deviceFile(in: directory)
+        let stoppedBytes = try Data(contentsOf: file)
+        await service.writeNow()
+        XCTAssertEqual(try Data(contentsOf: file), stoppedBytes,
+            "An off device cannot start another owned-file write")
+        service.releasePersistence()
+    }
+
     private func setSelfReportedApp(_ app: String, in file: URL) throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
         json["app"] = app
@@ -1021,6 +1082,51 @@ final class ListeningPlacesServiceTests: XCTestCase {
         XCTAssertTrue(scrubbed.records.isEmpty, "Retained own-file reset must not leak after device-only")
         XCTAssertNotNil(scrubbed.data, "Own file must be rewritten without the private row")
         XCTAssertEqual(episode.positionSeconds, 0, "Privacy scrub must not alter local playback state")
+    }
+
+    func testLegacyOwnedFileKeepsAttributableRowsButQuarantinesUnknownAndDeviceOnly() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let publicShow = Podcast(feedURL: "https://example.com/public.xml", title: "Public")
+        let privateShow = Podcast(feedURL: "https://example.com/private.xml", title: "Device only")
+        let publicEpisode = Episode(guid: "public", title: "Public episode",
+            audioURL: "https://example.com/public.mp3", positionSeconds: 42)
+        let privateEpisode = Episode(guid: "private", title: "Private episode",
+            audioURL: "https://example.com/private.mp3", positionSeconds: 43)
+        publicEpisode.podcast = publicShow
+        privateEpisode.podcast = privateShow
+        for model in [publicShow, privateShow] { context.insert(model) }
+        for model in [publicEpisode, privateEpisode] { context.insert(model) }
+        try context.save()
+        let loader = await ListeningPlacesSnapshotLoader.makeBackground(modelContainer: container)
+        let original = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: [], previousSignatures: [:], previousUpdatedAtByID: [:],
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        XCTAssertEqual(original.records.count, 2)
+        try ListeningPlacesFeedPrivacy.stageDeviceOnly(feedURL: privateShow.feedURL, in: context)
+        try context.save()
+        let unknown = ListeningPlaceRecord(id: "unmatched-synthetic-legacy-id", kind: "episode",
+            positionMilliseconds: 77_000, durationMilliseconds: nil,
+            played: false, updatedAt: Date(timeIntervalSince1970: 900),
+            label: nil, feed: nil, deleted: nil)
+        let upgraded = try await loader.prepare(
+            pendingZeroSnapshots: [], includeLabels: false,
+            previousRecords: original.records + [unknown],
+            previousSignatures: original.signatures,
+            previousUpdatedAtByID: original.updatedAtByID,
+            deviceID: "1234abcd", appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 2_000)
+        )
+        XCTAssertEqual(upgraded.records.map(\.id), [ListeningPlacesFormat.episodeID(
+            guid: publicEpisode.guid, enclosureURL: publicEpisode.audioURL
+        )], "Only a positively attributable public record may remain in the owned file")
+        XCTAssertNotNil(upgraded.data, "The owned file must be rewritten without uncertain legacy rows")
+        XCTAssertEqual(publicEpisode.positionSeconds, 42)
+        XCTAssertEqual(privateEpisode.positionSeconds, 43,
+            "Withdrawing a shared-file row must preserve local playback history")
     }
 
     func testOwnedSnapshotNeverAddsCredentialBearingEpisodePlace() async throws {
