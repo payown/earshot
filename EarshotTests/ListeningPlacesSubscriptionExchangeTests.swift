@@ -247,6 +247,12 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         XCTAssertTrue(try ListeningPlacesSubscriptionRetention.isRetained(
             feedURL: feed, in: context
         ))
+        let afterUnfollow = try ListeningPlacesSubscriptionExchange.exportOwnedFile(
+            episodeFile: emptyFile(), context: context,
+            policy: .init(shareSubscriptions: true), now: newer
+        )
+        XCTAssertTrue(try rows(afterUnfollow).isEmpty,
+                      "A remote unfollow must not publish a new tombstone")
         policy.shareSubscriptions = false
         XCTAssertEqual(try ListeningPlacesSubscriptionExchange.applyPeerFile(
             firstFile, context: context, policy: policy,
