@@ -693,18 +693,96 @@ final class EarshotUITests: XCTestCase {
     }
 
     func testQueueDetailsStillOpenByTouchWhenRotorDetailsIsDisabled() {
+        if #available(iOS 27.0, *) { try? XCUIDevice.shared.voiceOverService.disable() }
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
                                "-uiTestQueueDetailsDisabled"]
         app.launch()
         let row = app.buttons.matching(NSPredicate(
-            format: "label CONTAINS %@", "#166 – If You Used a Passkey"
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
         )).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["queue.row.play"].waitForExistence(timeout: 5),
+                      "This is the ordinary-touch path with VoiceOver off")
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5),
                       "Disabling the configurable rotor item must not remove ordinary details navigation")
         XCTAssertFalse(app.buttons["Close player"].exists)
+    }
+
+    func testQueueDisabledDetailsHasSeparateVoiceOverRoute() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
+                               "-uiTestQueueDetailsDisabled"]
+        app.launch()
+        let row = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        let details = app.buttons["queue.row.details"].firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 5),
+                      "Disabling the rotor action must leave an independently focusable details route")
+        XCTAssertTrue(details.label.contains("#166 – If You Used a Passkey"))
+        details.tap()
+        if !app.descendants(matching: .any)["episode.detail"].exists { details.doubleTap() }
+        XCTAssertTrue(app.descendants(matching: .any)["episode.detail"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Close player"].exists)
+    }
+
+    func testQueueDisabledDetailsKeepsVoiceOverFirstPlayNow() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
+                               "-uiTestQueueDetailsDisabled"]
+        app.launch()
+        let row = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "#166 – If You Used a Passkey"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        row.tap()
+        if !app.buttons["Close player"].exists { row.doubleTap() }
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5),
+                      "A separate details control must not replace the configured first action")
+    }
+
+    func testQueueSeparateVoiceOverDetailsIsAbsentDuringSelectionAndReorder() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("VoiceOver UI automation requires iOS 27") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue",
+                               "-uiTestQueueDetailsDisabled"]
+        app.launch()
+        let voiceOver = XCUIDevice.shared.voiceOverService
+        try voiceOver.enable()
+        defer { try? voiceOver.disable() }
+        let details = app.buttons["queue.row.details"].firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 15))
+        let select = app.buttons["Select episodes"].firstMatch
+        select.tap()
+        if !app.buttons["Done"].exists { select.doubleTap() }
+        XCTAssertFalse(details.exists, "Selection rows must only toggle selection")
+        let done = app.buttons["Done"].firstMatch
+        done.tap()
+        if !details.exists && done.exists { done.doubleTap() }
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        let options = app.buttons["Queue options"].firstMatch
+        options.tap()
+        if !app.buttons["Reorder Queue"].exists { options.doubleTap() }
+        let reorder = app.buttons["Reorder Queue"].firstMatch
+        XCTAssertTrue(reorder.waitForExistence(timeout: 5))
+        reorder.tap()
+        if !app.buttons["Done reordering"].exists { reorder.doubleTap() }
+        XCTAssertFalse(details.exists, "The separate Details stop must not appear in reorder mode")
+        let doneReordering = app.buttons["Done reordering"].firstMatch
+        doneReordering.tap()
+        if !details.exists && doneReordering.exists { doneReordering.doubleTap() }
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
     }
 
     func testQueueSelectionDuringHeldLargeLibraryRefreshKeepsSurvivorsAndSettles() {

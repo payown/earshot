@@ -737,6 +737,7 @@ struct QueueScreen: View {
             position: position,
             total: total,
             moveMode: moveMode,
+            isReordering: queueEditMode == .active,
             focusedEpisode: $focusedEpisode,
             actions: availableQueueActions(order: quickActions.queueActions, moveMode: moveMode, episode: episode)
                 .filter { $0 != .pickUpToDrag || pickedItem == nil },
@@ -1130,9 +1131,11 @@ enum GroupedQueueDrag {
 /// One queue item whose selection button's Actions rotor is the user's
 /// configured queue Quick Actions (in order), so a screen-reader user can play,
 /// reorder, or remove without a drag gesture. The row selects details; its
-/// visible Play button starts audio for touch users. VoiceOver keeps one stop
-/// per episode and offers Play in the Actions rotor. Swipe exposes destructive
-/// actions and the context menu exposes the other configured actions.
+/// visible Play button starts audio for touch users. VoiceOver normally keeps
+/// one stop per episode and offers Play in the Actions rotor. If a custom
+/// double-tap action owns the row while Details is disabled, the trailing
+/// control becomes a separate Details stop. Swipe exposes destructive actions
+/// and the context menu exposes the other configured actions.
 private struct QueueRow: View {
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
@@ -1151,6 +1154,7 @@ private struct QueueRow: View {
     let position: Int?
     let total: Int?
     let moveMode: QueueMoveMode
+    let isReordering: Bool
     @AccessibilityFocusState.Binding var focusedEpisode: PersistentIdentifier?
     let actions: [QueueItemAction]
     let supplementalActions: [QuickActionItem]
@@ -1179,6 +1183,13 @@ private struct QueueRow: View {
             : presentations
         let remainingActions = ConfiguredRowDefault.remaining(rotorPresentations, promoted: promoted)
             .filter { promoted != nil || $0.action != .openEpisodeDetails }
+        // When the listener removes Details from the Queue rotor and configures
+        // another applicable double-tap default, the trailing control becomes
+        // an independent Details stop. Keep the configured row default and
+        // rotor untouched; selection uses a different row, and reorder mode
+        // must not add this extra control.
+        let separateDetails = voiceOverEnabled && !isReordering
+            && promoted != nil && !actions.contains(.openEpisodeDetails)
         // Castro-style "X min left" / total length, the same treatment EpisodeRow
         // gives every other list. The Queue was the original surface this was
         // requested for but #493 only reached the shared row, not this bespoke
@@ -1296,15 +1307,18 @@ private struct QueueRow: View {
             selectionButton
             Button {
                 guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
-                player.playFromEpisodeList(episode)
+                if separateDetails { onSelect() }
+                else { player.playFromEpisodeList(episode) }
             } label: {
-                Image(systemName: "play.fill")
+                Image(systemName: separateDetails ? "info.circle" : "play.fill")
                     .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
             }
-            .accessibilityLabel("Play \(episode.title)")
-            .accessibilityHint("Starts playback immediately")
-            .accessibilityIdentifier("queue.row.play")
-            .accessibilityHidden(voiceOverEnabled)
+            .accessibilityLabel(separateDetails
+                ? "Open episode details for \(episode.title)" : "Play \(episode.title)")
+            .accessibilityHint(separateDetails
+                ? "Opens episode details" : "Starts playback immediately")
+            .accessibilityIdentifier(separateDetails ? "queue.row.details" : "queue.row.play")
+            .accessibilityHidden(voiceOverEnabled && !separateDetails)
         }
     }
 
