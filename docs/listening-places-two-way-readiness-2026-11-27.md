@@ -267,3 +267,26 @@ On the same final source, playback persistence, handoff and CloudProjection
 passed 140 tests with zero failures; the existing opt-in large-library
 watchdog test was skipped because `TEST_RUNNER_RUN_CLOUD_PROJECTION_SCALE=1`
 was not set (`EarshotLPPlayerCloudFinal20261127.xcresult`).
+
+### Additional application save paths
+
+Identity repair can merge another episode's position into a surviving row.
+A disposable fail-before regression proved its old local event could regain
+authority after a later return to the former position
+(`EarshotLPRepairClockBefore20261127.xcresult`). The repair entry points now
+invalidate changed places before their caller saves; the repair suite passed
+11/11 (`EarshotLPRepairClockAfter20261127.xcresult`). Remote Queue
+reconciliation can also commit unrelated dirty main-context playback state.
+Its three save boundaries now invalidate an unstaged place before committing.
+A disposable Queue checkpoint and the widened direct-writer inventory passed
+2/2 (`EarshotLPQueueDirtyClock20261127.xcresult`); the repair,
+CloudProjection and journal suites passed 133 tests with one existing opt-in
+scale skip (`EarshotLPProvenanceAppPaths20261127.xcresult`).
+
+The inventory now alarms on direct `positionSeconds`, `isPlayed` and
+`playedAt` assignments. It is a source review guard, not an interception
+mechanism. Other shared-context saves, including pre-unfollow UI state and
+settings saves, can still commit dirty Episode values made elsewhere. Until
+those boundaries are classified or a supported authoritative episode
+revision exists, arbitrary unstaged A→B→A remains a real application risk,
+not merely an artificial test case. The incoming receiver stays disconnected.
