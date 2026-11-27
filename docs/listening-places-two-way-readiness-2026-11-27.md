@@ -263,3 +263,7 @@ temporary-ID regression and the formerly crashing Queue test passed 2/2
 passed 324/324, zero failures and zero skips on iOS 26.5 Simulator
 (`EarshotLPWriterPrivacyBroadFixed20261127.xcresult`). This is local source
 validation, not provider, physical playback, Watch, or two-way acceptance.
+On the same final source, playback persistence, handoff and CloudProjection
+passed 140 tests with zero failures; the existing opt-in large-library
+watchdog test was skipped because `TEST_RUNNER_RUN_CLOUD_PROJECTION_SCALE=1`
+was not set (`EarshotLPPlayerCloudFinal20261127.xcresult`).
