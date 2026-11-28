@@ -898,3 +898,48 @@ external group was assigned. En-US internal test notes were read back.
 Build 335 remains the prior fallback. Physical 336 VoiceOver, provider delay,
 and two-app acceptance remain unverified; TestFlight availability does not
 establish those behaviors.
+
+### November 28 next-cycle 337, local only
+
+Only after the standard 336 internal group was verified installable, the
+isolated `feat/listening-places-resume-queue-337-20261128` worktree branched
+from its exact signed source `f1d50974e808444a42ca96c6116b2e7d442ed63c`.
+The tested 337 app-code head is `d5c1134d416ae3b39e38798d8e5f0e6561638d59`.
+No standard 337 archive, TestFlight build, App Store submission, or main
+merge exists from this work. The earlier private **Trial** 337 is a distinct
+bundle and must not be confused with this next-cycle branch.
+
+The new device-local Playback setting offers Saved position (default) or
+5, 10, 15, 30, or 60 seconds earlier. An automatic lead-in does not itself
+change the saved event or create a peer echo; an explicit seek and genuine
+listening checkpoint can. A never-played episode's Intro Skip is not treated
+as a saved place. Natural Queue completion now saves Played and position zero
+in one transaction; manual Mark Played retains its existing position policy.
+While the current Queue item plays, an opted-in receiver may prefetch only
+the next eligible public episode's peer place. A slow or unavailable provider
+never delays auto-advance or seeks the next episode after it has loaded;
+local saved progress is the fallback. Follows, folders, private/uncertain
+feeds and the disabled normal subscription receiver remain outside this work.
+
+The iOS 27.2 exact-code full gate at `d5c1134d` passed 2,924 unit and 80 UI
+tests with zero failures (`Earshot337FinalD5Full20261128.xcresult`). It
+recorded 33 established unit skips (including two explicit disposable peer
+fixtures) and six iPad-only UI skips on the iPhone simulator. The two pinned
+peer fixtures then passed 2/2 with the explicit disposable gate
+(`Earshot337PinnedPeerFinal20261128.xcresult`). The corrected intro/Queue
+focused run passed 20/20 (`Earshot337IntroRewindFocused20261128.xcresult`).
+The Watch 26.5 suite passed 70/70 on the preceding code head
+`eb6f50f49617f5d040fb4d7a1d007a42c43b02aa`; the subsequent change
+was limited to iPhone resume logic and its test
+(`Earshot337Watch20261128.xcresult`). An earlier full iPhone run failed
+only the now-updated writer-inventory count; a later rerun was deliberately
+interrupted after finding the Intro Skip edge case. Neither is counted as a
+final pass.
+
+Before any 337 distribution, `AGENTS.md` requires Michael's explicit
+accessibility-semantics sign-off for the new “Resume from” control, values,
+hint and help text. Physical iPhone VoiceOver and audible checks still need
+two distinct saved places, optional lead-in without a false shared rewind,
+explicit backward seek, true natural Queue advance to a peer's newer place,
+slow-provider local fallback, and no late seek of an already loaded item.
+Standard 336's physical provider and peer acceptance remains separate.
