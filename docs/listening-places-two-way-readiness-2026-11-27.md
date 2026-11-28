@@ -856,3 +856,31 @@ the two separately run opt-in peer cases. An earlier broad run used the QUILL
 fixture variable across unrelated tests, and an interrupted run still had the
 old re-entry expectation; neither is counted as a pass. This work has no live
 Apple-directory, real provider, Windows/NVDA, or physical paired-device proof.
+
+**November 28 playback-only Release preparation:** The isolated 1.3.1 internal
+candidate at `28f268f564283f7bfaeaae8124fa57f626304c94` retains signed
+335, the paused Queue removal correction, and the fractional peer-position
+fix. Its normal Listening Places Settings path keeps new folder sharing off
+until chosen and requires a separate, device-local Receive playback places
+choice before a manual Sync Playback Now. A folder change revokes that choice.
+The bounded reader considers other-device files only, validates the current
+folder and consent after provider access, applies only positively approved
+public podcast playback rows, defers a loaded episode, and preserves peer
+event provenance without writing another app's file. The subscription and
+folder exchange coordinator remains Debug-fixture-only; no Release control
+enables it. The existing iCloud library behavior is unchanged.
+
+On this exact code tree, the corrected iOS 27.2 simulator full run passed
+2,950 unit tests (33 established skips) and 85 UI tests (six iPad-specific
+skips), zero failures (`EarshotLPReleaseFullCorrected20261128.xcresult`).
+The Watch 26.5 simulator gate passed 62 unit and eight UI tests, zero failures
+(`Earshot336WatchReleaseGate20261128.xcresult`). Separate focused checks passed
+the copied signed-335 store fixture, two opt-in pinned QUILL peer fixtures,
+and held-provider consent ordering. An earlier full iPhone run had two Debug
+fixture UI failures; those were corrected and both passed in the final full
+run. Physical VoiceOver on this standard Release candidate, real Dropbox
+hydration timing, and physical peer exchange remain acceptance gates. The
+earlier private Trial 337 physical result is evidence for the fractional
+position correction, not proof of the standard 336 artifact. Signed archive,
+internal-only App Store Connect processing, and group installability are
+pending at this checkpoint; do not describe 336 as distributed yet.
