@@ -5,15 +5,27 @@ import XCTest
 final class PlaybackLogicTests: XCTestCase {
     func testOptionalResumeRewindUsesSavedPlaceOnlyForImplicitPodcastResume() {
         XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
-            savedPosition: 100, rewindSeconds: 0, isExplicitStart: false), 100)
+            savedPosition: 100, rewindSeconds: 0, isExplicitStart: false,
+            hasSavedPlace: true), 100)
         XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
-            savedPosition: 100, rewindSeconds: 15, isExplicitStart: false), 85)
+            savedPosition: 100, rewindSeconds: 15, isExplicitStart: false,
+            hasSavedPlace: true), 85)
         XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
-            savedPosition: 8, rewindSeconds: 15, isExplicitStart: false), 0)
+            savedPosition: 8, rewindSeconds: 15, isExplicitStart: false,
+            hasSavedPlace: true), 0)
         XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
-            savedPosition: 100, rewindSeconds: 15, isExplicitStart: true), 100)
+            savedPosition: 100, rewindSeconds: 15, isExplicitStart: true,
+            hasSavedPlace: true), 100)
         XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
-            savedPosition: 0, rewindSeconds: 15, isExplicitStart: false), 0)
+            savedPosition: 0, rewindSeconds: 15, isExplicitStart: false,
+            hasSavedPlace: false), 0)
+        let introLanding = PlaybackLogic.playbackStartPosition(
+            position: 0, duration: 1_800, introSkipSeconds: 30
+        )
+        XCTAssertEqual(introLanding, 30)
+        XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
+            savedPosition: introLanding, rewindSeconds: 15, isExplicitStart: false,
+            hasSavedPlace: false), 30)
         XCTAssertEqual(PlaybackLogic.validatedResumeRewindSeconds(-30), 0)
         XCTAssertEqual(PlaybackLogic.validatedResumeRewindSeconds(3_600), 60)
     }

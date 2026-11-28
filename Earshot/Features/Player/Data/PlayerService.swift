@@ -1144,15 +1144,17 @@ final class PlayerService {
             writeLivePosition(episode, second: handoff.positionSeconds)
             _ = saveContext(localPlaceMutation: false)
         }
+        let savedPosition = handoff?.positionSeconds ?? resumePosition(for: episode)
         let savedStart = PlaybackLogic.playbackStartPosition(
-            position: handoff?.positionSeconds ?? resumePosition(for: episode),
+            position: savedPosition,
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
         )
         let resume = startSecondsOverride ?? Double(PlaybackLogic.startAfterOptionalResumeRewind(
             savedPosition: savedStart,
             rewindSeconds: resumeRewindSeconds,
-            isExplicitStart: transient
+            isExplicitStart: transient,
+            hasSavedPlace: savedPosition > 0
         ))
         if startSecondsOverride == nil, !transient, resume < Double(savedStart) {
             beginAutomaticResumeRewind(
@@ -1297,8 +1299,9 @@ final class PlayerService {
         observeCurrentItem(item)
         applyAudioProcessing(to: item)
 
+        let savedPosition = resumePosition(for: episode)
         let resume = PlaybackLogic.playbackStartPosition(
-            position: resumePosition(for: episode),
+            position: savedPosition,
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
         )
@@ -1306,7 +1309,8 @@ final class PlayerService {
             player.seek(to: CMTime(seconds: Double(resume), preferredTimescale: 1))
         }
         currentPositionSeconds = Double(resume)
-        rewindOnFirstRestoredResumeID = episode.persistentModelID
+        rewindOnFirstRestoredResumeID = savedPosition > 0
+            ? episode.persistentModelID : nil
         resetOutroObservation(to: Double(resume))
         isPlaying = false
         // Force the first tick after play to persist this episode's position.
@@ -1398,7 +1402,7 @@ final class PlayerService {
             let saved = Int(max(0, currentPositionSeconds))
             let start = PlaybackLogic.startAfterOptionalResumeRewind(
                 savedPosition: saved, rewindSeconds: resumeRewindSeconds,
-                isExplicitStart: false
+                isExplicitStart: false, hasSavedPlace: true
             )
             if start < saved, let item = player.currentItem {
                 beginAutomaticResumeRewind(

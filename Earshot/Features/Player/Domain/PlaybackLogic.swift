@@ -451,10 +451,13 @@ enum PlaybackLogic {
     }
 
     static func startAfterOptionalResumeRewind(
-        savedPosition: Int, rewindSeconds: Int, isExplicitStart: Bool
+        savedPosition: Int, rewindSeconds: Int, isExplicitStart: Bool,
+        hasSavedPlace: Bool
     ) -> Int {
         let saved = max(0, savedPosition)
-        guard !isExplicitStart, saved > 0 else { return saved }
+        // Intro Skip can make the effective start nonzero for a never-played
+        // episode. That landing point is not a saved listening place.
+        guard !isExplicitStart, hasSavedPlace, saved > 0 else { return saved }
         return max(0, saved - validatedResumeRewindSeconds(rewindSeconds))
     }
 
