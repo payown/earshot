@@ -4,6 +4,202 @@ import XCTest
 
 @MainActor
 final class ListeningPlacesServiceTests: XCTestCase {
+    private actor HeldPeerRead {
+        private var entered = false
+        private var enteredWaiter: CheckedContinuation<Void, Never>?
+        private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+        func read() async -> ListeningPlacesOtherDeviceRead {
+            entered = true
+            enteredWaiter?.resume()
+            enteredWaiter = nil
+            await withCheckedContinuation { releaseWaiter = $0 }
+            return ListeningPlacesOtherDeviceRead(files: [], skipped: [])
+        }
+
+        func waitUntilReading() async {
+            if entered { return }
+            await withCheckedContinuation { enteredWaiter = $0 }
+        }
+
+        func release() {
+            releaseWaiter?.resume()
+            releaseWaiter = nil
+        }
+    }
+
+    func testConsentToggleDuringHeldProviderReadDoesNotReuseOldSnapshot() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-release-race-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gate = HeldPeerRead()
+        let container = try makeContainer()
+        let service = ListeningPlacesService(readOtherDeviceFiles: { _, _ in
+            await gate.read()
+        })
+        service.configure(context: container.mainContext)
+        await service.chooseFolder(directory, enableSharing: false)
+        service.setReceivePlaybackEnabled(true)
+        let oldPass = Task { await service.syncPlaybackNow(loadedEpisodeID: { nil }) }
+        await gate.waitUntilReading()
+        service.setReceivePlaybackEnabled(false)
+        service.setReceivePlaybackEnabled(true)
+        await gate.release()
+        await oldPass.value
+        XCTAssertEqual(service.receivePlaybackStatus,
+                       "Ready to read playback places when you choose Sync Playback Now.")
+        XCTAssertTrue(service.receivePlaybackEnabled)
+        XCTAssertFalse(service.isReceivingPlayback)
+        service.releasePersistence()
+    }
+
+    func testFolderSelectionCanLeaveSharingAndReceivingOffUntilSeparateConsent() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-release-off-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let service = ListeningPlacesService()
+        service.configure(context: container.mainContext)
+        XCTAssertFalse(service.enabled)
+        XCTAssertFalse(service.receivePlaybackEnabled)
+        await service.chooseFolder(directory, enableSharing: false)
+        XCTAssertFalse(service.enabled)
+        XCTAssertFalse(service.receivePlaybackEnabled)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:
+            directory.appending(path: "Listening Places/devices").path
+                + "/" + (AppSettingsStore(context: container.mainContext)
+                    .rawValue(SettingsKey.listeningPlacesDeviceID) ?? "") + ".json"))
+        service.setReceivePlaybackEnabled(true)
+        XCTAssertTrue(service.receivePlaybackEnabled)
+        XCTAssertFalse(service.enabled, "Receiving consent cannot turn on sharing")
+        service.releasePersistence()
+        let relaunched = ListeningPlacesService()
+        relaunched.configure(context: ModelContext(container))
+        XCTAssertTrue(relaunched.receivePlaybackEnabled)
+        XCTAssertFalse(relaunched.enabled)
+        let replacement = FileManager.default.temporaryDirectory
+            .appending(path: "places-release-replacement-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: replacement, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: replacement) }
+        await relaunched.chooseFolder(replacement, enableSharing: false)
+        XCTAssertFalse(relaunched.receivePlaybackEnabled,
+                       "A different shared folder needs a new receiving choice")
+        XCTAssertFalse(ListeningPlacesPlaybackReceiveConsent.isEnabled(in: ModelContext(container)))
+        relaunched.releasePersistence()
+    }
+
+    func testReceiveChoiceAndStopDoNotSaveOrRollbackUnrelatedDirtyEpisode() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-release-dirty-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let context = container.mainContext
+        let show = Podcast(feedURL: "https://example.com/synthetic.xml", title: "Synthetic")
+        let episode = Episode(guid: "dirty-consent", title: "Episode",
+                              audioURL: "https://example.com/audio.mp3", positionSeconds: 60)
+        episode.podcast = show
+        context.insert(show)
+        context.insert(episode)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: show.feedURL, in: context
+        )
+        try context.save()
+        let service = ListeningPlacesService()
+        service.configure(context: context)
+        let ownID = try XCTUnwrap(AppSettingsStore(context: context)
+            .rawValue(SettingsKey.listeningPlacesDeviceID))
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: ownID, now: .now
+        )
+        try context.save()
+        await service.chooseFolder(directory)
+        let ownFile = directory.appending(path: "Listening Places/devices/\(ownID).json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ownFile.path))
+
+        let pending = Podcast(feedURL: "https://example.com/unsaved.xml", title: "Unsaved")
+        context.insert(pending)
+        XCTAssertTrue(context.hasChanges)
+        service.setReceivePlaybackEnabled(true)
+        XCTAssertFalse(service.receivePlaybackEnabled)
+        XCTAssertTrue(context.hasChanges, "Receiving must not roll back a pending library edit")
+        await service.stopSharingAndRemoveDeviceFile()
+        XCTAssertTrue(context.hasChanges, "Stop must not roll back a pending library edit")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ownFile.path),
+                      "A failed consent save must stop before removing the shared file")
+        try context.save()
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<Podcast>()), 2)
+        service.releasePersistence()
+    }
+
+    func testReleaseServiceReadsPeerWithoutWritingOwnFileAndDefersLoadedEpisode() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-release-peer-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let context = container.mainContext
+        let feed = "https://example.com/public.xml"
+        let podcast = Podcast(feedURL: feed, title: "Synthetic public show")
+        let episode = Episode(guid: "synthetic-place", title: "Synthetic episode",
+                              audioURL: "https://example.com/episode.mp3", positionSeconds: 10)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: feed, in: context
+        )
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "phone123",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        try context.save()
+        let service = ListeningPlacesService()
+        service.configure(context: context)
+        await service.chooseFolder(directory, enableSharing: false)
+        let recordID = ListeningPlacesFormat.episodeID(
+            guid: episode.guid, enclosureURL: episode.audioURL
+        )
+        let eventTime = Date.now.addingTimeInterval(-60)
+        let peer = try ListeningPlacesFormat.encodedDeviceFile(
+            deviceID: "desktop99", appVersion: "quill/test", writtenAt: eventTime,
+            records: [ListeningPlaceRecord(
+                id: recordID, kind: "episode", positionMilliseconds: 409_421,
+                durationMilliseconds: nil, played: false, updatedAt: eventTime,
+                label: nil, feed: nil, deleted: nil
+            )]
+        )
+        let devices = directory.appending(path: "Listening Places/devices")
+        try peer.write(to: devices.appending(path: "desktop99.json"), options: .atomic)
+        await service.syncPlaybackNow(loadedEpisodeID: { nil })
+        XCTAssertEqual(episode.positionSeconds, 10, "Receiving is off before opt-in")
+        service.setReceivePlaybackEnabled(true)
+        await service.syncPlaybackNow(loadedEpisodeID: { episode.persistentModelID })
+        XCTAssertEqual(episode.positionSeconds, 10, "The loaded row must not be sought")
+        XCTAssertTrue(service.receivePlaybackStatus.contains("1 wait while loaded"))
+        await service.syncPlaybackNow(loadedEpisodeID: { nil })
+        XCTAssertEqual(episode.positionSeconds, 409)
+        XCTAssertFalse(service.enabled)
+        let ownID = try XCTUnwrap(AppSettingsStore(context: context)
+            .rawValue(SettingsKey.listeningPlacesDeviceID))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: devices.appending(path: "\(ownID).json").path
+        ), "Receiving cannot create this device's shared file")
+        await service.setEnabled(true)
+        let ownURL = devices.appending(path: "\(ownID).json")
+        if FileManager.default.fileExists(atPath: ownURL.path) {
+            let ownData = try Data(contentsOf: ownURL)
+            let ownRoot = try XCTUnwrap(JSONSerialization.jsonObject(with: ownData) as? [String: Any])
+            let ownRows = try XCTUnwrap(ownRoot["records"] as? [[String: Any]])
+            XCTAssertFalse(ownRows.contains { $0["id"] as? String == recordID },
+                           "A received place must not become a fresh local export")
+        }
+        if case .failed = service.status { XCTFail("Sharing reported a failed write") }
+        service.releasePersistence()
+    }
+
     func testMacFolderBookmarkDoesNotUseIncompatibleMinimalOption() {
         XCTAssertEqual(ListeningPlacesService.bookmarkOptions(isIOSAppOnMac: true), [])
         XCTAssertTrue(ListeningPlacesService.bookmarkOptions(isIOSAppOnMac: false).contains(.minimalBookmark))
@@ -1689,7 +1885,8 @@ final class ListeningPlacesServiceTests: XCTestCase {
         let readme = try String(
             contentsOf: directory.appending(path: "Listening Places/README.txt"), encoding: .utf8
         )
-        XCTAssertTrue(readme.contains("Earshot does not import changes from other devices"))
+        XCTAssertTrue(readme.contains("If receiving is separately on"))
+        XCTAssertTrue(readme.contains("It does not import follows or folders"))
         XCTAssertTrue(readme.contains("iCloud Sync separately syncs"))
 
         episode.positionSeconds = 0
@@ -2248,7 +2445,8 @@ final class ListeningPlacesServiceTests: XCTestCase {
         try Data(legacy.utf8).write(to: readme)
         try await transport.prepareFolder(bookmarkData: bookmark)
         let updated = try String(contentsOf: readme, encoding: .utf8)
-        XCTAssertTrue(updated.contains("Earshot does not import changes from other devices"))
+        XCTAssertTrue(updated.contains("If receiving is separately on"))
+        XCTAssertTrue(updated.contains("It does not import follows or folders"))
         XCTAssertTrue(updated.contains("iCloud Sync separately syncs"))
         XCTAssertTrue(updated.contains("unless you enable them"))
 

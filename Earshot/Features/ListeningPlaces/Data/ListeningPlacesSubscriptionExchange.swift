@@ -3,8 +3,8 @@ import Foundation
 import SwiftData
 
 /// An explicit, opt-in transaction boundary for disposable two-app conformance.
-/// Nothing in the shipped app invokes this coordinator. In particular, the
-/// Listening Places reader still does not apply peer episode places.
+/// Nothing in the shipped app invokes this subscription/folder coordinator.
+/// The separate opt-in Playback receiver applies eligible episode places only.
 @MainActor
 enum ListeningPlacesSubscriptionExchange {
     struct Policy: Codable, Equatable {

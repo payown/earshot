@@ -440,8 +440,13 @@ final class ListeningPlacesService {
     private(set) var includeLabels = false
     private(set) var folderName: String?
     private(set) var status: Status = .notConfigured
+    private(set) var receivePlaybackEnabled = false
+    private(set) var isReceivingPlayback = false
+    private(set) var receivePlaybackStatus = "Receiving is off."
 
     @ObservationIgnored private let transport: ListeningPlacesFileTransport
+    @ObservationIgnored private let readOtherDeviceFiles:
+        @Sendable (Data, String) async throws -> ListeningPlacesOtherDeviceRead
     @ObservationIgnored private let prepareFolder: @Sendable (Data) async throws -> Void
     @ObservationIgnored private let readObservedDeviceFile: @Sendable (Data, String) async throws -> Data?
     @ObservationIgnored private let writeDeviceFile: @Sendable (Data, String, Data) async throws -> Void
@@ -462,6 +467,8 @@ final class ListeningPlacesService {
     @ObservationIgnored private var diskMayDifferFromKnownSnapshot = false
     @ObservationIgnored private var removingDeviceFile = false
     @ObservationIgnored private var hasVerifiedPriorRecordAttribution = false
+    @ObservationIgnored private var receiveConsentGeneration = 0
+    @ObservationIgnored private var receiveOperationID: UUID?
     // A switch-off is not acknowledged until the already-started owned-file
     // replacement returns. No new snapshot may start while this is true.
     @ObservationIgnored private var sharingStopPending = false
@@ -497,6 +504,7 @@ final class ListeningPlacesService {
         writeDeviceFile: (@Sendable (Data, String, Data) async throws -> Void)? = nil,
         replaceObservedDeviceFile: (@Sendable (Data, String, Data?, Data) async throws -> Void)? = nil,
         readObservedDeviceFile: (@Sendable (Data, String) async throws -> Data?)? = nil,
+        readOtherDeviceFiles: (@Sendable (Data, String) async throws -> ListeningPlacesOtherDeviceRead)? = nil,
         canAnnounce: (@MainActor () -> Bool)? = nil,
         announceOlderFileFailure: (@MainActor (String) -> Void)? = nil,
         confirmOlderFile: (@Sendable (Data, String, Data) async throws -> Bool)? = nil,
@@ -506,6 +514,11 @@ final class ListeningPlacesService {
         let transport = ListeningPlacesFileTransport()
         let confirmationTransport = ListeningPlacesFileTransport()
         self.transport = transport
+        self.readOtherDeviceFiles = readOtherDeviceFiles ?? { bookmark, deviceID in
+            try await transport.readOtherDeviceFiles(
+                bookmarkData: bookmark, excludingDeviceID: deviceID
+            )
+        }
         self.prepareFolder = prepareFolder ?? { bookmark in
             try await transport.prepareFolder(bookmarkData: bookmark)
         }
@@ -552,6 +565,12 @@ final class ListeningPlacesService {
         olderFileObservation = nil
         pendingOlderFileConfirmation = nil
         self.context = context
+        receiveConsentGeneration += 1
+        receiveOperationID = nil
+        receivePlaybackEnabled = ListeningPlacesPlaybackReceiveConsent.isEnabled(in: context)
+        receivePlaybackStatus = receivePlaybackEnabled
+            ? "Ready to read playback places when you choose Sync Playback Now."
+            : "Receiving is off."
         sharingStopPending = false
         hasVerifiedPriorRecordAttribution = false
         let store = AppSettingsStore(context: context)
@@ -606,6 +625,7 @@ final class ListeningPlacesService {
     }
 
     func releasePersistence() {
+        receiveConsentGeneration += 1
         bindingID = UUID()
         olderFileObservation = nil
         pendingOlderFileConfirmation = nil
@@ -627,9 +647,13 @@ final class ListeningPlacesService {
         sharingStopPending = false
         hasVerifiedPriorRecordAttribution = false
         status = .notConfigured
+        receivePlaybackEnabled = false
+        isReceivingPlayback = false
+        receiveOperationID = nil
+        receivePlaybackStatus = "Receiving is off."
     }
 
-    func chooseFolder(_ url: URL) async {
+    func chooseFolder(_ url: URL, enableSharing: Bool = true) async {
         pendingOlderFileConfirmation = nil
         #if DEBUG
         if usesDisposablePlaybackDemo, sharingStopPending {
@@ -664,16 +688,27 @@ final class ListeningPlacesService {
             )
             try await prepareFolder(bookmark)
             guard generation == writeGeneration else { return }
+            receiveConsentGeneration += 1
+            if let context {
+                try ListeningPlacesPlaybackReceiveConsent.setEnabled(false, in: context)
+            }
             bindingID = UUID()
             olderFileObservation = nil
             pendingOlderFileConfirmation = nil
             bookmarkData = bookmark
             folderName = url.lastPathComponent
             sharingStopPending = false
-            enabled = true
+            // The normal Settings screen chooses a folder before asking for
+            // sharing consent. Existing programmatic callers retain their
+            // established enable-on-selection behavior.
+            enabled = enableSharing
             store?.setRawValue(bookmark.base64EncodedString(), for: SettingsKey.listeningPlacesBookmark)
             store?.setRawValue(url.lastPathComponent, for: SettingsKey.listeningPlacesFolderName)
-            store?.setBool(true, for: SettingsKey.listeningPlacesEnabled)
+            store?.setBool(enableSharing, for: SettingsKey.listeningPlacesEnabled)
+            receivePlaybackEnabled = false
+            receiveOperationID = nil
+            isReceivingPlayback = false
+            receivePlaybackStatus = "Receiving is off."
             signatures = [:]
             updatedAtByID = [:]
             lastWrittenRecords = nil
@@ -683,7 +718,11 @@ final class ListeningPlacesService {
             announcedDeviceFileConflict = false
             pendingZeroSnapshots = [:]
             hasVerifiedPriorRecordAttribution = false
-            await restoreExistingAndWrite()
+            if enableSharing {
+                await restoreExistingAndWrite()
+            } else {
+                status = .off
+            }
         } catch {
             if generation == writeGeneration { fail(error) }
         }
@@ -806,6 +845,75 @@ final class ListeningPlacesService {
         await writeSnapshot()
     }
 
+    func setReceivePlaybackEnabled(_ value: Bool) {
+        receiveConsentGeneration += 1
+        guard let context, bookmarkData != nil else {
+            receivePlaybackEnabled = false
+            receivePlaybackStatus = "Choose a folder before receiving playback places."
+            return
+        }
+        do {
+            try ListeningPlacesPlaybackReceiveConsent.setEnabled(value, in: context)
+            receivePlaybackEnabled = value
+            receivePlaybackStatus = value
+                ? "Ready to read playback places when you choose Sync Playback Now."
+                : "Receiving is off."
+        } catch {
+            receivePlaybackStatus = "Could not save the receiving choice. Try again."
+        }
+    }
+
+    func syncPlaybackNow(
+        loadedEpisodeID: @MainActor () -> PersistentIdentifier?
+    ) async {
+        guard !isReceivingPlayback, receivePlaybackEnabled,
+              let context, let bookmarkData else { return }
+        let operationID = UUID()
+        receiveOperationID = operationID
+        isReceivingPlayback = true
+        receivePlaybackStatus = "Reading playback places."
+        let capturedBinding = bindingID
+        let capturedDeviceID = deviceID
+        let capturedConsentGeneration = receiveConsentGeneration
+        defer {
+            if receiveOperationID == operationID {
+                receiveOperationID = nil
+                isReceivingPlayback = false
+            }
+        }
+        do {
+            let peerRead = try await readOtherDeviceFiles(bookmarkData, capturedDeviceID)
+            guard bindingID == capturedBinding,
+                  receiveConsentGeneration == capturedConsentGeneration,
+                  self.bookmarkData == bookmarkData,
+                  self.context === context,
+                  receivePlaybackEnabled,
+                  ListeningPlacesPlaybackReceiveConsent.isEnabled(in: context)
+            else {
+                return
+            }
+            let files = peerRead.files.map { file in
+                (deviceID: String(file.fileName.dropLast(5)), data: file.data)
+            }
+            let result = try ListeningPlacesPlaybackReceiver.apply(
+                files, in: context, ownDeviceID: capturedDeviceID,
+                now: .now, loadedEpisodeID: loadedEpisodeID
+            )
+            receivePlaybackStatus = "Read \(files.count) available device files. "
+                + "Skipped \(peerRead.skipped.count) unavailable or ineligible files. "
+                + "Applied \(result.applied) places; \(result.deferredLoaded) wait while loaded; "
+                + "\(result.deferred) could not be applied. "
+                + "Your folder provider may need time to download newer files."
+        } catch {
+            if bindingID == capturedBinding,
+               receiveConsentGeneration == capturedConsentGeneration,
+               self.context === context,
+               receivePlaybackEnabled {
+                receivePlaybackStatus = "Could not read playback places. Check the selected folder and try again."
+            }
+        }
+    }
+
     func setIncludeLabels(_ value: Bool) async {
         pendingOlderFileConfirmation = nil
         if sharingStopPending {
@@ -827,6 +935,25 @@ final class ListeningPlacesService {
 
     func stopSharingAndRemoveDeviceFile() async {
         guard let bookmarkData, !removingDeviceFile else { return }
+        guard let configuredContext = context else { return }
+        guard !configuredContext.hasChanges else {
+            fail(ListeningPlacesPlaybackReceiveConsent.ConsentError.unsavedChanges)
+            return
+        }
+        // Revoke receiving before waiting on the folder provider. A failure
+        // to save consent must not occur after its owned file was removed.
+        receiveConsentGeneration += 1
+        do {
+            if receivePlaybackEnabled
+                || ListeningPlacesPlaybackReceiveConsent.isEnabled(in: configuredContext) {
+                try ListeningPlacesPlaybackReceiveConsent.setEnabled(false, in: configuredContext)
+            }
+            receivePlaybackEnabled = false
+            receivePlaybackStatus = "Receiving is off."
+        } catch {
+            fail(error)
+            return
+        }
         pendingOlderFileConfirmation = nil
         removingDeviceFile = true
         var retryCurrentSnapshotAfterRemoval = false

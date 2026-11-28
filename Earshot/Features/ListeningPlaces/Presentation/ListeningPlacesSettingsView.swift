@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct ListeningPlacesSettingsView: View {
     @Environment(ListeningPlacesService.self) private var service
+    @Environment(PlayerService.self) private var player
     @State private var choosingFolder = false
     @State private var selectionError: String?
     @State private var confirmingRemoval = false
@@ -17,12 +18,12 @@ struct ListeningPlacesSettingsView: View {
             Section {
                 #if DEBUG
                 if ScreenshotHarness.isListeningPlacesPlaybackDemo {
-                    Text("Disposable Playback test: this Debug screen can import synthetic peer positions. Release builds do not import Listening Places files.")
+                    Text("Disposable Playback test: this Debug screen imports synthetic peer positions. The regular Receiving switch separately controls public podcast playback imports.")
                 } else {
-                    Text("Listening Places writes this device's episode positions and played state to a folder you choose. Other apps can use those files. Earshot does not import changes from other devices through this folder.")
+                    Text("Listening Places can share this device's episode positions and played state with a folder you choose. Receiving playback places is a separate choice. Follows and folders are not exchanged.")
                 }
                 #else
-                Text("Listening Places writes this device's episode positions and played state to a folder you choose. Other apps can use those files. Earshot does not import changes from other devices through this folder.")
+                Text("Listening Places can share this device's episode positions and played state with a folder you choose. Receiving playback places is a separate choice. Follows and folders are not exchanged.")
                 #endif
                 Text("iCloud Sync separately syncs your Earshot library and listening progress between your devices through your private iCloud account. Listening Places does not require iCloud Sync or an Earshot account.")
             }
@@ -62,6 +63,31 @@ struct ListeningPlacesSettingsView: View {
                 Text("Sharing")
             } footer: {
                 Text("Names are off by default. Episode identifiers are shortened hashes. Earshot does not include feed URLs.")
+            }
+
+            Section {
+                Toggle("Receive playback places", isOn: Binding(
+                    get: { service.receivePlaybackEnabled },
+                    set: { service.setReceivePlaybackEnabled($0) }
+                ))
+                .disabled(service.folderName == nil)
+                .accessibilityHint("Reads eligible public podcast playback places from other device files when you choose Sync Playback Now. Does not import follows or folders.")
+
+                Button("Sync Playback Now") {
+                    Task {
+                        await service.syncPlaybackNow(
+                            loadedEpisodeID: { player.nowPlayingEpisode?.persistentModelID }
+                        )
+                    }
+                }
+                .disabled(!service.receivePlaybackEnabled || service.isReceivingPlayback)
+
+                Text(service.receivePlaybackStatus)
+                    .accessibilityLabel("Receiving status: \(service.receivePlaybackStatus)")
+            } header: {
+                Text("Receiving")
+            } footer: {
+                Text("Only podcasts verified as public and allowed on this device are eligible. A loaded episode waits until you leave it. Your folder provider may need time to download new files.")
             }
 
             Section("Status") {
@@ -106,7 +132,7 @@ struct ListeningPlacesSettingsView: View {
             switch result {
             case .success(let urls):
                 guard let url = urls.first else { return }
-                Task { await service.chooseFolder(url) }
+                Task { await service.chooseFolder(url, enableSharing: service.enabled) }
             case .failure(let error):
                 selectionError = error.localizedDescription
             }

@@ -456,6 +456,12 @@ struct ListeningPlacesPlaybackDemoControls: View {
             }
             guard let directory = Self.directory else { return }
             if service.folderName == nil { await service.chooseFolder(directory) }
+            // Folder selection revokes normal receiving consent. This isolated
+            // Debug fixture explicitly opts back in for its synthetic peer run.
+            service.setReceivePlaybackEnabled(true)
+            guard service.receivePlaybackEnabled else {
+                throw ListeningPlacesSubscriptionExchange.ExchangeError.invalidFile
+            }
             if service.enabled {
                 let deviceID = AppSettingsStore(context: context).rawValue(
                     SettingsKey.listeningPlacesDeviceID) ?? "phone123"

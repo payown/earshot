@@ -831,9 +831,10 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         ) else { return XCTFail("local seek clock must remain readable") }
         XCTAssertEqual(committedSeek.updatedAt, localSeekTime)
         XCTAssertEqual(committedSeek.sourceDeviceID, "aabb1234")
-        #if EARSHOT_LP_PLAYBACK_TRIAL
         // Choosing a folder revokes inbound consent even when a disposable
         // test selects the same URL again; explicitly opt in for the next pass.
+        try ListeningPlacesPlaybackReceiveConsent.setEnabled(true, in: reopened)
+        #if EARSHOT_LP_PLAYBACK_TRIAL
         try ListeningPlacesSubscriptionTestCoordinator.setTrialImportEnabled(true, in: reopened)
         #endif
 

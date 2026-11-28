@@ -11,6 +11,54 @@ final class EarshotUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    func testListeningPlacesReceivingRequiresSeparateSwitchInNativeSettings() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen",
+                               "listeningPlacesPlayback"]
+        app.launchEnvironment["EARSHOT_LP_DISPOSABLE_SYNC"] = "1"
+        app.launch()
+
+        let fixtureStatus = app.staticTexts["listeningPlacesPlaybackDemoStatus"].firstMatch
+        XCTAssertTrue(fixtureStatus.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", "Ready. Loaded rewind"),
+            object: fixtureStatus
+        )], timeout: 15), .completed)
+
+        let receive = app.switches["Receive playback places"].firstMatch
+        let sync = app.buttons["Sync Playback Now"].firstMatch
+        for _ in 0..<6 where !receive.exists { app.swipeUp() }
+        XCTAssertTrue(receive.waitForExistence(timeout: 5), app.debugDescription)
+        // The disposable demo opts in to its synthetic peer after selecting
+        // the folder. Turn receiving off here to prove the native control is
+        // independent of sharing, then enable it again for manual Sync.
+        XCTAssertEqual(receive.value as? String, "1")
+        XCTAssertTrue(sync.exists)
+        receive.switches.firstMatch.tap()
+        let off = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "0"), object: receive
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [off], timeout: 5), .completed,
+                       app.debugDescription)
+        XCTAssertFalse(sync.isEnabled)
+        receive.switches.firstMatch.tap()
+        let on = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "1"), object: receive
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [on], timeout: 5), .completed,
+                       app.debugDescription)
+        XCTAssertTrue(sync.isEnabled)
+        sync.tap()
+        let status = app.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Receiving status:"
+        )).firstMatch
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", "Read 0 available device files"),
+            object: status
+        )], timeout: 10), .completed,
+            status.exists ? status.label : app.debugDescription)
+    }
+
     func testDisposableListeningPlacesPlaybackUsesNativeSettingsAndDefersLoadedEpisode() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen",

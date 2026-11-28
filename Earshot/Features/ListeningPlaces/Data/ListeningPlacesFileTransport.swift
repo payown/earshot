@@ -142,7 +142,7 @@ actor ListeningPlacesFileTransport {
         Listening Places
         ================
 
-        Earshot writes this device's episode positions and played state to one file in "devices". Other compatible apps can use these files. Earshot does not import changes from other devices through this folder.
+        Earshot can write this device's episode positions and played state to one file in "devices" when sharing is on. Other compatible apps can use that file. If receiving is separately on, Earshot can read eligible public podcast playback places from other device files when you choose Sync Playback Now. It does not import follows or folders.
 
         Earshot's iCloud Sync separately syncs your Earshot library and listening progress between your devices through your private iCloud account. Listening Places does not require iCloud Sync or an Earshot account.
 
