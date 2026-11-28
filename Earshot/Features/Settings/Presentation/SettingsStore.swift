@@ -21,6 +21,7 @@ final class SettingsStore {
     var skipSilenceEnabled: Bool = SettingsDefault.skipSilenceEnabled { didSet { persist { $0.setBool(skipSilenceEnabled, for: SettingsKey.skipSilenceEnabled) } } }
     var skipForwardSeconds: Int = SettingsDefault.skipForwardSeconds { didSet { persist { $0.setInt(skipForwardSeconds, for: SettingsKey.skipForwardSeconds) } } }
     var skipBackSeconds: Int = SettingsDefault.skipBackSeconds { didSet { persist { $0.setInt(skipBackSeconds, for: SettingsKey.skipBackSeconds) } } }
+    var resumeRewindSeconds: Int = SettingsDefault.resumeRewindSeconds { didSet { persist { $0.setInt(resumeRewindSeconds, for: SettingsKey.resumeRewindSeconds) } } }
     var playbackPositionStep: PlaybackPositionStep = SettingsDefault.playbackPositionStep { didSet { persist { $0.setRawValue(playbackPositionStep.rawValue, for: SettingsKey.playbackPositionStep) } } }
     var wrapQueue: Bool = SettingsDefault.wrapQueue { didSet { persist { $0.setBool(wrapQueue, for: SettingsKey.wrapQueue) } } }
     var continueAfterEpisode: Bool = SettingsDefault.continueAfterEpisode { didSet { persist { $0.setBool(continueAfterEpisode, for: SettingsKey.continueAfterEpisode) } } }
@@ -116,6 +117,9 @@ final class SettingsStore {
         assignIfChanged(\.skipSilenceEnabled, store.bool(SettingsKey.skipSilenceEnabled, default: SettingsDefault.skipSilenceEnabled))
         assignIfChanged(\.skipForwardSeconds, store.int(SettingsKey.skipForwardSeconds, default: SettingsDefault.skipForwardSeconds))
         assignIfChanged(\.skipBackSeconds, store.int(SettingsKey.skipBackSeconds, default: SettingsDefault.skipBackSeconds))
+        assignIfChanged(\.resumeRewindSeconds, PlaybackLogic.validatedResumeRewindSeconds(
+            store.int(SettingsKey.resumeRewindSeconds, default: SettingsDefault.resumeRewindSeconds)
+        ))
         assignIfChanged(\.playbackPositionStep, store.rawValue(SettingsKey.playbackPositionStep)
             .flatMap(PlaybackPositionStep.init(rawValue:)) ?? SettingsDefault.playbackPositionStep)
         assignIfChanged(\.keepFinishedEpisodesInQueue, store.bool(SettingsKey.keepFinishedEpisodesInQueue, default: false))

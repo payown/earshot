@@ -191,6 +191,16 @@ final class PlayerService {
     /// accumulate from the optimistic target shown to the listener.
     @ObservationIgnored private var userSeekGeneration = 0
     @ObservationIgnored private var pendingUserSeekTarget: Double?
+    private struct AutomaticResumeRewind {
+        let episodeID: PersistentIdentifier
+        let item: AVPlayerItem
+        let savedSeconds: Double
+        var seekComplete: Bool
+    }
+    /// A resume offset is not a seek. Let the listener hear the lead-in, but
+    /// retain the saved place until actual listening reaches it again.
+    @ObservationIgnored private var automaticResumeRewind: AutomaticResumeRewind?
+    @ObservationIgnored private var rewindOnFirstRestoredResumeID: PersistentIdentifier?
     /// A seek or a new player item begins a fresh outro observation. Only a
     /// subsequent clock crossing can trigger early completion.
     @ObservationIgnored private weak var outroObservedItem: AVPlayerItem?
@@ -356,6 +366,13 @@ final class PlayerService {
     @ObservationIgnored private var preloadedItem: AVPlayerItem?
     @ObservationIgnored private var preloadedEpisode: Episode?
     @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
+    /// A provider read for the next Queue item runs before the playback
+    /// boundary. Completion never awaits it and falls back to local progress.
+    @ObservationIgnored private weak var queuePlaceService: ListeningPlacesService?
+    @ObservationIgnored private var queuePlaceRead: Task<Void, Never>?
+    @ObservationIgnored private var queuePlaceTargetID: PersistentIdentifier?
+    @ObservationIgnored private weak var queuePlaceTargetEpisode: Episode?
+    @ObservationIgnored private var queuePlaceRequestedAt = Date.distantPast
 
     // Artwork: track the last URL we fetched so we don't re-download when the
     // same episode (or a different episode with the same artwork) is loaded.
@@ -432,6 +449,16 @@ final class PlayerService {
         context = nil
         settings = nil
         currentOutroSkipSeconds = nil
+        queuePlaceRead?.cancel()
+        queuePlaceRead = nil
+        queuePlaceTargetID = nil
+        queuePlaceTargetEpisode = nil
+        queuePlaceService = nil
+    }
+
+    func configureQueuePlaceService(_ service: ListeningPlacesService) {
+        queuePlaceService = service
+        refreshPreload()
     }
 
     func playFolderRunEpisode(_ episode: Episode, origin: PlaybackOrigin?, autoplay: Bool) {
@@ -457,7 +484,7 @@ final class PlayerService {
         let repo = QueueRepository(context: context)
         let saved = naturalCompletion ? repo.finishPlayback(episode) : repo.markPlayedAndRemove(episode)
         guard saved else { return false }
-        episode.positionSeconds = 0
+        if !naturalCompletion { episode.positionSeconds = 0 }
         return saveContext()
     }
 
@@ -607,6 +634,8 @@ final class PlayerService {
         if currentEpisode !== episode {
             invalidatePendingUserSeek()
             effectiveRateRevision &+= 1
+            automaticResumeRewind = nil
+            rewindOnFirstRestoredResumeID = nil
         }
         currentEpisode = episode
         if !currentEpisodeIsTransient, let feedURL = episode?.podcast?.feedURL {
@@ -627,7 +656,37 @@ final class PlayerService {
         }
     }
 
+    private func beginAutomaticResumeRewind(
+        episode: Episode, item: AVPlayerItem,
+        from savedSeconds: Double, to startSeconds: Double
+    ) {
+        automaticResumeRewind = AutomaticResumeRewind(
+            episodeID: episode.persistentModelID,
+            item: item,
+            savedSeconds: savedSeconds,
+            seekComplete: false
+        )
+        currentPositionSeconds = startSeconds
+        resetOutroObservation(to: startSeconds)
+        player.seek(to: CMTime(seconds: startSeconds, preferredTimescale: 600)) {
+            [weak self, weak item] _ in
+            Task { @MainActor [weak self, weak item] in
+                guard let self, let item,
+                      self.player.currentItem === item,
+                      var pending = self.automaticResumeRewind,
+                      pending.item === item else { return }
+                // A failed offset seek may leave AVPlayer at its previous
+                // clock. Keep the saved-place guard until real playback catches
+                // up rather than exporting that clock as a new rewind.
+                pending.seekComplete = true
+                self.automaticResumeRewind = pending
+            }
+        }
+    }
+
     private func setCurrentPersonalAudio(_ item: PersonalAudioItem?) {
+        automaticResumeRewind = nil
+        rewindOnFirstRestoredResumeID = nil
         if nowPlayingPersonalAudioID != item?.id {
             invalidatePendingUserSeek()
             effectiveRateRevision &+= 1
@@ -1085,12 +1144,22 @@ final class PlayerService {
             writeLivePosition(episode, second: handoff.positionSeconds)
             _ = saveContext(localPlaceMutation: false)
         }
-        let resume = startSecondsOverride ?? Double(PlaybackLogic.playbackStartPosition(
+        let savedStart = PlaybackLogic.playbackStartPosition(
             position: handoff?.positionSeconds ?? resumePosition(for: episode),
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
+        )
+        let resume = startSecondsOverride ?? Double(PlaybackLogic.startAfterOptionalResumeRewind(
+            savedPosition: savedStart,
+            rewindSeconds: resumeRewindSeconds,
+            isExplicitStart: transient
         ))
-        if resume > 0 {
+        if startSecondsOverride == nil, !transient, resume < Double(savedStart) {
+            beginAutomaticResumeRewind(
+                episode: episode, item: item,
+                from: Double(savedStart), to: resume
+            )
+        } else if resume > 0 {
             player.seek(to: CMTime(seconds: resume, preferredTimescale: 1))
             currentPositionSeconds = resume
         } else {
@@ -1237,6 +1306,7 @@ final class PlayerService {
             player.seek(to: CMTime(seconds: Double(resume), preferredTimescale: 1))
         }
         currentPositionSeconds = Double(resume)
+        rewindOnFirstRestoredResumeID = episode.persistentModelID
         resetOutroObservation(to: Double(resume))
         isPlaying = false
         // Force the first tick after play to persist this episode's position.
@@ -1322,6 +1392,21 @@ final class PlayerService {
     private func resumeImmediately(providesStartHaptic: Bool) {
         recordPlaybackDiagnostic("resume.begin")
         guard hasLoadedContent else { return }
+        if let episode = currentEpisode,
+           rewindOnFirstRestoredResumeID == episode.persistentModelID {
+            rewindOnFirstRestoredResumeID = nil
+            let saved = Int(max(0, currentPositionSeconds))
+            let start = PlaybackLogic.startAfterOptionalResumeRewind(
+                savedPosition: saved, rewindSeconds: resumeRewindSeconds,
+                isExplicitStart: false
+            )
+            if start < saved, let item = player.currentItem {
+                beginAutomaticResumeRewind(
+                    episode: episode, item: item,
+                    from: Double(saved), to: Double(start)
+                )
+            }
+        }
         // Resuming during a sleep-timer fade supersedes it (P1-4).
         cancelFadeIfNeeded()
         guard configureSession() else { return }
@@ -1339,6 +1424,7 @@ final class PlayerService {
             )
         }
         updateNowPlayingInfo()
+        refreshPreload()
     }
 
     private func installResolvedURLForLoadedEpisode(_ url: URL) {
@@ -1557,6 +1643,8 @@ final class PlayerService {
         // CloudKit handoff fetch. Without this cancellation, the late fetch can
         // seek straight back to the position the listener just left.
         cancelHandoffOperation()
+        automaticResumeRewind = nil
+        rewindOnFirstRestoredResumeID = nil
         let loadedDuration = player.currentItem?.duration.seconds
         let authoritativeDuration: Double
         if let loadedDuration, loadedDuration.isFinite, loadedDuration > 0 {
@@ -1607,6 +1695,13 @@ final class PlayerService {
     var skipBackSeconds: Int {
         settings?.int(SettingsKey.skipBackSeconds, default: SettingsDefault.skipBackSeconds)
             ?? SettingsDefault.skipBackSeconds
+    }
+    private var resumeRewindSeconds: Int {
+        PlaybackLogic.validatedResumeRewindSeconds(
+            settings?.int(SettingsKey.resumeRewindSeconds,
+                          default: SettingsDefault.resumeRewindSeconds)
+                ?? SettingsDefault.resumeRewindSeconds
+        )
     }
 
     // MARK: Private — seek helper
@@ -2622,7 +2717,22 @@ final class PlayerService {
         // all bounce back. The seek completion performs the authoritative
         // reconciliation instead.
         guard pendingUserSeekTarget == nil else { return }
+        if let pending = automaticResumeRewind {
+            guard currentEpisode?.persistentModelID == pending.episodeID,
+                  player.currentItem === pending.item,
+                  pending.seekComplete else { return }
+            let actual = player.currentTime().seconds
+            guard actual.isFinite, abs(actual - currentSeconds) < 1.5 else { return }
+            if isPlaying, player.timeControlStatus == .playing,
+               currentSeconds >= pending.savedSeconds {
+                automaticResumeRewind = nil
+            }
+        }
         currentPositionSeconds = currentSeconds
+        if durationSeconds > 0, durationSeconds - currentSeconds <= 30,
+           let next = queuePlaceTargetEpisode {
+            requestUpcomingQueuePlace(for: next, minimumInterval: 30)
+        }
 
         // Belt-and-braces (#574): the loaded episode can be deleted out from
         // under the player (unfollow-while-playing, factory reset).
@@ -2789,6 +2899,21 @@ final class PlayerService {
             // over an undated recovery tick of unknown age.
             return 0
         }
+        // A later imported or explicit local event may rewind progress. The
+        // process-local crash tick is not allowed to win just because its
+        // numeric position is larger. Unknown legacy provenance retains the
+        // preexisting crash-recovery behavior.
+        if let context,
+           case .event(let savedEvent) = try? ListeningPlacesEventJournal.read(
+                for: episode, in: context
+           ) {
+            let liveTime = UserDefaults.standard.object(
+                forKey: LivePositionKey.updatedAt
+            ) as? Date
+            if liveTime.map({ savedEvent.updatedAt >= $0 }) ?? true {
+                return episode.positionSeconds
+            }
+        }
         return max(episode.positionSeconds, livePosition(for: episode) ?? 0)
     }
 
@@ -2838,12 +2963,15 @@ final class PlayerService {
         guard playbackHandoff.isEnabled,
               !currentEpisodeIsTransient,
               let episode = currentEpisode,
+              automaticResumeRewind?.episodeID != episode.persistentModelID,
               !episode.isDeleted,
               currentPositionSeconds.isFinite,
               let identity = followedPlaybackHandoffIdentity(for: episode) else { return nil }
         return PlaybackHandoffSnapshot(
             identity: identity,
-            positionSeconds: Int(max(0, currentPositionSeconds)),
+            positionSeconds: episode.isPlayed
+                ? max(0, episode.positionSeconds)
+                : Int(max(0, currentPositionSeconds)),
             playbackRate: currentEffectiveRate
         )
     }
@@ -2959,6 +3087,9 @@ final class PlayerService {
             return true
         }
         guard let episode = currentEpisode, currentPositionSeconds.isFinite else { return true }
+        guard automaticResumeRewind?.episodeID != episode.persistentModelID else {
+            return true
+        }
         // Never write to a deleted instance (#574) — SwiftData traps.
         guard !episode.isDeleted else {
             logDeletedEpisodeGuardOnce("position persist")
@@ -3004,6 +3135,7 @@ final class PlayerService {
             return
         }
         guard let episode = currentEpisode else { return }
+        guard automaticResumeRewind?.episodeID != episode.persistentModelID else { return }
         // Never write to a deleted instance (#574) — SwiftData traps.
         guard !episode.isDeleted else {
             logDeletedEpisodeGuardOnce("throttled position persist")
@@ -3035,6 +3167,7 @@ final class PlayerService {
     private func publishPositionProjectionThrottled(currentSecond: Int) {
         guard !currentEpisodeIsTransient,
               let episode = currentEpisode,
+              automaticResumeRewind?.episodeID != episode.persistentModelID,
               !episode.isDeleted,
               !episode.isPlayed else { return }
         guard PlaybackLogic.shouldProjectPlaybackPosition(
@@ -3190,7 +3323,9 @@ final class PlayerService {
                 // unrelated context save publish that stale value as an explicit
                 // rewind over the newer compact projection.
                 let position = currentEpisode.isPlayed
-                    ? 0 : Int(max(0, currentPositionSeconds))
+                    ? 0 : automaticResumeRewind?.episodeID == currentEpisode.persistentModelID
+                        ? max(0, currentEpisode.positionSeconds)
+                        : Int(max(0, currentPositionSeconds))
                 if let snapshot = EpisodeUserStateSnapshot(
                     episode: currentEpisode,
                     positionSeconds: position
@@ -3275,9 +3410,11 @@ final class PlayerService {
         // auto-advancing to the next queue item.
         if sleepTimer.endOfEpisode {
             sleepTimer.episodeEnded()
-            repo.finishPlayback(finished)
-            finished.positionSeconds = 0
-            saveContext()
+            guard repo.finishPlayback(finished) else {
+                pause(providesPauseHaptic: false)
+                Announcer.announce("Could not save episode completion. Playback stopped.")
+                return
+            }
             isPlaying = false
             intendsToPlay = false
             clearNowPlayingPresentation()
@@ -3291,9 +3428,11 @@ final class PlayerService {
         // manually) advances normally again.
         if EpisodeExportLogic.shouldStopAfterCurrent(stopAfterCurrentEpisode: stopAfterCurrentEpisode) {
             stopAfterCurrentEpisode = false
-            repo.finishPlayback(finished)
-            finished.positionSeconds = 0
-            saveContext()
+            guard repo.finishPlayback(finished) else {
+                pause(providesPauseHaptic: false)
+                Announcer.announce("Could not save episode completion. Playback stopped.")
+                return
+            }
             isPlaying = false
             intendsToPlay = false
             clearNowPlayingPresentation()
@@ -3308,12 +3447,6 @@ final class PlayerService {
         // Mark played and honor Queue retention. Reset
         // its position since it played to the end.
         guard repo.finishPlayback(finished) else {
-            pause(providesPauseHaptic: false)
-            Announcer.announce("Could not save episode completion. Playback stopped.")
-            return
-        }
-        finished.positionSeconds = 0
-        guard saveContext() else {
             pause(providesPauseHaptic: false)
             Announcer.announce("Could not save episode completion. Playback stopped.")
             return
@@ -3349,6 +3482,10 @@ final class PlayerService {
             ? preloadedItem : nil
         preloadedItem = nil
         preloadedEpisode = nil
+        queuePlaceRead?.cancel()
+        queuePlaceRead = nil
+        queuePlaceTargetID = nil
+        queuePlaceTargetEpisode = nil
         play(
             nextEpisode,
             preparedItem: prepared,
@@ -3387,6 +3524,7 @@ final class PlayerService {
             clearPreload()
             return
         }
+        requestUpcomingQueuePlace(for: next, minimumInterval: 30)
         // Already buffering the right episode — nothing to do.
         if preloadedEpisode?.persistentModelID == next.persistentModelID { return }
         guard let url = PlaybackLogic.resolvePlaybackURL(
@@ -3400,7 +3538,10 @@ final class PlayerService {
         // approved warning) at the actual episode boundary. Preloading it here
         // would create an AVPlayerItem that bypasses that decision (#709).
         guard url.scheme?.lowercased() != "http" else {
-            clearPreload()
+            // The media warning belongs at playback time. Peer-place reading
+            // is separate and remains eligible under the receiving consent.
+            preloadedItem = nil
+            preloadedEpisode = nil
             return
         }
         preloadedItem = makePlayerItem(url: url)
@@ -3410,6 +3551,38 @@ final class PlayerService {
     private func clearPreload() {
         preloadedItem = nil
         preloadedEpisode = nil
+        queuePlaceRead?.cancel()
+        queuePlaceRead = nil
+        queuePlaceTargetID = nil
+        queuePlaceTargetEpisode = nil
+    }
+
+    private func requestUpcomingQueuePlace(
+        for next: Episode, minimumInterval: TimeInterval
+    ) {
+        guard isPlaying, let service = queuePlaceService,
+              service.receivePlaybackEnabled else { return }
+        let id = next.persistentModelID
+        if queuePlaceTargetID == id,
+           Date.now.timeIntervalSince(queuePlaceRequestedAt) < minimumInterval { return }
+        queuePlaceRead?.cancel()
+        queuePlaceTargetID = id
+        queuePlaceTargetEpisode = next
+        queuePlaceRequestedAt = .now
+        queuePlaceRead = Task { @MainActor [weak self, weak next] in
+            guard let self, let next else { return }
+            await service.syncUpcomingQueueEpisode(
+                next,
+                stillUpcoming: { [weak self] in
+                    guard let self, let context = self.context,
+                          let current = self.currentEpisode,
+                          current.persistentModelID != id else { return false }
+                    let queued = QueueRepository(context: context).queue()
+                    return self.nextAdvanceID(after: current, in: queued, allowsWrapping: true) == id
+                },
+                loadedEpisodeID: { [weak self] in self?.nowPlayingEpisodeID }
+            )
+        }
     }
 
     // MARK: Private — audio processing

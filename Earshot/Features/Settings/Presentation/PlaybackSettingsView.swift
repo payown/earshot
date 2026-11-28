@@ -8,6 +8,7 @@ struct PlaybackSettingsView: View {
     @Environment(SettingsStore.self) private var settings
 
     private static let skipIntervals = [10, 15, 30, 45, 60]
+    private static let resumeRewindIntervals = [0, 5, 10, 15, 30, 60]
 
     // Ordered ascending so a VoiceOver flick up means "more" (faster / longer).
     private var speedAdjustableOptions: [AdjustableOptionPicker<Double>.Option] {
@@ -18,6 +19,14 @@ struct PlaybackSettingsView: View {
 
     private var skipAdjustableOptions: [AdjustableOptionPicker<Int>.Option] {
         Self.skipIntervals.map { .init(value: $0, title: "\($0)s", spoken: "\($0) seconds") }
+    }
+
+    private var resumeRewindOptions: [AdjustableOptionPicker<Int>.Option] {
+        Self.resumeRewindIntervals.map { seconds in
+            seconds == 0
+                ? .init(value: 0, title: "Saved position", spoken: "Saved position")
+                : .init(value: seconds, title: "\(seconds)s earlier", spoken: "\(seconds) seconds earlier")
+        }
     }
 
     private var positionStepOptions: [AdjustableOptionPicker<PlaybackPositionStep>.Option] {
@@ -88,6 +97,17 @@ struct PlaybackSettingsView: View {
                 // heading stop. The distinct Auto-advance and Queue sections keep
                 // their headers.
                 Text("Shows Previous and Next chapter buttons beside the chapter name in the player. Turn off to navigate chapters with the VoiceOver rotor on the artwork.")
+            }
+
+            Section {
+                AdjustableOptionPicker(
+                    "Resume from",
+                    options: resumeRewindOptions,
+                    selection: $settings.resumeRewindSeconds,
+                    hint: "Flick up to rewind farther from a saved place, down to rewind less"
+                )
+            } footer: {
+                Text("A saved podcast episode starts at its saved place or the chosen number of seconds earlier. The offset alone does not change the saved place. Skip back remains a separate control.")
             }
 
             Section {

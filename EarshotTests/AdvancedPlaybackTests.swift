@@ -591,6 +591,44 @@ final class AdvancedPlaybackTests: XCTestCase {
                        "Marking a completed episode unplayed must not resurrect another session's tick")
     }
 
+    func test_newerPeerBackwardSeekWinsOverOlderCrashRecoveryTick() throws {
+        let context = TestStore.freshContext()
+        let episode = makeEpisode(context, guid: "peer-rewind")
+        let key = DownloadTaskKey.key(
+            feedURL: episode.podcast?.feedURL, guid: episode.guid
+        )
+        let defaults = UserDefaults.standard
+        let peerTime = Date.now.addingTimeInterval(-30)
+        episode.positionSeconds = 100
+        try ListeningPlacesEventJournal.stagePeerEvent(
+            ListeningPlacesStateEvent(
+                id: ListeningPlacesFormat.episodeID(
+                    guid: episode.guid, enclosureURL: episode.audioURL
+                ), positionMilliseconds: 100_421, played: false,
+                updatedAt: peerTime, sourceDeviceID: "synthetic-peer", isReset: false
+            ), for: episode, in: context
+        )
+        try context.save()
+        AppSettingsStore(context: context).setRawValue(
+            key, for: SettingsKey.lastPlayingEpisodeID
+        )
+        defaults.set(key, forKey: PlayerService.LivePositionKey.episode)
+        defaults.set(500, forKey: PlayerService.LivePositionKey.seconds)
+        defaults.set(peerTime.addingTimeInterval(-30),
+                     forKey: PlayerService.LivePositionKey.updatedAt)
+        defer {
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.episode)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.seconds)
+            defaults.removeObject(forKey: PlayerService.LivePositionKey.updatedAt)
+        }
+        let player = PlayerService()
+        player.configure(context: context)
+        player.load(episode)
+        XCTAssertEqual(player.currentPositionSeconds, 100)
+        XCTAssertEqual(episode.positionSeconds, 100)
+        player.stopAndUnload()
+    }
+
     func test_replayAfterRemoteCompletionThenMarkUnplayed_ignoresOlderLiveTick() async throws {
         let context = TestStore.freshContext()
         let player = PlayerService()

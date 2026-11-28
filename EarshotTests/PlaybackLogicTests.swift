@@ -3,6 +3,21 @@ import XCTest
 
 /// Unit tests for the pure playback rules. No AVFoundation, no real files.
 final class PlaybackLogicTests: XCTestCase {
+    func testOptionalResumeRewindUsesSavedPlaceOnlyForImplicitPodcastResume() {
+        XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
+            savedPosition: 100, rewindSeconds: 0, isExplicitStart: false), 100)
+        XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
+            savedPosition: 100, rewindSeconds: 15, isExplicitStart: false), 85)
+        XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
+            savedPosition: 8, rewindSeconds: 15, isExplicitStart: false), 0)
+        XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
+            savedPosition: 100, rewindSeconds: 15, isExplicitStart: true), 100)
+        XCTAssertEqual(PlaybackLogic.startAfterOptionalResumeRewind(
+            savedPosition: 0, rewindSeconds: 15, isExplicitStart: false), 0)
+        XCTAssertEqual(PlaybackLogic.validatedResumeRewindSeconds(-30), 0)
+        XCTAssertEqual(PlaybackLogic.validatedResumeRewindSeconds(3_600), 60)
+    }
+
     func testExplicitQueueNavigationPreservesOrderAndFindsBothNeighbors() {
         let queue = ["a", "c", "b", "d"]
         XCTAssertEqual(PlaybackLogic.queueNeighborID(queue: queue, current: "b", direction: .previous), "c")

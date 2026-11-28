@@ -71,7 +71,7 @@ struct ListeningPlacesSettingsView: View {
                     set: { service.setReceivePlaybackEnabled($0) }
                 ))
                 .disabled(service.folderName == nil)
-                .accessibilityHint("Reads eligible public podcast playback places from other device files when you choose Sync Playback Now. Does not import follows or folders.")
+                .accessibilityHint("Reads eligible public podcast playback places when you choose Sync Playback Now, and checks the next Queue episode before automatic playback. Does not import follows or folders.")
 
                 Button("Sync Playback Now") {
                     Task {
@@ -87,7 +87,7 @@ struct ListeningPlacesSettingsView: View {
             } header: {
                 Text("Receiving")
             } footer: {
-                Text("Only podcasts verified as public and allowed on this device are eligible. A loaded episode waits until you leave it. Your folder provider may need time to download new files.")
+                Text("Only podcasts verified as public and allowed on this device are eligible. A loaded episode waits until you leave it. Earshot checks the next Queue episode before automatic playback. If the folder provider is slow, playback uses the saved place already on this device. Your folder provider may need time to download new files.")
             }
 
             Section("Status") {

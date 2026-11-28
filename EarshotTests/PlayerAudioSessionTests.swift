@@ -5,6 +5,27 @@ import XCTest
 
 @MainActor
 final class PlayerAudioSessionTests: XCTestCase {
+    func testOptionalResumeRewindDoesNotPersistOrProjectOffsetOnImmediatePause() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        let episode = Episode(guid: "rewind", title: "Rewind", audioURL: audioURL.absoluteString)
+        episode.positionSeconds = 12
+        context.insert(episode)
+        try context.save()
+        AppSettingsStore(context: context).setInt(5, for: SettingsKey.resumeRewindSeconds)
+
+        let player = PlayerService(audioSession: MockPlayerAudioSession())
+        player.configure(context: context)
+        player.play(episode)
+        XCTAssertEqual(player.currentPositionSeconds, 7)
+        player.pause()
+        XCTAssertEqual(episode.positionSeconds, 12,
+                       "An automatic listening offset is not a shared seek")
+        player.stopAndUnload()
+    }
+
     func testRemoteStartRestoresBeforeMaintenanceAndLateStartupDoesNotPauseIt() throws {
         for command in [PlayerService.RemotePlaybackCommand.play, .toggle] {
             let container = try ModelContainerFactory.makeInMemory()

@@ -444,6 +444,20 @@ enum PlaybackLogic {
         return startPosition
     }
 
+    /// A local listening preference, never a seek or a shared progress event.
+    /// Malformed settings from an older or future app cannot create a huge seek.
+    static func validatedResumeRewindSeconds(_ seconds: Int) -> Int {
+        min(max(seconds, 0), 60)
+    }
+
+    static func startAfterOptionalResumeRewind(
+        savedPosition: Int, rewindSeconds: Int, isExplicitStart: Bool
+    ) -> Int {
+        let saved = max(0, savedPosition)
+        guard !isExplicitStart, saved > 0 else { return saved }
+        return max(0, saved - validatedResumeRewindSeconds(rewindSeconds))
+    }
+
     /// Only continuous playback crossing a known ending boundary may finish an
     /// episode early. A seek or resume starts a new observation at its landing
     /// position, so neither can mark the episode played by itself.

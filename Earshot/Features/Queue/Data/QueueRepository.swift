@@ -732,10 +732,13 @@ final class QueueRepository {
     func finishPlayback(_ episode: Episode) -> Bool {
         markPlayed(episode, keepingQueueMembership: AppSettingsStore(context: context).bool(
             SettingsKey.keepFinishedEpisodesInQueue, default: false
-        ))
+        ), resetPositionForCompletion: true)
     }
 
-    private func markPlayed(_ episode: Episode, keepingQueueMembership: Bool) -> Bool {
+    private func markPlayed(
+        _ episode: Episode, keepingQueueMembership: Bool,
+        resetPositionForCompletion: Bool = false
+    ) -> Bool {
         // Also dismiss from the inbox: an episode played to completion should
         // leave the inbox durably, matching the mark-played Quick Action and
         // swipe (#546). `inboxDismissed` stays set even if later marked unplayed.
@@ -747,6 +750,7 @@ final class QueueRepository {
         let mutate: (Episode) -> Void = {
             $0.isPlayed = true
             $0.inboxDismissed = true
+            if resetPositionForCompletion { $0.positionSeconds = 0 }
             // Auto-delete the download once played, when the user opted in. In
             // the same save as the played flip so the file and state clear atomically.
             DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)

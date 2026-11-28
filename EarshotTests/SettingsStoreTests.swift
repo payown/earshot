@@ -57,6 +57,22 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.playbackPositionStep, .automatic)
     }
 
+    func testResumeRewindDefaultsToExactAndPersistsOnlyOnThisDevice() {
+        let context = TestStore.freshContext()
+        let settings = SettingsStore()
+        settings.configure(context: context)
+        XCTAssertEqual(settings.resumeRewindSeconds, 0)
+        XCTAssertTrue(AppSettingScope.isLocal(SettingsKey.resumeRewindSeconds))
+        settings.resumeRewindSeconds = 15
+        let reloaded = SettingsStore()
+        reloaded.configure(context: context)
+        XCTAssertEqual(reloaded.resumeRewindSeconds, 15)
+        AppSettingsStore(context: context).setInt(900, for: SettingsKey.resumeRewindSeconds)
+        let bounded = SettingsStore()
+        bounded.configure(context: context)
+        XCTAssertEqual(bounded.resumeRewindSeconds, 60)
+    }
+
     func testFreshInstallDefaultsTranscriptExportsToSpeakersOnly() {
         let context = TestStore.freshContext()
         let settings = SettingsStore()

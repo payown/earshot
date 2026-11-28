@@ -914,6 +914,69 @@ final class ListeningPlacesService {
         }
     }
 
+    /// Opportunistically refreshes just the upcoming Queue episode while the
+    /// current item is still playing. This never delays auto-advance: a slow or
+    /// unavailable folder simply leaves the durable local place unchanged.
+    /// Manual Sync Now remains available independently of this read.
+    func syncUpcomingQueueEpisode(
+        _ episode: Episode,
+        stillUpcoming: @MainActor () -> Bool,
+        loadedEpisodeID: @MainActor () -> PersistentIdentifier?
+    ) async {
+        guard receivePlaybackEnabled, let context, let bookmarkData,
+              !context.hasChanges, !episode.isDeleted,
+              episode.modelContext === context, stillUpcoming() else { return }
+        // A private, device-only or unverified next episode must not trigger
+        // even an automatic read of the shared provider.
+        guard let feed = episode.podcast?.feedURL,
+              episode.status != .expired,
+              let deviceOnly = try? ListeningPlacesFeedPrivacy.deviceOnlyKeys(in: context),
+              ListeningPlacesFeedPrivacy.mayShare(
+                feedURL: feed, deviceOnlyKeys: deviceOnly
+              ),
+              let approved = try? ListeningPlacesPublicFeedApproval.approvedKeys(in: context),
+              approved.contains(ListeningPlacesPublicFeedApproval.key(feed))
+        else { return }
+        let capturedBinding = bindingID
+        let capturedDeviceID = deviceID
+        let capturedConsentGeneration = receiveConsentGeneration
+        let capturedID = ListeningPlacesFormat.episodeID(
+            guid: episode.guid, enclosureURL: episode.audioURL
+        )
+        do {
+            let peerRead = try await readOtherDeviceFiles(bookmarkData, capturedDeviceID)
+            let files = peerRead.files.map {
+                (deviceID: String($0.fileName.dropLast(5)), data: $0.data)
+            }
+            let parsed = await Task.detached(priority: .utility) {
+                ListeningPlacesPlaybackReceiver.parsePeerFiles(
+                    files, ownDeviceID: capturedDeviceID, now: .now
+                )
+            }.value
+            guard !Task.isCancelled,
+                  bindingID == capturedBinding,
+                  receiveConsentGeneration == capturedConsentGeneration,
+                  self.bookmarkData == bookmarkData,
+                  self.context === context,
+                  receivePlaybackEnabled,
+                  ListeningPlacesPlaybackReceiveConsent.isEnabled(in: context),
+                  !episode.isDeleted, episode.modelContext === context,
+                  ListeningPlacesFormat.episodeID(
+                    guid: episode.guid, enclosureURL: episode.audioURL
+                  ) == capturedID,
+                  loadedEpisodeID() != episode.persistentModelID,
+                  stillUpcoming()
+            else { return }
+            _ = try ListeningPlacesPlaybackReceiver.applyParsed(
+                parsed, in: context, loadedEpisodeID: loadedEpisodeID,
+                targetEpisode: episode
+            )
+        } catch {
+            // Playback never waits for a provider or changes its Queue policy.
+            // The explicit Sync Now control reports read failures to the user.
+        }
+    }
+
     func setIncludeLabels(_ value: Bool) async {
         pendingOlderFileConfirmation = nil
         if sharingStopPending {

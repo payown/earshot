@@ -45,6 +45,9 @@ enum SettingsKey {
     static let equalizerTreble = "equalizer_treble"
     static let skipForwardSeconds = "skip_forward_seconds"
     static let skipBackSeconds = "skip_back_seconds"
+    /// Device-local offset applied only when starting from a saved podcast
+    /// place. It is never itself a playback progress mutation.
+    static let resumeRewindSeconds = "resume_rewind_seconds"
     /// Device-local interval for the VoiceOver playback-position adjustment.
     static let playbackPositionStep = "playback_position_step"
     // direct_touch_enabled: retained for data compatibility only. Its one
@@ -331,6 +334,7 @@ enum SettingsDefault {
     static let equalizerBand: EqualizerBandGain = .neutral
     static let skipForwardSeconds = 30
     static let skipBackSeconds = 15
+    static let resumeRewindSeconds = 0
     static let playbackPositionStep: PlaybackPositionStep = .automatic
     static let wifiOnlyDownloads = true
     static let downloadCompletionNotifications = false

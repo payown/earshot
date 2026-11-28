@@ -1495,6 +1495,37 @@ final class EarshotUITests: XCTestCase {
         XCTAssertEqual(adjustment.value as? String, "5 minutes")
     }
 
+    func testPodcastResumeRewindSettingDefaultsToSavedPlaceAndPersists() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Settings"].tap()
+        let playback = app.buttons["Playback"]
+        XCTAssertTrue(playback.waitForExistence(timeout: 5))
+        playback.tap()
+
+        let resume = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label == %@", "Resume from")
+        ).firstMatch
+        for _ in 0..<6 where !resume.isHittable { app.swipeUp() }
+        XCTAssertTrue(resume.isHittable, app.debugDescription)
+        XCTAssertEqual(resume.value as? String, "Saved position")
+        resume.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.65)).tap()
+        let earlier = app.buttons["15s earlier"].firstMatch
+        if !earlier.waitForExistence(timeout: 2) {
+            resume.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.65)).tap()
+        }
+        XCTAssertTrue(earlier.waitForExistence(timeout: 5), app.debugDescription)
+        earlier.tap()
+        XCTAssertEqual(resume.value as? String, "15 seconds earlier")
+
+        app.navigationBars.buttons["Settings"].tap()
+        playback.tap()
+        for _ in 0..<6 where !resume.isHittable { app.swipeUp() }
+        XCTAssertEqual(resume.value as? String, "15 seconds earlier")
+    }
+
     func testHomeScreenBadgeOptInAndOptOut() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "library"]

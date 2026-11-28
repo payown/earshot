@@ -14,21 +14,52 @@ enum ListeningPlacesPlaybackReceiver {
 
     enum ReceiverError: Error { case dirtyContext, revalidationFailed }
 
+    /// Pure bounded decoding can run away from the main actor for an automatic
+    /// Queue check. The store, eligibility and loaded-item checks remain on the
+    /// main actor at the eventual save boundary.
+    nonisolated static func parsePeerFiles(
+        _ files: [(deviceID: String, data: Data)], ownDeviceID: String, now: Date
+    ) -> [(deviceID: String, file: ListeningPlacesInboundFile)] {
+        files.compactMap { source in
+            guard source.deviceID != ownDeviceID,
+                  let parsed = try? ListeningPlacesInboundParser.parse(
+                    data: source.data, now: now
+                  ), parsed.deviceID == source.deviceID, !parsed.isStale else {
+                return nil
+            }
+            return (deviceID: source.deviceID, file: parsed)
+        }
+    }
+
     static func apply(
         _ files: [(deviceID: String, data: Data)], in context: ModelContext,
         ownDeviceID: String, now: Date,
-        loadedEpisodeID: @MainActor () -> PersistentIdentifier?
+        loadedEpisodeID: @MainActor () -> PersistentIdentifier?,
+        targetEpisode: Episode? = nil
+    ) throws -> Result {
+        try applyParsed(
+            parsePeerFiles(files, ownDeviceID: ownDeviceID, now: now),
+            in: context, loadedEpisodeID: loadedEpisodeID,
+            targetEpisode: targetEpisode
+        )
+    }
+
+    static func applyParsed(
+        _ files: [(deviceID: String, file: ListeningPlacesInboundFile)],
+        in context: ModelContext,
+        loadedEpisodeID: @MainActor () -> PersistentIdentifier?,
+        targetEpisode: Episode? = nil
     ) throws -> Result {
         guard ListeningPlacesPlaybackReceiveConsent.isEnabled(in: context) else {
             return Result()
         }
         guard !context.hasChanges else { throw ReceiverError.dirtyContext }
         var remoteByID: [String: [ListeningPlacesRemoteEvent]] = [:]
+        let targetID = targetEpisode.map {
+            ListeningPlacesFormat.episodeID(guid: $0.guid, enclosureURL: $0.audioURL)
+        }
         for file in files {
-            guard file.deviceID != ownDeviceID,
-                  let parsed = try? ListeningPlacesInboundParser.parse(data: file.data, now: now),
-                  parsed.deviceID == file.deviceID, !parsed.isStale else { continue }
-            for entry in parsed.entries {
+            for entry in file.file.entries where targetID == nil || entry.record.id == targetID {
                 remoteByID[entry.record.id, default: []].append(
                     ListeningPlacesRemoteEvent(deviceID: file.deviceID, entry: entry)
                 )
@@ -38,21 +69,41 @@ enum ListeningPlacesPlaybackReceiver {
         let deviceOnly = try ListeningPlacesFeedPrivacy.deviceOnlyKeys(in: context)
         let approved = try ListeningPlacesPublicFeedApproval.approvedKeys(in: context)
         var matches: [String: [Episode]] = [:]
-        var offset = 0
-        while true {
-            var descriptor = FetchDescriptor<Episode>()
-            descriptor.fetchOffset = offset
-            descriptor.fetchLimit = 256
-            let batch = try context.fetch(descriptor)
-            if batch.isEmpty { break }
-            for episode in batch {
-                let id = ListeningPlacesFormat.episodeID(
-                    guid: episode.guid, enclosureURL: episode.audioURL
-                )
-                if remoteByID[id] != nil { matches[id, default: []].append(episode) }
+        if let targetEpisode {
+            guard targetEpisode.modelContext === context, !targetEpisode.isDeleted else {
+                return Result()
             }
-            if batch.count < 256 { break }
-            offset += batch.count
+            let id = ListeningPlacesFormat.episodeID(
+                guid: targetEpisode.guid, enclosureURL: targetEpisode.audioURL
+            )
+            if remoteByID[id] != nil {
+                let guid = targetEpisode.guid
+                let sameGUID = try context.fetch(FetchDescriptor<Episode>(
+                    predicate: #Predicate { $0.guid == guid }
+                ))
+                matches[id] = sameGUID.filter {
+                    ListeningPlacesFormat.episodeID(
+                        guid: $0.guid, enclosureURL: $0.audioURL
+                    ) == id
+                }
+            }
+        } else {
+            var offset = 0
+            while true {
+                var descriptor = FetchDescriptor<Episode>()
+                descriptor.fetchOffset = offset
+                descriptor.fetchLimit = 256
+                let batch = try context.fetch(descriptor)
+                if batch.isEmpty { break }
+                for episode in batch {
+                    let id = ListeningPlacesFormat.episodeID(
+                        guid: episode.guid, enclosureURL: episode.audioURL
+                    )
+                    if remoteByID[id] != nil { matches[id, default: []].append(episode) }
+                }
+                if batch.count < 256 { break }
+                offset += batch.count
+            }
         }
         var result = Result()
         var staged: [(episode: Episode, event: ListeningPlacesStateEvent,

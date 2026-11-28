@@ -971,6 +971,14 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         XCTAssertEqual(ambiguous.applied, 0)
         XCTAssertEqual(first.positionSeconds, 10)
         XCTAssertEqual(second.positionSeconds, 20)
+        let targetedAmbiguous = try ListeningPlacesEpisodeTestReceiver.apply(
+            [("desktop99", file)], in: context, ownDeviceID: "phone123",
+            now: peerTime.addingTimeInterval(1), loadedEpisodeID: { nil },
+            targetEpisode: first
+        )
+        XCTAssertEqual(targetedAmbiguous.applied, 0,
+                       "an automatic next-item read cannot choose a duplicate GUID")
+        XCTAssertEqual(first.positionSeconds, 10)
 
         context.delete(second)
         try context.save()

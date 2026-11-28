@@ -4,17 +4,85 @@ import XCTest
 
 @MainActor
 final class ListeningPlacesServiceTests: XCTestCase {
+    func testUpcomingQueueReadAppliesOnlyEligibleTargetAndKeepsPeerClock() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-next-queue-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let context = container.mainContext
+        let show = Podcast(feedURL: "https://example.com/public.xml", title: "Synthetic")
+        let playing = Episode(guid: "playing", title: "Playing",
+                              audioURL: "https://example.com/playing.mp3", positionSeconds: 5)
+        let next = Episode(guid: "next", title: "Next",
+                           audioURL: "https://example.com/next.mp3", positionSeconds: 10)
+        playing.podcast = show
+        next.podcast = show
+        context.insert(show)
+        context.insert(playing)
+        context.insert(next)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: show.feedURL, in: context
+        )
+        let localTime = Date.now.addingTimeInterval(-120)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: playing, in: context, deviceID: "phone123", now: localTime
+        )
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: next, in: context, deviceID: "phone123", now: localTime
+        )
+        try context.save()
+        let peerTime = Date.now.addingTimeInterval(-60)
+        let peerData = try ListeningPlacesFormat.encodedDeviceFile(
+            deviceID: "desktop99", appVersion: "quill/test", writtenAt: peerTime,
+            records: [
+                .episode(guid: playing.guid, enclosureURL: playing.audioURL,
+                         positionSeconds: 40, durationSeconds: nil, played: false,
+                         updatedAt: peerTime),
+                .episode(guid: next.guid, enclosureURL: next.audioURL,
+                         positionSeconds: 90, durationSeconds: nil, played: false,
+                         updatedAt: peerTime),
+            ]
+        )
+        let service = ListeningPlacesService(readOtherDeviceFiles: { _, _ in
+            ListeningPlacesOtherDeviceRead(
+                files: [.init(fileName: "desktop99.json", data: peerData)], skipped: []
+            )
+        })
+        service.configure(context: context)
+        await service.chooseFolder(directory, enableSharing: false)
+        service.setReceivePlaybackEnabled(true)
+        await service.syncUpcomingQueueEpisode(
+            next, stillUpcoming: { true },
+            loadedEpisodeID: { playing.persistentModelID }
+        )
+        XCTAssertEqual(playing.positionSeconds, 5, "the loaded item is never imported")
+        XCTAssertEqual(next.positionSeconds, 90)
+        guard case .event(let received) = try ListeningPlacesEventJournal.read(
+            for: next, in: context
+        ) else { return XCTFail("peer event must be durable") }
+        XCTAssertEqual(received.sourceDeviceID, "desktop99")
+        XCTAssertEqual(received.updatedAt.timeIntervalSince1970,
+                       floor(peerTime.timeIntervalSince1970), accuracy: 1)
+        service.releasePersistence()
+    }
+
     private actor HeldPeerRead {
+        private let result: ListeningPlacesOtherDeviceRead
         private var entered = false
         private var enteredWaiter: CheckedContinuation<Void, Never>?
         private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+        init(result: ListeningPlacesOtherDeviceRead = .init(files: [], skipped: [])) {
+            self.result = result
+        }
 
         func read() async -> ListeningPlacesOtherDeviceRead {
             entered = true
             enteredWaiter?.resume()
             enteredWaiter = nil
             await withCheckedContinuation { releaseWaiter = $0 }
-            return ListeningPlacesOtherDeviceRead(files: [], skipped: [])
+            return result
         }
 
         func waitUntilReading() async {
@@ -26,6 +94,53 @@ final class ListeningPlacesServiceTests: XCTestCase {
             releaseWaiter?.resume()
             releaseWaiter = nil
         }
+    }
+
+    func testUpcomingQueueReadRevokedDuringProviderWaitCannotApply() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "places-next-revoked-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeContainer()
+        let context = container.mainContext
+        let show = Podcast(feedURL: "https://example.com/public.xml", title: "Synthetic")
+        let next = Episode(guid: "next", title: "Next",
+                           audioURL: "https://example.com/next.mp3", positionSeconds: 10)
+        next.podcast = show
+        context.insert(show)
+        context.insert(next)
+        try ListeningPlacesPublicFeedApproval.stageSyntheticDirectoryFixture(
+            for: show.feedURL, in: context
+        )
+        try context.save()
+        let peerTime = Date.now.addingTimeInterval(-60)
+        let bytes = try ListeningPlacesFormat.encodedDeviceFile(
+            deviceID: "desktop99", appVersion: "quill/test", writtenAt: peerTime,
+            records: [.episode(guid: next.guid, enclosureURL: next.audioURL,
+                               positionSeconds: 90, durationSeconds: nil,
+                               played: false, updatedAt: peerTime)]
+        )
+        let gate = HeldPeerRead(result: .init(
+            files: [.init(fileName: "desktop99.json", data: bytes)], skipped: []
+        ))
+        let service = ListeningPlacesService(readOtherDeviceFiles: { _, _ in
+            await gate.read()
+        })
+        service.configure(context: context)
+        await service.chooseFolder(directory, enableSharing: false)
+        service.setReceivePlaybackEnabled(true)
+        let task = Task {
+            await service.syncUpcomingQueueEpisode(
+                next, stillUpcoming: { true }, loadedEpisodeID: { nil }
+            )
+        }
+        await gate.waitUntilReading()
+        service.setReceivePlaybackEnabled(false)
+        await gate.release()
+        await task.value
+        XCTAssertEqual(next.positionSeconds, 10)
+        XCTAssertFalse(service.receivePlaybackEnabled)
+        service.releasePersistence()
     }
 
     func testConsentToggleDuringHeldProviderReadDoesNotReuseOldSnapshot() async throws {

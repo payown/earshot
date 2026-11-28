@@ -30,6 +30,7 @@ extension AppRuntime {
             try Task.checkCancellation()
             self.settings.configure(context: context)
             self.listeningPlaces.configure(context: context)
+            self.player.configureQueuePlaceService(self.listeningPlaces)
             self.tips.configure(context: context)
             let capSettings = AppSettingsStore(context: context)
             let count = (try? PodcastQuery.followedCount(in: context)) ?? 0
