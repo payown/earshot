@@ -881,6 +881,20 @@ fixture UI failures; those were corrected and both passed in the final full
 run. Physical VoiceOver on this standard Release candidate, real Dropbox
 hydration timing, and physical peer exchange remain acceptance gates. The
 earlier private Trial 337 physical result is evidence for the fractional
-position correction, not proof of the standard 336 artifact. Signed archive,
-internal-only App Store Connect processing, and group installability are
-pending at this checkpoint; do not describe 336 as distributed yet.
+position correction, not proof of the standard 336 artifact.
+
+The standard 1.3.1 (336) archive was signed from exact source
+`f1d50974e808444a42ca96c6116b2e7d442ed63c`; the iPhone, Watch and
+Watch widgets all report 1.3.1/336. Its internal-only exported IPA has
+SHA-256 `e8bbcc224db52f1cdf454a9d5f5e1cd15b5299f0805936353aa5b10b7f6446a5`
+and Apple's `TFInternalTestingOnly` marker. Xcode's direct upload failed
+before transfer because its account session was unavailable, so the same
+signed IPA was uploaded once through the already authorized App Store Connect
+CLI. Apple reported build `9f1be339-dda5-4450-af17-07e35e08c38d` at
+November 28 07:56:59 UTC: `VALID`, audience `INTERNAL_ONLY`, internal state
+`IN_BETA_TESTING`, external state `NOT_APPLICABLE`, and exactly the existing
+Internal Testing Group attached. The verified group includes Michael; no
+external group was assigned. En-US internal test notes were read back.
+Build 335 remains the prior fallback. Physical 336 VoiceOver, provider delay,
+and two-app acceptance remain unverified; TestFlight availability does not
+establish those behaviors.
