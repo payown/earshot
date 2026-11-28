@@ -122,6 +122,7 @@
 		338C5E42AE7830A7C9B821EC /* TranscriptService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E43D5126C6AC5AE4D570D477 /* TranscriptService.swift */; };
 		338FA4BB04965286D64A1891 /* EpisodeTimeLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF9E5DE17E14375162AAC109 /* EpisodeTimeLogic.swift */; };
 		33C506B6499A0ED5BFBA8756 /* ModelEnums.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0E82F35CB949845DE1189C9 /* ModelEnums.swift */; };
+		346F80E32B9B06E83610C3CD /* ListeningPlacesPlaybackReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = E496038BB03864D6E208FAB6 /* ListeningPlacesPlaybackReceiver.swift */; };
 		3569163EA3FCB7CCEE96321B /* LibrarySearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A433BAF1DC5E3C08260149B3 /* LibrarySearchIndex.swift */; };
 		3569E4DF882AA0744DF03F6B /* FolderLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4003700266EC96D55971CD8F /* FolderLogic.swift */; };
 		3685A73FDD41B6BB274592BE /* TipJarDecisionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD6B7B2E464E2146715A5481 /* TipJarDecisionLogicTests.swift */; };
@@ -267,6 +268,7 @@
 		8544FC4DF6DE4B15FBA82025 /* AppInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80935849410681BAA8F92DEF /* AppInfo.swift */; };
 		85AE981C66944209CEFE10D7 /* LibraryIntentBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F936109334BADDAC2226E00 /* LibraryIntentBridge.swift */; };
 		863579F2F3B26691050CA211 /* ListeningPlacesServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1F818A8097AB3F0BF2CC36 /* ListeningPlacesServiceTests.swift */; };
+		863697A935600C23E66977AD /* ListeningPlacesPlaybackReceiveConsent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA7CD857F06154CA1FAE1D1A /* ListeningPlacesPlaybackReceiveConsent.swift */; };
 		86AE4FF0E28426B3DEE4825B /* FeedRefreshActorQueueCapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 559FA1CACE197EB46AC47170 /* FeedRefreshActorQueueCapTests.swift */; };
 		86C09F86B31361225FA22C98 /* PlayerAsyncMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1282A4B5BF2000D95791D32 /* PlayerAsyncMetadataTests.swift */; };
 		87CC6044B462001318E2253B /* ID3TagFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6065C232A19FD1A5A024AAB /* ID3TagFetcher.swift */; };
@@ -1095,6 +1097,7 @@
 		D9A1936103158B459C7D2215 /* EpisodeMultiSelectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeMultiSelectTests.swift; sourceTree = "<group>"; };
 		D9C724475B4780AD0B164DC0 /* AccessibilitySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilitySettingsView.swift; sourceTree = "<group>"; };
 		DA389FA74C2F910844B8F4D8 /* PodcastMediaIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastMediaIntents.swift; sourceTree = "<group>"; };
+		DA7CD857F06154CA1FAE1D1A /* ListeningPlacesPlaybackReceiveConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningPlacesPlaybackReceiveConsent.swift; sourceTree = "<group>"; };
 		DA857FDA457E7638AC0F5C1C /* SecureURLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureURLTests.swift; sourceTree = "<group>"; };
 		DB277E3AB7A3AD6A261D149A /* InboxLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxLogic.swift; sourceTree = "<group>"; };
 		DBF4AFB57055E5E13DBE7788 /* LocalSearchLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalSearchLoader.swift; sourceTree = "<group>"; };
@@ -1111,6 +1114,7 @@
 		E43D20EBF7730F2069525A18 /* RoutePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePickerView.swift; sourceTree = "<group>"; };
 		E43D5126C6AC5AE4D570D477 /* TranscriptService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptService.swift; sourceTree = "<group>"; };
 		E4424CF6A7E7F746BDD54A3F /* NotificationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDelegate.swift; sourceTree = "<group>"; };
+		E496038BB03864D6E208FAB6 /* ListeningPlacesPlaybackReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningPlacesPlaybackReceiver.swift; sourceTree = "<group>"; };
 		E4CDEC33418AED0564C337DC /* CatalogEpisodeQueueRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogEpisodeQueueRepository.swift; sourceTree = "<group>"; };
 		E4CF80BEF00C7F9A4E4E4D07 /* RetryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryPolicy.swift; sourceTree = "<group>"; };
 		E561A2C8B10CB27A76F73D67 /* ChapterSkipLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterSkipLogicTests.swift; sourceTree = "<group>"; };
@@ -1384,6 +1388,8 @@
 			children = (
 				8DFEA874A21421E107C7DF61 /* ListeningPlacesEventJournal.swift */,
 				3288A7529EA4B38B7CBFE9C0 /* ListeningPlacesFileTransport.swift */,
+				DA7CD857F06154CA1FAE1D1A /* ListeningPlacesPlaybackReceiveConsent.swift */,
+				E496038BB03864D6E208FAB6 /* ListeningPlacesPlaybackReceiver.swift */,
 				D462CD510BD0C7B076819DD6 /* ListeningPlacesService.swift */,
 				B88396F9586C0B1CEB02045C /* ListeningPlacesSubscriptionExchange.swift */,
 				8A17D6930D688040C26F1AA3 /* ListeningPlacesSubscriptionRetention.swift */,
@@ -2898,6 +2904,8 @@
 				94E348388F2E157F9D5F8B54 /* ListeningPlacesFormat.swift in Sources */,
 				2CD595968F1D3D857ECC198B /* ListeningPlacesInboundParser.swift in Sources */,
 				F57AE0E247F7EB4ED3A4D60C /* ListeningPlacesMergePlanner.swift in Sources */,
+				863697A935600C23E66977AD /* ListeningPlacesPlaybackReceiveConsent.swift in Sources */,
+				346F80E32B9B06E83610C3CD /* ListeningPlacesPlaybackReceiver.swift in Sources */,
 				1EA75D3BC1873947406A7352 /* ListeningPlacesService.swift in Sources */,
 				C57AC0DA03D2CC53E03EBDDD /* ListeningPlacesSettingsView.swift in Sources */,
 				B8C37E365CDE367BB2F486D5 /* ListeningPlacesSubscriptionExchange.swift in Sources */,

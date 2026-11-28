@@ -9,6 +9,21 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
     private let older = Date(timeIntervalSince1970: 1_700_000_000)
     private let newer = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testPlaybackReceiveConsentIsDeviceLocalAndDefaultsOffForUpgrades() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = ModelContext(container)
+        XCTAssertFalse(ListeningPlacesPlaybackReceiveConsent.isEnabled(in: context))
+        try LocalAppSettingIdentity.setValue(
+            "unknown", for: "listening_places_receive_playback_v1", in: context
+        )
+        try context.save()
+        XCTAssertFalse(ListeningPlacesPlaybackReceiveConsent.isEnabled(in: ModelContext(container)))
+        try ListeningPlacesPlaybackReceiveConsent.setEnabled(true, in: context)
+        XCTAssertTrue(ListeningPlacesPlaybackReceiveConsent.isEnabled(in: ModelContext(container)))
+        try ListeningPlacesPlaybackReceiveConsent.setEnabled(false, in: context)
+        XCTAssertFalse(ListeningPlacesPlaybackReceiveConsent.isEnabled(in: ModelContext(container)))
+    }
+
     func testPublicProvenanceRequiresExactAnonymousDirectoryResolution() throws {
         typealias Evidence = ListeningPlacesPublicFeedApproval.Evidence
         func evidence(
@@ -917,6 +932,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
 
     func testEpisodeReceiverDefersAmbiguousIDsConflictingRowsAndStaleFiles() throws {
         let context = TestStore.freshContext()
+        try ListeningPlacesPlaybackReceiveConsent.stageEnabled(true, in: context)
         let firstShow = Podcast(feedURL: feed, title: "First")
         let secondFeed = "https://example.com/second.xml"
         let secondShow = Podcast(feedURL: secondFeed, title: "Second")
@@ -978,6 +994,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
 
     func testEpisodeReceiverDefersPrivateUnknownLegacyAndMissingRows() throws {
         let context = TestStore.freshContext()
+        try ListeningPlacesPlaybackReceiveConsent.stageEnabled(true, in: context)
         let privateFeed = "https://example.com/private.xml?token=synthetic"
         let privateShow = Podcast(feedURL: privateFeed, title: "Private")
         let privateEpisode = Episode(guid: "private", title: "Private episode",
@@ -1046,6 +1063,13 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             deviceID: "desktop99", appVersion: "quill/test", writtenAt: peerTime,
             records: [placeRecord(id: id, position: 20_000, at: peerTime)]
         )
+        let off = try ListeningPlacesEpisodeTestReceiver.apply(
+            [("desktop99", file)], in: context, ownDeviceID: "phone123",
+            now: peerTime.addingTimeInterval(1), loadedEpisodeID: { nil }
+        )
+        XCTAssertEqual(off.applied, 0)
+        XCTAssertEqual(episode.positionSeconds, 10)
+        try ListeningPlacesPlaybackReceiveConsent.setEnabled(true, in: context)
         var checks = 0
         XCTAssertThrowsError(try ListeningPlacesEpisodeTestReceiver.apply(
             [("desktop99", file)], in: context, ownDeviceID: "phone123",
