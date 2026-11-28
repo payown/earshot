@@ -68,12 +68,17 @@ enum ListeningPlacesEventJournal {
     ) -> ListeningPlacesLocalPlace {
         guard let raw = rawValue,
               let stored = decode(raw) else { return .unknownLegacy }
-        let currentPosition = ListeningPlacesFormat.milliseconds(episode.positionSeconds)
-        guard stored.positionMilliseconds == currentPosition,
+        // Earshot's Episode stores whole seconds, while a peer can preserve
+        // milliseconds. The saved Episode must agree with the peer place at
+        // that precision; retain the exact peer value in the journal so a
+        // later export/merge does not invent a local event or lose its clock.
+        guard episode.positionSeconds >= 0,
+              stored.positionMilliseconds >= 0,
+              stored.positionMilliseconds / 1_000 == episode.positionSeconds,
               stored.played == episode.isPlayed else { return .unknownLegacy }
         let id = ListeningPlacesFormat.episodeID(guid: episode.guid, enclosureURL: episode.audioURL)
         return .event(ListeningPlacesStateEvent(
-            id: id, positionMilliseconds: currentPosition, played: stored.played,
+            id: id, positionMilliseconds: stored.positionMilliseconds, played: stored.played,
             updatedAt: stored.updatedAt, sourceDeviceID: stored.sourceDeviceID,
             isReset: stored.isReset
         ))
@@ -94,7 +99,10 @@ enum ListeningPlacesEventJournal {
         let previous = try AppSettingIdentity.valueThrowing(for: key, in: context).flatMap(decode)
         let position = ListeningPlacesFormat.milliseconds(episode.positionSeconds)
         let played = episode.isPlayed
-        if !force, previous?.positionMilliseconds == position && previous?.played == played {
+        if !force, episode.positionSeconds >= 0, let previous,
+           previous.positionMilliseconds >= 0,
+           previous.positionMilliseconds / 1_000 == episode.positionSeconds,
+           previous.played == played {
             return false
         }
         let event = StoredEvent(
@@ -171,7 +179,9 @@ enum ListeningPlacesEventJournal {
               event.id == ListeningPlacesFormat.episodeID(
                 guid: episode.guid, enclosureURL: episode.audioURL
               ),
-              event.positionMilliseconds == ListeningPlacesFormat.milliseconds(episode.positionSeconds),
+              episode.positionSeconds >= 0,
+              event.positionMilliseconds >= 0,
+              event.positionMilliseconds / 1_000 == episode.positionSeconds,
               event.played == episode.isPlayed else { throw Error.missingEpisodeIdentity }
         try AppSettingIdentity.setValue(encode(StoredEvent(
             positionMilliseconds: event.positionMilliseconds,

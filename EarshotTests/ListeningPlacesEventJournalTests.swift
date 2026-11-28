@@ -405,12 +405,29 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
         episode.positionSeconds = 12
         let peer = ListeningPlacesStateEvent(
             id: ListeningPlacesFormat.episodeID(guid: episode.guid, enclosureURL: episode.audioURL),
-            positionMilliseconds: 12_000, played: false, updatedAt: peerTime,
+            positionMilliseconds: 12_421, played: false, updatedAt: peerTime,
             sourceDeviceID: "desktop", isReset: false
         )
         try ListeningPlacesEventJournal.stagePeerEvent(peer, for: episode, in: context)
         try context.save()
         XCTAssertEqual(event(in: context, episode: episode), peer)
+        XCTAssertFalse(try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "phone",
+            now: peerTime.addingTimeInterval(10)
+        ), "a no-op whole-second checkpoint must preserve the fractional peer event")
+        XCTAssertEqual(event(in: context, episode: episode), peer)
+        episode.positionSeconds = 8
+        let localTime = peerTime.addingTimeInterval(20)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: episode, in: context, deviceID: "phone", now: localTime
+        )
+        try context.save()
+        guard case .event(let local) = try ListeningPlacesEventJournal.read(
+            for: episode, in: context
+        ) else { return XCTFail("later local seek needs a new event") }
+        XCTAssertEqual(local.positionMilliseconds, 8_000)
+        XCTAssertEqual(local.updatedAt, localTime)
+        XCTAssertEqual(local.sourceDeviceID, "phone")
     }
 
     func testParsedPeerBackwardSeekDefersLoadedRowThenPersistsOriginalClock() throws {
@@ -436,7 +453,7 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
         let file = try ListeningPlacesFormat.encodedDeviceFile(
             deviceID: "desktop", appVersion: "quill/test", writtenAt: peerTime,
             records: [ListeningPlaceRecord(
-                id: id, kind: "episode", positionMilliseconds: 12_000,
+                id: id, kind: "episode", positionMilliseconds: 12_421,
                 durationMilliseconds: nil, played: false, updatedAt: peerTime,
                 label: nil, feed: nil, deleted: nil
             )]

@@ -658,7 +658,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             guid: "receiver-episode", enclosureURL: "https://example.com/receiver.mp3"
         )
         var records = try XCTUnwrap(peerRoot["records"] as? [[String: Any]])
-        records.append(["id": id, "kind": "episode", "position_ms": 12_000,
+        records.append(["id": id, "kind": "episode", "position_ms": 409_421,
                         "played": false, "updated_at": timestamp])
         records.append(["id": "episode:0000000000000000", "kind": "episode",
                         "position_ms": 20_000, "played": false, "updated_at": timestamp])
@@ -720,7 +720,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             loadedEpisodeID: { loaded }
         )
         XCTAssertEqual(second.episodes.applied, 1)
-        XCTAssertEqual(episode.positionSeconds, 12)
+        XCTAssertEqual(episode.positionSeconds, 409)
         XCTAssertEqual(other.positionSeconds, 31)
         let ownedBytes = try await transport.readDeviceFile(
             bookmarkData: bookmark, deviceID: "aabb1234"
@@ -735,7 +735,7 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         let saved = try XCTUnwrap(reopened.fetch(FetchDescriptor<Episode>()).first {
             $0.guid == "receiver-episode"
         })
-        XCTAssertEqual(saved.positionSeconds, 12)
+        XCTAssertEqual(saved.positionSeconds, 409)
         XCTAssertTrue(saved.inboxDismissed)
         XCTAssertEqual(try reopened.fetchCount(FetchDescriptor<QueueItem>()), 1)
         guard case .event(let clock) = try ListeningPlacesEventJournal.read(
@@ -743,6 +743,8 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
         ) else { return XCTFail("peer event clock was not durable") }
         XCTAssertEqual(clock.updatedAt, peerTime)
         XCTAssertEqual(clock.sourceDeviceID, "desktop99")
+        XCTAssertEqual(clock.positionMilliseconds, 409_421,
+                       "peer millisecond precision must retain its original event identity")
         let directLoader = await ListeningPlacesSnapshotLoader.makeBackground(
             modelContainer: reopened.container
         )
@@ -782,7 +784,43 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             loadedEpisodeID: { nil }
         )
         XCTAssertEqual(repeated.episodes.applied, 0)
-        XCTAssertEqual(saved.positionSeconds, 12)
+        XCTAssertEqual(saved.positionSeconds, 409)
+
+        XCTAssertFalse(try ListeningPlacesEventJournal.stageLocalMutation(
+            of: saved, in: reopened, deviceID: "aabb1234",
+            now: peerTime.addingTimeInterval(70)
+        ), "a same-second checkpoint must not restamp the imported place")
+        XCTAssertEqual(try ListeningPlacesEventJournal.read(for: saved, in: reopened),
+                       .event(clock))
+        saved.positionSeconds = 300
+        let localSeekTime = peerTime.addingTimeInterval(90)
+        try ListeningPlacesEventJournal.stageLocalMutation(
+            of: saved, in: reopened, deviceID: "aabb1234", now: localSeekTime
+        )
+        try reopened.save()
+        let afterSeekExporter = ListeningPlacesService()
+        afterSeekExporter.configure(context: reopened)
+        await afterSeekExporter.chooseFolder(root)
+        await afterSeekExporter.writeNow()
+        let afterSeekBytes = try await transport.readDeviceFile(
+            bookmarkData: bookmark, deviceID: "aabb1234"
+        )
+        let afterSeek = try XCTUnwrap(afterSeekBytes)
+        let seekRow = try XCTUnwrap(rows(afterSeek).first { $0["id"] as? String == id })
+        XCTAssertEqual(seekRow["position_ms"] as? Int, 300_000)
+        XCTAssertEqual(seekRow["updated_at"] as? String,
+                       ISO8601DateFormatter().string(from: localSeekTime))
+        afterSeekExporter.releasePersistence()
+        guard case .event(let committedSeek) = try ListeningPlacesEventJournal.read(
+            for: saved, in: reopened
+        ) else { return XCTFail("local seek clock must remain readable") }
+        XCTAssertEqual(committedSeek.updatedAt, localSeekTime)
+        XCTAssertEqual(committedSeek.sourceDeviceID, "aabb1234")
+        #if EARSHOT_LP_PLAYBACK_TRIAL
+        // Choosing a folder revokes inbound consent even when a disposable
+        // test selects the same URL again; explicitly opt in for the next pass.
+        try ListeningPlacesSubscriptionTestCoordinator.setTrialImportEnabled(true, in: reopened)
+        #endif
 
         func replacePeerPlace(position: Int, played: Bool, secondsLater: TimeInterval) throws {
             let eventTime = peerTime.addingTimeInterval(secondsLater)
@@ -798,6 +836,22 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
                 .write(to: peerPath, options: .atomic)
         }
         try replacePeerPlace(position: 90_000, played: true, secondsLater: 120)
+        let forwardBytes = try Data(contentsOf: peerPath)
+        let forwardParsed = try ListeningPlacesInboundParser.parse(
+            data: forwardBytes, now: peerTime.addingTimeInterval(180)
+        )
+        XCTAssertEqual(forwardParsed.entries.first { $0.record.id == id }?
+            .record.positionMilliseconds, 90_000)
+        let forwardRemote = forwardParsed.entries.filter { $0.record.id == id }.map {
+            ListeningPlacesRemoteEvent(deviceID: forwardParsed.deviceID, entry: $0)
+        }
+        XCTAssertEqual(ListeningPlacesMergePlanner.decide(
+            id: id, local: .event(committedSeek), remote: forwardRemote, isLoaded: false
+        ), .apply(ListeningPlacesStateEvent(
+            id: id, positionMilliseconds: 90_000, played: true,
+            updatedAt: peerTime.addingTimeInterval(120),
+            sourceDeviceID: "desktop99", isReset: false
+        )))
         let forward = try await ListeningPlacesSubscriptionTestCoordinator.sync(
             bookmarkData: bookmark, ownDeviceID: "aabb1234", context: reopened,
             transport: transport, now: peerTime.addingTimeInterval(180),
@@ -822,7 +876,13 @@ final class ListeningPlacesSubscriptionExchangeTests: XCTestCase {
             bookmarkData: bookmark, deviceID: "aabb1234"
         )
         let afterReset = try XCTUnwrap(afterResetBytes)
-        XCTAssertFalse(try rows(afterReset).contains { $0["id"] as? String == id })
+        let retainedLocalRow = try XCTUnwrap(rows(afterReset).first {
+            $0["id"] as? String == id
+        })
+        XCTAssertEqual(retainedLocalRow["position_ms"] as? Int, 300_000)
+        XCTAssertEqual(retainedLocalRow["updated_at"] as? String,
+                       ISO8601DateFormatter().string(from: localSeekTime),
+                       "an older owned local event may remain, but a peer reset must not echo")
         // A subsequent real local seek/Played event may supersede the peer
         // reset, but the normal exporter must use that event's clock, not the
         // later time at which the provider file happens to be rewritten.

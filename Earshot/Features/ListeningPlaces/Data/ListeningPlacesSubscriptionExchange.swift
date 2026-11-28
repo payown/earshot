@@ -662,7 +662,6 @@ enum ListeningPlacesEpisodeTestReceiver {
                 case .deferLoaded: result.deferredLoaded += 1
                 case .apply(let event):
                     guard event.positionMilliseconds >= 0,
-                          event.positionMilliseconds % 1_000 == 0,
                           loadedEpisodeID() != episode.persistentModelID,
                           ListeningPlacesFormat.episodeID(
                             guid: episode.guid, enclosureURL: episode.audioURL
