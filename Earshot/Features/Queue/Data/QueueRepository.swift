@@ -747,13 +747,13 @@ final class QueueRepository {
         }
         let episodeToMark = queuedEpisode ?? episode
         PendingCloudPlayedMutation.stage([episodeToMark], played: true, in: context)
-        let mutate: (Episode) -> Void = {
-            $0.isPlayed = true
-            $0.inboxDismissed = true
-            if resetPositionForCompletion { $0.positionSeconds = 0 }
+        let mutate: (Episode) -> Void = { mutableEpisode in
+            mutableEpisode.isPlayed = true
+            mutableEpisode.inboxDismissed = true
+            if resetPositionForCompletion { mutableEpisode.positionSeconds = 0 }
             // Auto-delete the download once played, when the user opted in. In
             // the same save as the played flip so the file and state clear atomically.
-            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)
+            DownloadCleanup.removeDownloadAfterPlayedIfEnabled(mutableEpisode, in: self.context)
         }
         let saved: Bool
         if queuedEpisode != nil, keepingQueueMembership {

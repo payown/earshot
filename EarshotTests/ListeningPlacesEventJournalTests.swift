@@ -352,8 +352,12 @@ final class ListeningPlacesEventJournalTests: XCTestCase {
             // with the original peer event before one context save.
             "Earshot/Features/ListeningPlaces/Data/ListeningPlacesPlaybackReceiver.swift": 3,
             "Earshot/Features/Player/Data/PlaybackHandoffClient.swift": 1,
-            "Earshot/Features/Player/Data/PlayerService.swift": 17,
-            "Earshot/Features/Queue/Data/QueueRepository.swift": 1,
+            // Natural completion now resets the place in QueueRepository's
+            // played/queue save, rather than in three later PlayerService
+            // paths. The repository closure names its model so this inventory
+            // sees both the Played and position writes.
+            "Earshot/Features/Player/Data/PlayerService.swift": 14,
+            "Earshot/Features/Queue/Data/QueueRepository.swift": 3,
             "Earshot/Features/QuickActions/Domain/EpisodeActionsBuilder.swift": 1,
             "Earshot/Features/Subscriptions/Data/EpisodeRepository.swift": 2,
         ])
